@@ -4,8 +4,23 @@
 
 > Scan QR → Upload → Pay → Collect. The simplest way to get documents printed at local shops.
 >
-> Status: **AWAITING APPROVAL — no application code has been written yet.**
-> Prepared: 2026-11-19
+> Status: **APPROVED (MVP scope) — building Sprints 0–3.**
+> Prepared: 2026-11-19 · Approved with decisions below.
+>
+> **Approved decisions (2026-11-19)**
+> - Scope: **MVP only** (Sprints 0–3). Sprints 4–6 deferred.
+> - **Payments: NO Razorpay.** Shop-owner's own **UPI collect (intent link + UPI QR)** rendered as a
+>   gateway-style checkout ("Paid to <shop>"), because it is **free**. Shop owner sets price &amp; adds
+>   their UPI ID in Settings; customer pays out-of-band, taps "I've paid" (optional UTR); **shop owner
+>   confirms receipt in dashboard** before the order enters the print queue. COD also supported.
+>   Razorpay remains a future option behind a feature flag.
+> - **OTP: Email OTP** (Supabase Auth) as interim SMS; MSG91 later.
+> - **Hosting: `*.vercel.app`** for beta; custom domain later.
+> - **Commercial defaults:** GST 18%, platform commission 8%, seed rate card B&W ₹2 / Color ₹10 per A4
+>   page — all owner-editable per shop. Owner sets their own prices.
+> - **Dropbox: customer file import** — in the upload step, import via a Dropbox share link (works
+>   with any Dropbox account, zero setup) + Dropbox Chooser button when `NEXT_PUBLIC_DROPBOX_APP_KEY`
+>   is configured. Server copies the file into Supabase Storage and page-counts it like an upload.
 
 ---
 
@@ -43,9 +58,10 @@ and reports without any hardware.
    (≤ 25 MB/file, ≤ 10 files), server re-verifies with `pdf-lib`.
 4. Options per item: copies, color/B&W, paper size (A4/A3/A5/Legal), paper type
    (75/90/100 gsm), sides (single/duplex), binding (none/staple/spiral/hard), lamination.
-5. Instant price (shop-configurable rate card + 18% GST) → pay via **UPI / Card / Wallet / NetBanking
-   (Razorpay)** or **COD**.
-6. Get **token** (shop-scoped, e.g. `A-023`) + ETA. Order trackable at `/track/<order-id>`.
+5. Instant price (shop-configurable rate card + 18% GST) → pay via **UPI collect**
+   (intent link / UPI QR of the **shop owner's own UPI ID** — gateway-styled checkout, ₹0 fees)
+   or **COD**.
+6. Get **token** (shop-scoped, e.g. `A-023`) + ETA once the shop confirms payment.
 7. Status pipeline: `Queued → Printing → Ready → Collected` (push via Realtime + SMS if configured).
 8. At counter, show token → shop marks Collected → customer rates (1–5 + comment).
 
@@ -89,7 +105,7 @@ Admin auth: email + password, role `admin` (allowlist by email + `profiles.role`
 | UI | **Tailwind CSS v4 + shadcn/ui + lucide-react** | Fast, consistent, accessible |
 | Data/Backend | **Supabase** (Postgres 17, Auth, Storage, Realtime, Edge Functions) | Managed; RLS for multi-tenant isolation; Realtime for the queue |
 | Validation | **Zod** shared between client & server | Single source for API contracts |
-| Payments | **Razorpay** (Orders + Checkout + Webhooks; UPI/cards/wallets/netbanking) | India-first; COD handled natively in DB |
+| Payments | **UPI collect (intent link + UPI QR)** of the shop owner's own UPI ID, rendered as a gateway-style checkout + manual shop-side confirmation; **COD**. Zero fees, zero KYC. Razorpay as future flag | India-first, free, no fund handling by platform |
 | File/page count | Supabase Storage (private bucket) + `pdf-lib` server-side page count | Accurate pricing |
 | QR | `qrcode` npm lib, server-rendered PNG/PDF | Counter-printable QR + shop landing |
 | Charts | **Recharts** | Reports & admin analytics |
@@ -176,10 +192,10 @@ errors. RLS enabled on every table.
   `note`, `created_at`. (Audit trail for disputes.)
 
 ### Money
-- **payments** — `order_id` unique, `provider` (`razorpay`|`cod`), `provider_order_id`,
-  `provider_payment_id`, `provider_signature`, `amount_paise`, `status`
-  enum(`created`,`authorized`,`captured`,`failed`,`refunded`,`partially_refunded`),
-  `method`, `raw jsonb` (webhook payload for audit).
+- **payments** — `order_id` unique, `provider` (`upi`|`cod`), `utr` text nullable (customer-entered UPI ref),
+  `amount_paise`, `status`
+  enum(`created`,`submitted`,`confirmed`,`rejected`,`cod_pending`,`cod_collected`),
+  `confirmed_by → profiles` nullable, `confirmed_at` timestamptz nullable, `raw jsonb` (audit).
 - **refunds** — `payment_id`, `razorpay_refund_id`, `amount_paise`, `reason`, `status`.
 - **payouts** — `shop_id`, `period_start`, `period_end`, `gross_paise`, `commission_paise`,
   `refunds_paise`, `net_paise`, `status` enum(`pending`,`processing`,`paid`,`failed`),
@@ -199,7 +215,7 @@ errors. RLS enabled on every table.
 ### Indexes & constraints
 - `orders(shop_id, status, created_at desc)` — queue board.
 - `orders(customer_id, created_at desc)` — customer history.
-- `payments(provider_payment_id)` unique.
+- `payments(utr)` index (lookup by customer UTR).
 - Partial index `orders(status) where status in ('queued','printing','ready')` — active queue.
 - FK `on delete cascade` from orders → items/files/events.
 
@@ -216,10 +232,12 @@ uploads) go through handlers; simple reads use Supabase client + RLS directly.
 | `POST /api/orders` | anon-or-user | Create `draft` order + items from spec; returns `order_id` + upload targets |
 | `POST /api/orders/:id/files` | owner-of-order | Upload file → Supabase Storage; server computes page count; returns item quotes |
 | `GET /api/orders/:id/quote` | owner-of-order | Authoritative price (re-computes from server rate card + verified pages) |
-| `POST /api/orders/:id/pay` | phone-verified | COD → `cod_pending`; else creates Razorpay order, returns `{razorpay_order_id, key_id, amount}` |
-| `POST /api/payments/razorpay/webhook` | Razorpay HMAC | `payment.captured/failed`, `refund.processed` → update `payments`, `orders`; idempotent by event id |
+| `POST /api/orders/:id/pay` | owner-of-order | `method=cod` → `cod_pending`; `method=upi` → returns UPI intent payload (`upi://pay?...`) built from shop's UPI ID + order total, plus deep-link buttons; checkout renders QR + "I've paid" |
+| `POST /api/orders/:id/payment-submitted` | owner-of-order | Customer asserts UPI payment done (optional UTR + note) → `payment_status=submitted`; appears in shop's confirm queue |
+| `POST /api/orders/:id/import-dropbox` | owner-of-order | Import a file into the order from a Dropbox share/direct link (server-side fetch → Storage); Chooser links supported |
+| `POST /api/shop/orders/:id/confirm-payment` | shop staff | `submitted`/`cod_pending` → `confirmed`/`cod_collected` (or `rejected`); on confirm, assign token + ETA → order becomes `queued` |
 | `GET /api/track/:orderId` | anon (unguessable id) | Public status snapshot for token tracking |
-| `POST /api/orders/:id/status` | shop staff/admin | Transition `queued→printing→ready→collected` with guard checks + `order_status_events`; `ready` fires notification |
+| `POST /api/shop/orders/:id/status` | shop staff/admin | Transition `queued→printing→ready→collected` with guard checks + `order_status_events`; `ready` fires notification |
 | `GET /api/shop/orders?lane=new|in_progress|ready|completed&date=` | shop staff | Queue board payload |
 | `PATCH /api/shop/orders/:id/priority` | shop staff | Reorder/rush flag |
 | `GET/PUT /api/shop/rate-card` | owner | Rate card CRUD |
@@ -235,7 +253,7 @@ uploads) go through handlers; simple reads use Supabase client + RLS directly.
 **Error contract:** `{ error: { code, message, field? } }` with proper HTTP status; validation
 errors 422; RLS-denied 403; conflicts (double status transition) 409.
 
-**Idempotency:** webhook + status transitions check current state inside a transaction
+**Idempotency:** status transitions and payment confirmation check current state inside a transaction
 (`select ... for update`) — safe against retries/double-clicks.
 
 ---
@@ -262,8 +280,8 @@ service default → platform default template (so a new shop is never un-orderab
 
 - **RLS** on every table; storage RLS mirrors order tenancy; service-role key only in
   server handlers/webhooks.
-- **Auth:** phone OTP (customer, Supabase + SMS provider), email/password (shop/admin),
-  anonymous sign-in for scan session upgraded to phone at payment.
+- **Auth:** email OTP (customer interim, Supabase + SMTP), email/password (shop/admin),
+  anonymous sign-in for scan session upgraded to email OTP at payment.
 - **Files:** allowlist MIME (pdf/doc/docx/jpg/png), 25 MB cap, ≤ 10 files, random storage
   names, signed URLs (5 min TTL), auto-delete drafts after 24 h (pg_cron), collected orders
   after 30 days (configurable).
@@ -287,7 +305,7 @@ orders, ≥ 80% "order completed without help".**
 |---|---|---|
 | **0 — Foundation** (wk 1) | Repo, design system, CI, DB | pnpm + Next.js 15 scaffold, Tailwind/shadcn, ESLint/TS strict, Vitest, Supabase project `printly` (ap-south-1), migrations + RLS, seed (1 demo shop, rate card), Vercel project + GitHub link, env wiring, preview deploys |
 | **1 — Customer flow** (wk 2–3) | Scan → order | QR landing `/s/[slug]`, service picker, upload w/ page-count + preview, options UI, pricing engine + tests, order create + tracking page (Realtime), anonymous auth |
-| **2 — Payments & shop queue** (wk 4–5) | Money + shop | Razorpay order/webhook/refund, COD path, phone OTP gate, token generation, shop dashboard 4-lane board, order detail + status actions, ready notification (SMS hook), collected + review |
+| **2 — Payments & shop queue** (wk 4–5) | Money + shop | **UPI collect checkout (gateway-styled, shop's own UPI ID)**, payment-submitted + shop confirm flow, COD path, email-OTP customer auth, token generation, shop dashboard 4-lane board, order detail + status actions, ready notification (Realtime + email/SMS hook), collected + review |
 | **3 — Admin & hardening** (wk 6–8) | Ops + launch | Admin console (shop KYC approve/reject, GMV/order/AOV charts, disputes, manual payout marking), inventory low-stock, rate-card settings, QR PDF/PNG generator, error tracking, E2E (Playwright: full QR→collect), load sanity, **closed beta with 1–2 shops** |
 | 4 — Reports & polish | Shop depth | Daily/weekly/monthly reports, peak-hours chart, rush surcharge, reorder/priority, payout CSV export, email receipts |
 | 5 — Growth | Reliability | Promo codes, SMS notifications end-to-end, retention view, GST invoice PDF, abuse controls (rate limits, file scanning), Hindi UI strings |
@@ -335,5 +353,5 @@ Each sprint ends with a demo-able build and a tagged release on the branch.
 | Customers won't OTP-gate before pay | Allow COD without phone (token only), OTP required for online pay |
 | Wrong page counts → wrong price | Server-side verification with pdf-lib; price confirmed pre-payment; "shop can adjust ±10% with reason" escape hatch |
 | File privacy (IDs, contracts) | Private bucket, signed URLs, auto-purge, no public enumeration |
-| Payment/webhook mismatch | Signature verify + idempotent state machine + nightly reconciliation job |
+| Payment/confirmation mismatch | Idempotent state machine (`pending → submitted → confirmed`); UTR reference capture; shop always has final say before printing; COD always available |
 | Scope creep | Strict MVP cut; anything beyond Sprint 3 is a new approval |

@@ -1,0 +1,37 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-50: oklch(0.97 0.02 55);
+  --color-brand-100: oklch(0.93 0.05 55);
+  --color-brand-500: oklch(0.72 0.17 55);
+  --color-brand-600: oklch(0.65 0.18 50);
+  --color-brand-700: oklch(0.55 0.17 45);
+  --color-ink: oklch(0.21 0.02 260);
+  --color-paper: oklch(0.99 0.005 80);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+html, body { background: var(--color-paper); color: var(--color-ink); }
+* { -webkit-tap-highlight-color: transparent; }
+button { cursor: pointer; }
+input, select, textarea { outline: none; }
+input:focus-visible, select:focus-visible, textarea:focus-visible {
+  box-shadow: 0 0 0 3px oklch(0.72 0.17 55 / 0.35); border-radius: 0.75rem;
+}
+
+.card { background: white; border: 1px solid oklch(0.9 0.01 80); border-radius: 1.25rem; box-shadow: 0 1px 2px oklch(0.2 0.02 260 / 0.05); }
+.chip { display: inline-flex; align-items: center; gap: 0.35rem; border-radius: 999px; padding: 0.2rem 0.65rem; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.01em; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; border-radius: 0.9rem; font-weight: 600; transition: transform .08s ease, background .15s ease; user-select: none; }
+.btn:active { transform: scale(0.97); }
+.btn-primary { background: var(--color-brand-600); color: white; }
+.btn-primary:hover { background: var(--color-brand-700); }
+.btn-dark { background: var(--color-ink); color: white; }
+.btn-dark:hover { opacity: 0.9; }
+.btn-ghost { background: oklch(0.95 0.01 80); color: var(--color-ink); }
+.btn-ghost:hover { background: oklch(0.92 0.01 80); }
+.btn[disabled] { opacity: 0.45; pointer-events: none; }
+.input { width: 100%; border: 1px solid oklch(0.88 0.01 80); border-radius: 0.75rem; padding: 0.65rem 0.8rem; font-size: 0.95rem; background: white; }
+.label { font-size: 0.78rem; font-weight: 600; color: oklch(0.4 0.02 260); margin-bottom: 0.35rem; display:block; }
+.skeleton { background: linear-gradient(90deg, oklch(0.94 0.005 80) 25%, oklch(0.97 0.005 80) 50%, oklch(0.94 0.005 80) 75%); background-size: 200% 100%; animation: sk 1.4s infinite; border-radius: 0.75rem; }
+@keyframes sk { 0% { background-position: 200% 0 } 100% { background-position: -200% 0 } }
+@media print { .no-print { display: none !important; } }
