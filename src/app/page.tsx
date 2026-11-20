@@ -120,13 +120,13 @@ export default function HomePage() {
         </div>
         <div>
           <h2 className="text-3xl font-extrabold tracking-tight">Run your shop like magic.</h2>
-          <p className="mt-3 text-neutral-600">No hardware, no new apps to learn. Orders land in one queue, customers pay you directly on UPI (₹0 fees), and you get the file, the token and the spec — all in one screen.</p>
+          <p className="mt-3 text-neutral-600">No hardware, no new apps to learn. Orders land in one queue, and customers pay you directly by UPI or cash. One all-features subscription gives your shop the tools to manage every order.</p>
           <ul className="mt-5 space-y-2.5 text-[15px]">
             {['See order totals and your subscription in your dashboard', 'Your own UPI QR — money comes straight to your account', 'File arrives before the customer does', 'Works on any phone or the shop PC'].map((t) => (
               <li key={t} className="flex items-start gap-2"><CheckCircle2 size={18} className="text-green-600 mt-0.5 shrink-0" />{t}</li>
             ))}
           </ul>
-          <Link href="/shop/signup" className="mt-6 btn btn-dark h-12 px-6 inline-flex">List your shop — free <ArrowRight size={18} /></Link>
+          <Link href="/shop/signup" className="mt-6 btn btn-dark h-12 px-6 inline-flex">Apply to list your shop <ArrowRight size={18} /></Link>
         </div>
       </section>
 

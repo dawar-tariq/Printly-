@@ -179,7 +179,7 @@ export default function ShopSignupPage() {
             <p className="mt-1 font-mono text-xl font-extrabold tracking-wider text-orange-900">{done.code}</p>
             <p className="mt-1 text-xs text-orange-800">Customer link: {done.path}</p>
           </div>
-          <p className="mt-3 text-xs text-neutral-500">Sign in with your email to track verification. Your customer link works after approval.</p>
+          <p className="mt-3 text-xs text-neutral-500">Sign in with your email to track verification and manage your subscription. Your customer link accepts orders once your shop is approved and has active subscription access.</p>
           <Link href="/login" className="btn btn-dark h-12 px-6 mt-6 inline-flex">Go to sign in</Link>
         </div>
       </div>
@@ -196,7 +196,7 @@ export default function ShopSignupPage() {
           <span className="w-11 h-11 rounded-2xl bg-orange-100 text-orange-700 grid place-items-center"><Store size={22} /></span>
           <div>
             <h1 className="text-2xl font-extrabold tracking-tight">List your shop on Printly</h1>
-            <p className="text-xs text-neutral-500">Free to join · UPI direct to your account · Verified in 24–48h</p>
+            <p className="text-xs text-neutral-500">Free to apply · Shop subscription required for access · UPI direct to your account</p>
           </div>
         </div>
 

@@ -12,3 +12,10 @@ it('keeps the administrator portal off the shop-facing landing page', () => {
   expect(screen.getByRole('link', { name: 'Shop sign in' }).getAttribute('href')).toBe('/login');
   expect(screen.queryByRole('link', { name: /admin sign in/i })).toBeNull();
 });
+
+it('describes shop access as a subscription instead of a free listing', () => {
+  render(<HomePage />);
+  expect(screen.getByText(/one all-features subscription gives your shop/i)).toBeTruthy();
+  expect(screen.getByRole('link', { name: /apply to list your shop/i }).getAttribute('href')).toBe('/shop/signup');
+  expect(screen.queryByText(/list your shop — free/i)).toBeNull();
+});
