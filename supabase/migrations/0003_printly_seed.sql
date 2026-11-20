@@ -12,14 +12,19 @@ on conflict (key) do nothing;
 
 -- demo auth users (password: demo1234)
 insert into auth.users (instance_id, id, aud, role, email, encrypted_password,
-  email_confirmed_at, last_sign_in_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
+  email_confirmed_at, last_sign_in_at, raw_app_meta_data, raw_user_meta_data,
+  confirmation_token, recovery_token, email_change_token_new, email_change,
+  email_change_token_current, phone_change, phone_change_token, reauthentication_token,
+  created_at, updated_at)
 values
   ('00000000-0000-0000-0000-000000000000', 'b2222222-2222-4222-8222-222222222221', 'authenticated', 'authenticated',
    'demoshop@printly.test', crypt('demo1234', gen_salt('bf')), now(), now(),
-   '{"provider":"email","providers":["email"]}', '{"full_name":"Demo Shop Owner"}', now(), now()),
+   '{"provider":"email","providers":["email"]}', '{"full_name":"Demo Shop Owner"}',
+   '', '', '', '', '', '', '', '', now(), now()),
   ('00000000-0000-0000-0000-000000000000', 'b2222222-2222-4222-8222-222222222222', 'authenticated', 'authenticated',
    'admin@printly.test', crypt('demo1234', gen_salt('bf')), now(), now(),
-   '{"provider":"email","providers":["email"]}', '{"full_name":"Printly Admin"}', now(), now())
+   '{"provider":"email","providers":["email"]}', '{"full_name":"Printly Admin"}',
+   '', '', '', '', '', '', '', '', now(), now())
 on conflict (id) do nothing;
 
 insert into auth.identities (id, user_id, provider_id, identity_data, provider, last_sign_in_at, created_at, updated_at)
