@@ -6,7 +6,7 @@ Printly is a Next.js and Supabase application for customer print orders, shop op
 
 1. Install dependencies with `pnpm install`.
 2. Copy `.env.example` to `.env.local` and configure the Supabase URL, anon key, service-role key, and site URL. The service-role key is server-only; never commit it or expose it in the browser.
-3. Apply the SQL migrations in `supabase/migrations` in order, including `0007` and `0008` for shop identities and name-proof review.
+3. Apply the SQL migrations in `supabase/migrations` in order, including `0007`–`0009` for shop identities, name-proof review, and private shop columns.
 4. Run `pnpm dev`. Checks: `pnpm typecheck`, `pnpm test`, and `pnpm build`.
 
 ## Access and shop identity
@@ -16,3 +16,4 @@ Printly is a Next.js and Supabase application for customer print orders, shop op
 - Each shop has an immutable, unique public code. Customer links and QR codes use `/s/p-<code>`. Existing name-based links remain valid. The code is a public identifier, **not a password**: authenticated membership and database RLS protect private shop data.
 - Names are compared without regard to case or repeated spaces. A unique name needs no name proof. An existing name requires a shop photo or a GSTIN in the correct format, and stays paused pending an administrator's review. A GSTIN format check does not establish ownership or registration. Photos are stored in the private `shop-name-proofs` bucket, accessible to administrators only. Owners can replace evidence in Settings if changes are requested.
 - Demo credentials in the historical seed are publicly known and are suitable only for isolated development. If a seeded admin exists on a shared deployment, change its password immediately using **Admin → Settings**, and provision a real administrator account before real-world use.
+- The current shop application creates email-confirmed accounts without sending a verification email. This bypasses Supabase's email-confirmation setting; implement and configure verified-email onboarding (including production SMTP and redirect URLs) before relying on email address ownership or launching publicly.
