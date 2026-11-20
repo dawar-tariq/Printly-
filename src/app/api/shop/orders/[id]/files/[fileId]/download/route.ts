@@ -7,7 +7,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const admin = createAdminSupabase();
   const { data: file } = await admin.from('order_files').select('storage_path, shop_id, original_name').eq('id', fileId).eq('order_id', id).maybeSingle();
   if (!file) return jsonError(404, 'not_found', 'File not found');
-  if (!await assertStaffOfShop(file.shop_id)) return jsonError(403, 'forbidden', 'Not your shop');
+  if (!await assertStaffOfShop(file.shop_id, { recoveryOrderId: id })) return jsonError(403, 'forbidden', 'Not your shop or order is unavailable');
   const { data, error } = await admin.storage.from('order-files').createSignedUrl(file.storage_path, 60, { download: file.original_name });
   if (error || !data) return jsonError(500, 'storage', error?.message ?? 'Could not sign URL');
   const response = NextResponse.redirect(data.signedUrl, 302);

@@ -9,9 +9,22 @@ import { Store } from 'lucide-react';
 export const dynamic = 'force-dynamic';
 
 export default async function ShopLayout({ children }: { children: React.ReactNode }) {
-  const staff = await getStaffContext();
+  const staff = await getStaffContext({ allowExpired: true });
   if (!staff) redirect('/login?next=/shop');
   if (staff.isAdmin) redirect('/admin');
+
+  if (staff.membershipError || staff.subscriptionError) {
+    return (
+      <div className="grid min-h-screen place-items-center px-6 text-center">
+        <div className="card max-w-md p-8">
+          <div className="flex justify-center"><Logo /></div>
+          <h1 className="mt-5 text-xl font-extrabold">Can’t check shop access right now</h1>
+          <p className="mt-2 text-sm text-neutral-600">Please try again. Your subscription has not been changed.</p>
+          <a href="/shop" className="btn btn-dark mt-5 h-11 px-5">Try again</a>
+        </div>
+      </div>
+    );
+  }
 
   if (staff.shopIds.length === 0) {
     return (
@@ -27,11 +40,14 @@ export default async function ShopLayout({ children }: { children: React.ReactNo
     );
   }
 
+  if (!staff.activeShopIds.includes(staff.shopIds[0])) redirect('/shop/subscription');
+
   const admin = createAdminSupabase();
-  const [{ data: shop }, { data: onboarding }] = await Promise.all([
-    admin.from('shops').select('id, name, slug, short_code, kyc_status, status').eq('id', staff.shopIds[0]).single(),
+  const [{ data: shop }, { data: onboarding }, { data: plan }] = await Promise.all([
+    admin.from('shops').select('id, name, slug, short_code, kyc_status, status, owner_id').eq('id', staff.shopIds[0]).single(),
     admin.from('shop_onboarding').select('review_note').eq('shop_id', staff.shopIds[0]).maybeSingle(),
+    admin.from('subscription_plan').select('warning_days').eq('id', true).maybeSingle(),
   ]);
   if (!shop) redirect('/login?next=/shop');
-  return <ShopShell shop={shop} reviewNote={onboarding?.review_note ?? ''}>{children}</ShopShell>;
+  return <ShopShell shop={shop} reviewNote={onboarding?.review_note ?? ''} subscription={staff.subscriptions.find((s) => s.shop_id === shop.id) ?? null} warningDays={plan?.warning_days ?? 7} isOwner={shop.owner_id === staff.user.id}>{children}</ShopShell>;
 }

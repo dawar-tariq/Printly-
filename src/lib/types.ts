@@ -37,7 +37,6 @@ export interface ShopRow {
   upi_id: string | null;
   kyc_status: 'pending' | 'approved' | 'rejected' | 'changes_requested';
   status: 'active' | 'paused' | 'suspended';
-  commission_bps: number;
   rush_surcharge_bps: number;
   eta_minutes: number;
   rating_avg: number;

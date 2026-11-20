@@ -5,7 +5,9 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { Logo } from '@/components/Logo';
 import { createBrowserSupabase } from '@/lib/supabase-client';
-import { LayoutDashboard, Settings, Boxes, BarChart3, LogOut, ExternalLink, Hourglass, PenLine, Ban } from 'lucide-react';
+import { LayoutDashboard, Settings, Boxes, BarChart3, CreditCard, LogOut, ExternalLink, Hourglass, PenLine, Ban } from 'lucide-react';
+import { SubscriptionNotice } from '@/components/SubscriptionNotice';
+import type { ShopSubscription } from '@/lib/subscription';
 import { cn } from '@/lib/utils';
 import { publicShopPath } from '@/lib/shop-identity';
 
@@ -13,10 +15,11 @@ const TABS = [
   { href: '/shop', label: 'Orders', icon: LayoutDashboard, exact: true },
   { href: '/shop/inventory', label: 'Inventory', icon: Boxes },
   { href: '/shop/reports', label: 'Reports', icon: BarChart3 },
+  { href: '/shop/subscription', label: 'Subscription', icon: CreditCard },
   { href: '/shop/settings', label: 'Settings & QR', icon: Settings },
 ];
 
-export function ShopShell({ shop, reviewNote, children }: { shop: { id: string; name: string; slug: string; short_code: string; kyc_status: string; status: string }; reviewNote: string; children: React.ReactNode }) {
+export function ShopShell({ shop, reviewNote, subscription, warningDays, isOwner, children }: { shop: { id: string; name: string; slug: string; short_code: string; kyc_status: string; status: string }; reviewNote: string; subscription: ShopSubscription | null; warningDays: number; isOwner: boolean; children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [signingOut, setSigningOut] = useState(false);
@@ -51,6 +54,7 @@ export function ShopShell({ shop, reviewNote, children }: { shop: { id: string; 
         </nav>
       </header>
       <main className="max-w-6xl min-w-0 mx-auto px-3 sm:px-4 py-4">
+        <SubscriptionNotice subscription={subscription} warningDays={warningDays} isOwner={isOwner} />
         {shop.kyc_status === 'pending' && (
           <div className="mb-4 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex items-start gap-2.5">
             <Hourglass size={16} className="mt-0.5 shrink-0" />

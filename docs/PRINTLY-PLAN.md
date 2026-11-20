@@ -1,5 +1,7 @@
 # Printly — Product & Technical Plan
 
+> **Historical planning document:** The commercial and technical proposals below are not the current implementation. Subscription terms, direct UPI payments, access rules and rollout guidance are documented in the [README](../README.md). The former commission and settlement model has been removed from the application.
+
 **QR-to-Print Marketplace for Indian Print Shops**
 
 > Scan QR → Upload → Pay → Collect. The simplest way to get documents printed at local shops.

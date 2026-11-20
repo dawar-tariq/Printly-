@@ -10,12 +10,11 @@ export default function AdminSettingsPage() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [commission, setCommission] = useState(8);
   const [gst, setGst] = useState(18);
   const [rush, setRush] = useState(10);
   const [maintenance, setMaintenance] = useState(false);
   const [savedMaintenance, setSavedMaintenance] = useState<boolean | null>(null);
-  const [savedRates, setSavedRates] = useState<{ commission_bps: number; gst_bps: number; rush_bps: number } | null>(null);
+  const [savedRates, setSavedRates] = useState<{ gst_bps: number; rush_bps: number } | null>(null);
 
   const load = useCallback(async () => {
     setLoaded(false);
@@ -32,11 +31,9 @@ export default function AdminSettingsPage() {
       const flag = settings.maintenance;
       if (flag !== true && flag !== false && flag !== 'true' && flag !== 'false') throw new Error('Invalid maintenance setting');
       const rates = {
-        commission_bps: num(settings.commission_bps, 800),
         gst_bps: num(settings.gst_bps, 1800),
         rush_bps: num(settings.rush_bps, 1000),
       };
-      setCommission(rates.commission_bps / 100);
       setGst(rates.gst_bps / 100);
       setRush(rates.rush_bps / 100);
       setSavedRates(rates);
@@ -60,12 +57,10 @@ export default function AdminSettingsPage() {
       // Save only fields changed on this page. A maintenance toggle must not
       // overwrite newer pricing (or vice versa) saved by another administrator.
       const rates = {
-        commission_bps: Math.round(commission * 100),
         gst_bps: Math.round(gst * 100),
         rush_bps: Math.round(rush * 100),
       };
       const changes = {
-        ...(rates.commission_bps !== savedRates.commission_bps ? { commission_bps: rates.commission_bps } : {}),
         ...(rates.gst_bps !== savedRates.gst_bps ? { gst_bps: rates.gst_bps } : {}),
         ...(rates.rush_bps !== savedRates.rush_bps ? { rush_bps: rates.rush_bps } : {}),
         ...(maintenance !== savedMaintenance ? { maintenance } : {}),
@@ -103,11 +98,6 @@ export default function AdminSettingsPage() {
       <h1 className="text-2xl font-extrabold tracking-tight flex items-center gap-2"><Settings size={22} />Platform settings</h1>
       <div className="card mt-4 p-5 space-y-4">
         <fieldset disabled={saving} className="min-w-0 space-y-4">
-          <div>
-            <label className="label" htmlFor="commission">Platform commission (%)</label>
-            <input id="commission" type="number" min={0} max={50} step={0.5} className="input" value={commission} onChange={(e) => setCommission(Number(e.target.value))} />
-            <p className="text-[10px] text-neutral-400 mt-1">Applied to every paid order when generating settlements. Default 8%.</p>
-          </div>
           <div>
             <label className="label" htmlFor="gst">GST (%)</label>
             <input id="gst" type="number" min={0} max={50} step={0.5} className="input" value={gst} onChange={(e) => setGst(Number(e.target.value))} />

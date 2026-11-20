@@ -8,7 +8,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const admin = createAdminSupabase();
   const { data: file } = await admin.from('order_files').select('storage_path, shop_id, mime').eq('id', fileId).eq('order_id', id).maybeSingle();
   if (!file) return jsonError(404, 'not_found', 'File not found');
-  if (!await assertStaffOfShop(file.shop_id)) return jsonError(403, 'forbidden', 'Not your shop');
+  if (!await assertStaffOfShop(file.shop_id, { recoveryOrderId: id })) return jsonError(403, 'forbidden', 'Not your shop or order is unavailable');
   if (file.mime !== PDF_MIME && !IMAGE_MIMES.has(file.mime)) return jsonError(415, 'unsupported', 'Preview is available for PDF, JPEG and PNG files.');
   const { data, error } = await admin.storage.from('order-files').createSignedUrl(file.storage_path, 60);
   if (error || !data) return jsonError(500, 'storage', 'Could not open this file. Please try again.');

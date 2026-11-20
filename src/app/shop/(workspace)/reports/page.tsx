@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, BarChart3, IndianRupee, Receipt, ShoppingBag, TrendingDown } from 'lucide-react';
+import { Loader2, BarChart3, IndianRupee, ShoppingBag, CheckCircle2 } from 'lucide-react';
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { formatPaise, formatPaiseExact } from '@/lib/format';
 import { SERVICE_LABEL } from '@/lib/constants';
@@ -9,10 +9,9 @@ import { cn } from '@/lib/utils';
 
 type Range = 'day' | 'week' | 'month';
 interface Report {
-  days: number; orders_count: number; revenue_paise: number; commission_paise: number; net_paise: number; avg_order_paise: number;
+  days: number; orders_count: number; paid_orders_count: number; revenue_paise: number; avg_order_paise: number;
   service_counts: Record<string, number>;
   series: { day: string; revenue_paise: number; orders: number }[];
-  payouts: Array<{ id: string; period_start: string; period_end: string; net_paise: number; status: string; utr: string | null }>;
 }
 
 export default function ReportsPage() {
@@ -30,7 +29,7 @@ export default function ReportsPage() {
 
   const stats = data ? [
     { label: 'Revenue (collected)', value: formatPaise(data.revenue_paise), icon: IndianRupee, sub: `${data.orders_count} orders` },
-    { label: 'Net settlement (after platform fee)', value: formatPaise(data.net_paise), icon: TrendingDown, sub: `−${formatPaise(data.commission_paise)} platform fee` },
+    { label: 'Paid orders', value: String(data.paid_orders_count), icon: CheckCircle2, sub: 'confirmed or collected' },
     { label: 'Avg. order value', value: formatPaise(data.avg_order_paise), icon: ShoppingBag, sub: 'paid orders' },
   ] : [];
 
@@ -76,9 +75,9 @@ export default function ReportsPage() {
             </div>
           </div>
 
-          <div className="grid md:grid-cols-5 gap-4 mt-4">
+          <div className="mt-4">
             {/* service mix */}
-            <div className="card p-4 md:col-span-2">
+            <div className="card p-4">
               <h2 className="text-xs font-extrabold uppercase tracking-widest text-neutral-500">What sells</h2>
               <div className="mt-3 space-y-2.5">
                 {Object.entries(data.service_counts).sort((a, b) => b[1] - a[1]).map(([service, count]) => (
@@ -89,26 +88,6 @@ export default function ReportsPage() {
                 ))}
                 {Object.keys(data.service_counts).length === 0 && <p className="text-xs text-neutral-400">No items in this period yet.</p>}
               </div>
-            </div>
-
-            {/* payouts */}
-            <div className="card p-4 md:col-span-3">
-              <h2 className="text-xs font-extrabold uppercase tracking-widest text-neutral-500 flex items-center gap-1.5"><Receipt size={13} />Settlements</h2>
-              <ul className="mt-2 divide-y divide-neutral-100">
-                {data.payouts.map((p) => (
-                  <li key={p.id} className="py-2.5 flex items-center justify-between gap-3 text-sm">
-                    <div>
-                      <div className="font-semibold">{new Date(p.period_start).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} – {new Date(p.period_end).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</div>
-                      <div className="text-[10px] text-neutral-400">{p.utr ? `UTR ${p.utr}` : 'Awaiting bank transfer'}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="font-extrabold tabular-nums">{formatPaise(p.net_paise)}</div>
-                      <span className={cn('chip', p.status === 'paid' ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800')}>{p.status}</span>
-                    </div>
-                  </li>
-                ))}
-                {data.payouts.length === 0 && <li className="py-4 text-xs text-neutral-400">No settlements yet — they’re generated weekly by Printly HQ.</li>}
-              </ul>
             </div>
           </div>
         </>

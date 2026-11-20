@@ -3,6 +3,7 @@ import { computeQuote, PricingError } from '@/lib/pricing';
 import { loadOrderWithRates } from '@/lib/order-quote';
 import { requestHasDraftAccess } from '@/lib/draft-access';
 import { quoteToken } from '@/lib/quote-token';
+import { shopHasSubscription } from '@/lib/subscription-server';
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -11,8 +12,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   try { loaded = await loadOrderWithRates(id); }
   catch { return jsonError(503, 'db', 'Could not calculate the total. Please retry.'); }
   if (!loaded) return jsonError(404, 'order_not_found', 'Order not found');
-  const { order, items, card, gstBps, rushBps } = loaded;
+  const { admin, order, items, card, gstBps, rushBps } = loaded;
   if (order.status !== 'draft' || order.payment_method) return jsonError(409, 'order_locked', 'The order has already entered checkout.');
+  const subscribed = await shopHasSubscription(admin, order.shop_id);
+  if (subscribed === null) return jsonError(503, 'db', 'Could not check shop availability. Please retry.');
+  if (!subscribed) return jsonError(403, 'shop_unavailable', 'This shop is not accepting orders right now.');
   if (!items.length) return jsonError(422, 'empty_order', 'Add at least one item.');
   const requestedRush = new URL(req.url).searchParams.get('rush');
   const rush = requestedRush === '1' ? true : requestedRush === '0' ? false : !!order.rush;

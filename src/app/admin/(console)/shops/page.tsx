@@ -17,7 +17,7 @@ interface Onboarding {
 }
 interface ShopRow {
   id: string; name: string; slug: string; short_code: string; city: string; phone: string; gstin: string | null; upi_id: string | null;
-  kyc_status: string; status: string; commission_bps: number; created_at: string;
+  kyc_status: string; status: string; created_at: string;
   owner?: { email: string; full_name: string | null } | null;
   onboarding?: Onboarding | null;
   enabled_services?: number;

@@ -122,7 +122,7 @@ export default function HomePage() {
           <h2 className="text-3xl font-extrabold tracking-tight">Run your shop like magic.</h2>
           <p className="mt-3 text-neutral-600">No hardware, no new apps to learn. Orders land in one queue, customers pay you directly on UPI (₹0 fees), and you get the file, the token and the spec — all in one screen.</p>
           <ul className="mt-5 space-y-2.5 text-[15px]">
-            {['See order totals and platform fees in your dashboard', 'Your own UPI QR — money comes straight to your account', 'File arrives before the customer does', 'Works on any phone or the shop PC'].map((t) => (
+            {['See order totals and your subscription in your dashboard', 'Your own UPI QR — money comes straight to your account', 'File arrives before the customer does', 'Works on any phone or the shop PC'].map((t) => (
               <li key={t} className="flex items-start gap-2"><CheckCircle2 size={18} className="text-green-600 mt-0.5 shrink-0" />{t}</li>
             ))}
           </ul>

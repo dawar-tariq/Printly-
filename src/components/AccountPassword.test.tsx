@@ -24,6 +24,10 @@ function fill(current: string, password: string, confirmation: string) {
 }
 
 describe('account password changes', () => {
+  it.each(['shop', 'admin'] as const)('does not display public demo password notices in %s settings', (portal) => {
+    const { container } = render(<AccountPassword portal={portal} />);
+    expect(container.textContent?.toLowerCase()).not.toContain('demo');
+  });
   it('lets a shop owner change only their own password after verifying the current one', async () => {
     render(<AccountPassword portal="shop" />);
     expect(screen.getByText('Shop account password')).toBeTruthy();

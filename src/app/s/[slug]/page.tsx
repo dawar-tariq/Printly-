@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import { createServerSupabase } from '@/lib/supabase';
+import { createAdminSupabase, createServerSupabase } from '@/lib/supabase';
+import { shopHasSubscription } from '@/lib/subscription-server';
 import { Logo } from '@/components/Logo';
 import { Star, MapPin, Phone, Clock, Printer, FileText, ScanLine, BookOpen, Layers, Copy, ArrowRight, ShieldCheck } from 'lucide-react';
 import { formatPaise } from '@/lib/format';
@@ -33,7 +34,8 @@ export default async function ShopLandingPage({ params }: { params: Promise<{ sl
     );
   }
   if (!shop) notFound();
-  const active = shop.status === 'active';
+  const subscribed = shop.status === 'active' ? await shopHasSubscription(createAdminSupabase(), shop.id) : false;
+  const active = shop.status === 'active' && subscribed === true;
 
   const [{ data: services }, { data: rates }] = await Promise.all([
     supabase.from('shop_services').select('service, enabled, display_order').eq('shop_id', shop.id).eq('enabled', true).order('display_order'),

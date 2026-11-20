@@ -6,14 +6,16 @@ import { Loader2, CheckCircle2, XCircle, PenLine, ArrowLeft, Phone, Mail, MapPin
 import { cn } from '@/lib/utils';
 import { BUSINESS_TYPE_LABELS, REGISTRATION_LABELS, SERVICE_LABELS, INVENTORY_CATEGORY_LABELS, formatBusinessHours, type ChecklistItem } from '@/lib/onboarding';
 import { publicShopPath } from '@/lib/shop-identity';
+import { subscriptionDate, subscriptionState, termLabel, type ShopSubscription } from '@/lib/subscription';
 
 interface Detail {
   shop: {
     id: string; name: string; slug: string; short_code: string; address: string; city: string; phone: string;
-    gstin: string | null; upi_id: string | null; kyc_status: string; status: string; commission_bps: number;
+    gstin: string | null; upi_id: string | null; kyc_status: string; status: string;
     eta_minutes: number; rush_surcharge_bps: number; rating_avg: number; rating_count: number; created_at: string; updated_at: string;
     owner?: { id: string; email: string; full_name: string | null; phone: string | null; created_at: string } | null;
   };
+  subscription: ShopSubscription | null;
   onboarding: Record<string, unknown> & {
     business_type?: string; legal_business_name?: string | null; year_established?: number | null;
     staff_count?: number; printer_count?: number; avg_daily_jobs?: number; printer_details?: string;
@@ -111,6 +113,10 @@ export default function AdminShopDetailPage({ params }: { params: Promise<{ id: 
         </div>
       </div>
 
+      <section className="card mt-4 flex flex-wrap items-center justify-between gap-3 p-4">
+        <div><h2 className="text-sm font-extrabold">Subscription</h2><p className="mt-1 text-sm text-neutral-700"><strong>{subscriptionState(data.subscription).status === 'permanent' ? 'Permanent free access' : termLabel(data.subscription?.term)}</strong> · {subscriptionState(data.subscription).status.replace('_', ' ')}{data.subscription?.expires_at && !data.subscription.is_permanent ? ` · ends ${subscriptionDate(data.subscription.expires_at)}` : ''}</p></div>
+        <Link href="/admin/subscriptions" className="btn btn-ghost min-h-10 px-4 text-xs">Manage subscription</Link>
+      </section>
       {toast && <div className="mt-3 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">{toast}</div>}
 
       <div className="grid lg:grid-cols-3 gap-4 mt-4">
@@ -164,7 +170,7 @@ export default function AdminShopDetailPage({ params }: { params: Promise<{ id: 
               <Row label="Avg daily jobs" value={ob?.avg_daily_jobs != null ? String(ob.avg_daily_jobs) : null} />
               <Row label="Printer details" value={ob?.printer_details} />
               <Row label="How they found Printly" value={ob?.referral_source} />
-              <Row label="Commission" value={`${(shop.commission_bps / 100).toFixed(1)}% · ETA ${shop.eta_minutes} min · Rush +${(shop.rush_surcharge_bps / 100).toFixed(0)}%`} />
+              <Row label="Order timing" value={`ETA ${shop.eta_minutes} min · Rush +${(shop.rush_surcharge_bps / 100).toFixed(0)}%`} />
               <Row label="Rating" value={shop.rating_count ? `${shop.rating_avg} (${shop.rating_count} reviews)` : 'No reviews yet'} />
             </div>
           </section>

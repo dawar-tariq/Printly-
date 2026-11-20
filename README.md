@@ -6,12 +6,28 @@ Printly is a Next.js and Supabase application for customer print orders, shop op
 
 1. Install dependencies with `pnpm install`.
 2. Copy `.env.example` to `.env.local` and configure the Supabase URL, anon key, service-role key, and site URL. The service-role key is server-only; never commit it or expose it in the browser.
-3. Apply all SQL migrations in `supabase/migrations` in order, including `0007`–`0009` for shop identities and privacy and `0010` for transactional draft, pricing and payment safeguards. The new APIs depend on `0010` and are not compatible with the old schema.
+3. Apply all SQL migrations in `supabase/migrations` in order, including `0007`–`0009` for shop identities and privacy, `0010` for transactional checkout safeguards, and `0011` for subscriptions. The application and database changes must be released together; see the rollout notes below.
 4. Run `pnpm dev`. Checks: `pnpm typecheck`, `pnpm test`, and `pnpm build`.
 
 ### Production rollout of `0010`
 
 Use a planned maintenance window and a verified database backup. Stop new checkouts, apply `0010` transactionally, deploy the matching application, and verify customer checkout and shop payment confirmation before reopening. Do not leave the old code running against the new schema or deploy the new code against the old schema. Customers with pre-upgrade drafts must restart them; a customer who already sent a UPI payment should **not** pay again. If their old browser session cannot report the payment, the shop can find the order using its tracking link, record the customer's report, then independently verify and confirm the transfer.
+
+## Subscriptions
+
+Printly has **one all-features plan** with monthly, six-month and yearly terms. In **Admin → Subscription**, configure each price, Printly’s receiving UPI ID, the payee name and the in-app reminder window (1–30 days). Prices and recipient start unset: an unset price disables that term, and no purchase can start until both UPI details are configured. Prices are stored in paise; changes apply to new requests only. The recipient and price of an existing request are preserved. If another admin changes the plan while a settings form is open, saving is rejected; reload the saved values and review your edits rather than overwriting them.
+
+The shop owner starts a request in **Shop → Subscription**, sends a one-time UPI transfer to Printly and submits its transaction reference. A report is **not** proof of payment and never activates access. In **Admin → Subscription**, independently check the actual receiving account, reference, amount and recipient before approving. An approved term is added after the end of any remaining entitlement, in calendar months using India time (Asia/Kolkata); rejected reports require a reason shown to the owner. Requests, decisions and permanent grants are recorded. There is no payment gateway, automatic verification, recurring charge or email/SMS reminder. Owners see an in-app warning and a once-per-session popup near expiry. If a transfer may have been sent but reporting fails, check the current request or contact Printly; do not pay twice.
+
+An admin may grant or revoke **permanent free access** for any shop without a purchase. This overrides but does not erase its paid or transition period; revoking it restores any remaining time. If permanent access is granted while a request is in progress, an owner who already paid can still submit the reference for review; otherwise they should cancel the unpaid request.
+
+After expiry or when unsubscribed, the dashboard and ordinary shop-management APIs are locked, and the storefront will not accept new orders. **Shop → Open orders** remains available to staff for open jobs, customer UPI reports and looking up a specific previously placed order by tracking link. Transfers and refunds are handled separately; cancelling an order does not automatically refund it. Previously issued signed file URLs cannot be revoked until they expire. Historical commission/payout records are retained in the database for audit but their interfaces and new commission calculations have been removed; new checkout records zero commission.
+
+### Production rollout of `0011`
+
+Schedule a maintenance window, take and verify a backup, block access to older deployments and direct bypass paths, and allow in-flight checkout activity to finish. Apply `0011` and deploy the matching application as one coordinated cutover: the old app’s checkout snapshot is incompatible with the new database function, while the new app requires the new subscription tables. Do **not** deploy or roll back just one side. The migration grants every shop existing at that moment a one-time **30-day transition**, starting at migration time; shops created afterward have no free period. Do not reapply or reset it as a renewal mechanism.
+
+Set the actual prices and receiving UPI details in the admin console; none are supplied by this repository. If the operator explicitly chooses to configure them after reopening, payment requests remain disabled, new shops cannot buy a term, and existing shops' 30-day transition is already counting down. Verify the transition rows, admin configuration, storefront availability, expiry lockout, existing-order recovery and a non-financial test of request/approval and permanent grant/revoke using an isolated test shop. Never mark a real payment approved without confirming its transfer. Make a coordinated rollback/recovery plan for both code and database before the cutover; do not discard historical payment data.
 
 ## Printly brand and QR artwork
 
@@ -21,7 +37,7 @@ Existing printed QR signs do not change automatically. Generate and print new QR
 
 ## Shop QR standee
 
-Open **Shop → Settings & QR → Create A4 standee**. The workspace uses the signed-in account's linked shop and its owner's saved profile; it does not create another shop or accept a shop ID from the browser. Generate again after editing saved details. If details change between preview and export, the export asks for a fresh preview. Shops that are not active and approved can still prepare the standee, but customers cannot place orders until the shop is active.
+Open **Shop → Settings & QR → Create A4 standee**. The workspace uses the signed-in account's linked shop and its owner's saved profile; it does not create another shop or accept a shop ID from the browser. Generate again after editing saved details. If details change between preview and export, the export asks for a fresh preview. Shops with an active subscription can prepare a standee before approval, but customers cannot place orders until the shop is active and its subscription is current.
 
 The standee QR opens `/s/p-<code>/order` for that shop. Set `NEXT_PUBLIC_SITE_URL` to the canonical site origin (no path, query, or credentials; HTTPS in production); the request's Host header is never used as a fallback. The existing simple QR in Settings remains available and points to the shop landing page. Standee responses are private and uncached.
 

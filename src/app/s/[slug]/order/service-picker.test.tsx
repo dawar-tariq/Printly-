@@ -13,7 +13,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 describe('customer service picker', () => {
   it('makes the selected service clearly visible and accessible', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
-      shop: { name: 'Demo Prints', status: 'active' },
+      shop: { name: 'Demo Prints', status: 'active' }, accepting_orders: true,
       services: [{ service: 'print', enabled: true }, { service: 'photocopy', enabled: true }, { service: 'scan', enabled: false }],
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
     render(<OrderWizard />);
@@ -36,9 +36,17 @@ describe('customer service picker', () => {
     expect(copy.textContent).not.toContain('Selected');
   });
 
+  it('does not accept orders when subscription availability is false', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ shop: { name: 'Demo', status: 'active' }, accepting_orders: false, services: [{ service: 'print', enabled: true }] })));
+    render(<OrderWizard />);
+    fireEvent.click(await screen.findByRole('button', { name: /print pdf/i }));
+    expect((screen.getByRole('button', { name: 'Continue' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/not accepting orders right now/i)).toBeTruthy();
+  });
+
   it('does not advance when order creation fails', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => url.startsWith('/api/shops/')
-      ? Response.json({ shop: { name: 'Demo', status: 'active' }, services: [{ service: 'print', enabled: true }] })
+      ? Response.json({ shop: { name: 'Demo', status: 'active' }, accepting_orders: true, services: [{ service: 'print', enabled: true }] })
       : Response.json({ error: { message: 'Shop is unavailable' } }, { status: 403 })));
     render(<OrderWizard />);
     fireEvent.click(await screen.findByRole('button', { name: /print pdf/i }));

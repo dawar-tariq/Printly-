@@ -36,6 +36,7 @@ interface UploadedFile {
 }
 interface ShopPublic {
   shop: { slug: string; name: string; city: string; upi_id: string | null; eta_minutes: number; rating_avg: number; rating_count: number; status: string };
+  accepting_orders: boolean;
   services: { service: string; enabled: boolean }[];
 }
 interface QuoteResp { quote: { lines: { service: string; description: string; unitPricePaise: number; qty: number; lineTotalPaise: number }[]; subtotalPaise: number; rushFeePaise: number; taxPaise: number; totalPaise: number }; rush: boolean; quote_token: string }
@@ -437,6 +438,7 @@ function OrderWizardForShop({ slug }: { slug: string }) {
             <h1 className="text-2xl font-extrabold tracking-tight">What do you need?</h1>
             <p className="text-sm text-neutral-500 mt-1">Pick a service to get started.</p>
             {shopLoading && <p className="mt-5 text-sm text-neutral-500" role="status">Loading services…</p>}
+            {!shopLoading && shopData && !shopData.accepting_orders && <p role="status" className="mt-5 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">This shop is not accepting orders right now. Please check back soon.</p>}
             {!shopLoading && shopData && !shopData.services.some((s) => s.enabled) && <p className="mt-5 text-sm text-neutral-500">This shop has no services available right now.</p>}
             <div className="grid grid-cols-2 gap-3 mt-5" aria-label="Choose a service">
               {(Object.keys(SERVICE_META) as Service[])
@@ -459,7 +461,7 @@ function OrderWizardForShop({ slug }: { slug: string }) {
                   );
                 })}
             </div>
-            <button disabled={!service || !shopData || shopData.shop.status !== 'active' || busy} onClick={async () => {
+            <button disabled={!service || !shopData || !shopData.accepting_orders || busy} onClick={async () => {
               setBusy(true);
               try { if (await ensureOrder()) setStep('files'); }
               catch { setBanner('Could not start the order. Please try again.'); }

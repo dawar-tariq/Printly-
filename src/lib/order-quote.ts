@@ -14,7 +14,7 @@ export async function loadOrderWithRates(orderId: string) {
   const admin = createAdminSupabase();
   const { data: order, error: orderError } = await admin
     .from('orders')
-    .select('*, shops!inner(id, name, slug, upi_id, eta_minutes, commission_bps, rush_surcharge_bps, status)')
+    .select('*, shops!inner(id, name, slug, upi_id, eta_minutes, rush_surcharge_bps, status)')
     .eq('id', orderId)
     .maybeSingle();
   if (orderError) throw new Error('Could not load the order.');

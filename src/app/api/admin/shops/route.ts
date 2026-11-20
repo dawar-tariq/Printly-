@@ -11,7 +11,7 @@ export async function GET(req: Request) {
 
   const admin = createAdminSupabase();
   let query = admin.from('shops')
-    .select('id, name, slug, short_code, address, city, phone, gstin, upi_id, kyc_status, status, commission_bps, created_at, owner:profiles!shops_owner_id_fkey(email, full_name)')
+    .select('id, name, slug, short_code, address, city, phone, gstin, upi_id, kyc_status, status, created_at, owner:profiles!shops_owner_id_fkey(email, full_name)')
     .order('created_at', { ascending: false })
     .limit(200);
   if (kyc && kyc !== 'all') query = query.eq('kyc_status', kyc);

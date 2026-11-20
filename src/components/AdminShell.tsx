@@ -4,14 +4,14 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { Logo } from '@/components/Logo';
 import { createBrowserSupabase } from '@/lib/supabase-client';
-import { LayoutDashboard, Store, ShieldAlert, Landmark, Settings, LogOut } from 'lucide-react';
+import { LayoutDashboard, Store, ShieldAlert, CreditCard, Settings, LogOut } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const TABS = [
   { href: '/admin', label: 'Analytics', icon: LayoutDashboard, exact: true },
   { href: '/admin/shops', label: 'Shops & KYC', icon: Store },
   { href: '/admin/disputes', label: 'Disputes', icon: ShieldAlert },
-  { href: '/admin/payouts', label: 'Payouts', icon: Landmark },
+  { href: '/admin/subscriptions', label: 'Subscription', icon: CreditCard },
   { href: '/admin/settings', label: 'Settings', icon: Settings },
 ];
 

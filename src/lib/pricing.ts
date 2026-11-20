@@ -122,7 +122,3 @@ function lineDescription(item: ItemSpec, unit: RateRow['unit']): string {
   const label = item.service === 'photocopy' ? 'Photocopy' : item.service === 'scan' ? 'Scan' : 'Print';
   return `${label} — ${bits.join(', ')}`;
 }
-
-export function commissionPaise(totalPaise: number, commissionBps: number): number {
-  return Math.round((totalPaise * commissionBps) / 10000);
-}

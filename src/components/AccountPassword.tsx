@@ -37,7 +37,6 @@ export function AccountPassword({ portal }: { portal: 'admin' | 'shop' }) {
   return (
     <form onSubmit={changePassword} className="card mt-5 p-5 space-y-3">
       <h2 className="font-extrabold flex items-center gap-2"><ShieldCheck size={18} />{portal === 'admin' ? 'Administrator password' : 'Shop account password'}</h2>
-      <p className="text-xs text-amber-900 bg-amber-50 rounded-xl p-3">Demo account passwords are publicly known. Change them before using Printly with real shop data.</p>
       <div><label className="label" htmlFor={`${portal}-current-password`}>Current password</label><input id={`${portal}-current-password`} className="input" type="password" autoComplete="current-password" required value={current} onChange={(e) => setCurrent(e.target.value)} /></div>
       <div><label className="label" htmlFor={`${portal}-new-password`}>New password (at least 12 characters)</label><input id={`${portal}-new-password`} className="input" type="password" autoComplete="new-password" minLength={12} required value={password} onChange={(e) => setPassword(e.target.value)} /></div>
       <div><label className="label" htmlFor={`${portal}-confirm-password`}>Confirm new password</label><input id={`${portal}-confirm-password`} className="input" type="password" autoComplete="new-password" minLength={12} required value={confirm} onChange={(e) => setConfirm(e.target.value)} /></div>

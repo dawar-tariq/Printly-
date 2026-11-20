@@ -2,28 +2,33 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Loader2, IndianRupee, ShoppingBag, Store, ShieldAlert, BadgePercent, Hourglass } from 'lucide-react';
+import { Loader2, IndianRupee, ShoppingBag, Store, ShieldAlert, CreditCard, Hourglass } from 'lucide-react';
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { formatPaise, formatPaiseExact } from '@/lib/format';
-import { cn } from '@/lib/utils';
 
 interface Analytics {
-  gmv_paise: number; commission_paise: number; orders_count: number; paid_orders_count: number;
+  gmv_paise: number; pending_subscriptions: number; orders_count: number; paid_orders_count: number;
   aov_paise: number; active_shops: number; pending_kyc: number; open_disputes: number;
   series: { day: string; gmv_paise: number; orders: number }[];
 }
 
 export default function AdminAnalyticsPage() {
   const [data, setData] = useState<Analytics | null>(null);
-  useEffect(() => { fetch('/api/admin/analytics', { cache: 'no-store' }).then((r) => r.json()).then(setData); }, []);
+  const [error, setError] = useState(false);
+  const [retry, setRetry] = useState(0);
+  useEffect(() => {
+    setError(false);
+    fetch('/api/admin/analytics', { cache: 'no-store' }).then((r) => { if (!r.ok) throw new Error('unavailable'); return r.json(); }).then(setData).catch(() => setError(true));
+  }, [retry]);
 
+  if (error) return <div role="alert" className="card p-8 text-center text-sm text-red-700">Could not load analytics. <button onClick={() => setRetry((n) => n + 1)} className="font-bold underline">Try again</button></div>;
   if (!data) return <div className="grid place-items-center py-24"><Loader2 className="animate-spin text-indigo-600" size={30} /></div>;
 
   const stats = [
-    { label: 'GMV (14d, collected)', value: formatPaise(data.gmv_paise), icon: IndianRupee },
-    { label: 'Commission earned', value: formatPaise(data.commission_paise), icon: BadgePercent },
+    { label: 'GMV (paid)', value: formatPaise(data.gmv_paise), icon: IndianRupee, sub: 'up to 10,000 recent orders' },
+    { label: 'Subscription requests', value: String(data.pending_subscriptions), icon: CreditCard, sub: 'awaiting payment verification' },
     { label: 'Orders', value: String(data.orders_count), icon: ShoppingBag, sub: `${data.paid_orders_count} paid · AOV ${formatPaise(data.aov_paise)}` },
-    { label: 'Active shops', value: String(data.active_shops), icon: Store },
+    { label: 'Enabled shops', value: String(data.active_shops), icon: Store, sub: 'shop status, before subscription check' },
   ];
 
   return (
@@ -61,7 +66,7 @@ export default function AdminAnalyticsPage() {
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 text-center">
-        {[['Settlement model', 'UPI direct'], ['Platform fee', '8%'], ['GST on order', '18%'], ['Default payout', 'Weekly']].map(([k, v]) => (
+        {[['Plan', 'One plan · all features'], ['Terms', 'Monthly · 6 months · yearly'], ['Shop payments', 'UPI direct'], ['Renewal', 'Manual · admin verified']].map(([k, v]) => (
           <div key={k} className="card p-4"><div className="text-[10px] uppercase tracking-widest text-neutral-400">{k}</div><div className="mt-1 font-extrabold">{v}</div></div>
         ))}
       </div>

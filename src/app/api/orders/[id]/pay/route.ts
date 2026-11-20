@@ -7,11 +7,12 @@ import { checkoutContact } from '@/lib/contracts';
 import { requestHasDraftAccess } from '@/lib/draft-access';
 import { draftMutationError } from '@/lib/draft-mutation';
 import { quoteToken } from '@/lib/quote-token';
+import { shopHasSubscription } from '@/lib/subscription-server';
 
 const payInput = z.object({ method: z.enum(['upi', 'cod']), quote_token: z.string().regex(/^[0-9a-f]{64}$/) }).and(checkoutContact);
 const noStore = { headers: { 'Cache-Control': 'private, no-store' } };
 
-type Shop = { name: string; upi_id: string | null; eta_minutes: number; commission_bps: number; rush_surcharge_bps: number | null; status: string };
+type Shop = { name: string; upi_id: string | null; eta_minutes: number; rush_surcharge_bps: number | null; status: string };
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -42,6 +43,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
   if (!items.length) return jsonError(422, 'empty_order', 'Add at least one item');
   if (!shop) return jsonError(503, 'db', 'Could not load shop pricing. Please retry.');
+  const subscribed = await shopHasSubscription(admin, order.shop_id);
+  if (subscribed === null) return jsonError(503, 'db', 'Could not check shop availability. Please retry.');
+  if (!subscribed || shop.status !== 'active') return jsonError(403, 'shop_unavailable', 'This shop is not accepting orders right now.');
   if (method === 'upi' && !shop.upi_id) return jsonError(409, 'upi_missing', 'This shop has not set up UPI collection yet — choose Cash on collection');
 
   const version = Number(order.draft_version);
@@ -68,14 +72,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const { data: committed, error } = await admin.rpc('commit_draft_checkout', {
     p_order_id: id, p_version: version, p_rates: card, p_gst_bps: gstBps,
     p_shop: {
-      name: shop.name, upi_id: shop.upi_id, eta_minutes: shop.eta_minutes, commission_bps: shop.commission_bps,
+      name: shop.name, upi_id: shop.upi_id, eta_minutes: shop.eta_minutes,
       rush_surcharge_bps: shop.rush_surcharge_bps, status: shop.status,
     },
     p_lines: lines,
     p_checkout: {
       customer_name, customer_phone, customer_email: customer_email ?? '', notes: notes ?? '', method, rush: !!rush,
       subtotal_paise: quote.subtotalPaise, tax_paise: quote.taxPaise + quote.rushFeePaise, total_paise: quote.totalPaise,
-      commission_paise: Math.round((quote.totalPaise * shop.commission_bps) / 10000), quote_token,
+      quote_token,
     },
   });
   if (error) return draftMutationError(error);

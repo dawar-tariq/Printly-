@@ -11,7 +11,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const admin = createAdminSupabase();
   const { data: order } = await admin.from('orders').select('id, shop_id').eq('id', id).maybeSingle();
   if (!order) return jsonError(404, 'order_not_found', 'Order not found');
-  const staff = await assertStaffOfShop(order.shop_id);
+  const staff = await assertStaffOfShop(order.shop_id, { recoveryOrderId: id });
   if (!staff) return jsonError(403, 'forbidden', 'Not your shop');
 
   // One transaction checks the state and records the decision, payment, token

@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { getSessionProfile, jsonOk, jsonError } from '@/lib/api';
 import { createAdminSupabase } from '@/lib/supabase';
 
-const SETTING_KEYS = ['commission_bps', 'gst_bps', 'rush_bps', 'maintenance'] as const;
+const SETTING_KEYS = ['gst_bps', 'rush_bps', 'maintenance'] as const;
 
 export async function GET() {
   const session = await getSessionProfile();
@@ -14,11 +14,10 @@ export async function GET() {
 }
 
 const putInput = z.object({
-  commission_bps: z.number().int().min(0).max(5000).optional(),
   gst_bps: z.number().int().min(0).max(5000).optional(),
   rush_bps: z.number().int().min(0).max(5000).optional(),
   maintenance: z.boolean().optional(),
-});
+}).strict();
 
 export async function PUT(req: Request) {
   const session = await getSessionProfile();

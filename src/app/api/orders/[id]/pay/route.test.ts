@@ -10,7 +10,9 @@ const state = vi.hoisted(() => ({
   payment: null as null | { status: string; raw: Record<string, unknown> },
   rpcCalls: [] as Array<Record<string, unknown>>,
   rpcError: '' as string,
+  subscribed: true as boolean | null,
 }));
+vi.mock('@/lib/subscription-server', () => ({ shopHasSubscription: async () => state.subscribed }));
 
 function admin() {
   return {
@@ -55,7 +57,7 @@ beforeEach(() => {
     shops: { name: 'Demo Prints', upi_id: 'demo@upi', eta_minutes: 20, commission_bps: 800, rush_surcharge_bps: 1500, status: 'active' } };
   state.items = [{ id: itemId, service: 'print', paper_size: 'A4', color: 'bw', sides: 'single', paper_gsm: 80, option: null, copies: 2, pages: 2 }];
   state.card = [{ id: '55555555-5555-4555-8555-555555555555', service: 'print', paper_size: 'A4', color: 'bw', sides: 'single', paper_gsm: 80, option: null, unit: 'page', price_paise: 200 }];
-  state.payment = null; state.rpcCalls = []; state.rpcError = '';
+  state.payment = null; state.rpcCalls = []; state.rpcError = ''; state.subscribed = true;
 });
 
 describe('checkout uses the quote the customer reviewed', () => {
@@ -99,6 +101,21 @@ describe('checkout uses the quote the customer reviewed', () => {
     expect(state.rpcCalls).toHaveLength(1);
     state.order.payment_status = 'submitted';
     expect(await (await pay({ method: 'upi', quote_token: quoted })).json()).toMatchObject({ mode: 'placed' });
+  });
+  it('blocks expired shops and fails closed if subscription lookup fails', async () => {
+    state.subscribed = false;
+    expect((await pay()).status).toBe(403);
+    state.subscribed = null;
+    expect((await pay()).status).toBe(503);
+    expect(state.rpcCalls).toHaveLength(0);
+  });
+  it('still recovers an existing UPI checkout after the shop expires', async () => {
+    const quoted = token();
+    expect((await pay({ method: 'upi', quote_token: quoted })).status).toBe(200);
+    state.subscribed = false;
+    const retry = await pay({ method: 'upi', quote_token: quoted });
+    expect(await retry.json()).toMatchObject({ mode: 'upi', pa: 'demo@upi', total_paise: 944 });
+    expect(state.rpcCalls).toHaveLength(1);
   });
   it('does not start UPI if the shop has no UPI ID', async () => {
     (state.order.shops as Record<string, unknown>).upi_id = null;
