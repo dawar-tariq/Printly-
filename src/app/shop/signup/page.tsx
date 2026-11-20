@@ -255,7 +255,7 @@ export default function ShopSignupPage() {
               <div><label className="label">City *</label><input className="input" value={form.city} onChange={set('city')} placeholder="Srinagar" /></div>
               <div><label className="label">PIN code</label><input className="input" value={form.pincode} onChange={set('pincode')} placeholder="190001" inputMode="numeric" /></div>
               <div><label className="label">Your UPI ID</label><input className="input" value={form.upi_id} onChange={set('upi_id')} placeholder="name@okaxis" /></div>
-              <p className="sm:col-span-2 text-[11px] text-neutral-500 -mt-1">Customers pay directly to this UPI ID. Printly never touches your money. You can change it anytime in Settings.</p>
+              <p className="sm:col-span-2 text-[11px] text-neutral-500 -mt-1">Customers pay for orders directly to this UPI ID. Subscription payments to Printly are separate. You can change your shop UPI ID anytime in Settings.</p>
             </div>
           )}
 

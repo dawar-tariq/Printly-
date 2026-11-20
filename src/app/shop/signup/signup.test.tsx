@@ -20,7 +20,9 @@ describe('name proof in onboarding', () => {
   it('explains that applying is free but shop access requires a subscription', () => {
     render(<ShopSignupPage />);
     expect(screen.getByText(/free to apply · shop subscription required for access/i)).toBeTruthy();
+    expect(screen.getByText(/subscription payments to printly are separate/i)).toBeTruthy();
     expect(screen.queryByText(/free to join/i)).toBeNull();
+    expect(screen.queryByText(/printly never touches your money/i)).toBeNull();
   });
 
   it('does not ask for a photo or GSTIN when the name is available', async () => {
