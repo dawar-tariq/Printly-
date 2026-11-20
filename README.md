@@ -32,6 +32,12 @@ Print on A4 portrait at actual size (100%), with browser headers and footers dis
 - Demo credentials in the historical seed are publicly known and are suitable only for isolated development. Change a seeded admin password in **Admin → Settings** and a seeded shop password in **Shop → Settings & QR** before using a shared deployment. Provision real accounts before real-world use.
 - The current shop application creates email-confirmed accounts without sending a verification email. This bypasses Supabase's email-confirmation setting; implement and configure verified-email onboarding (including production SMTP and redirect URLs) before relying on email address ownership or launching publicly.
 
+## Maintenance mode
+
+In **Admin → Settings**, check **Enable maintenance mode** and select **Save settings**. Once saved, public/customer and shop pages return a self-contained maintenance page with HTTP 503, and their application APIs return a non-cacheable 503 error. The admin sign-in, console and admin APIs remain available and still require normal authorization; uncheck and save to reopen the site. Already-open pages check again while visible, about every 30 seconds and on focus, and display the notice without discarding their current input. Visitors who loaded the standalone maintenance page can use **Try again**. If the setting cannot be read, public requests fail closed with a generic unavailable message; the admin area remains accessible so the setting can be checked.
+
+This is an application-level gate, not a database lock. Requests already in progress can finish, external UPI transfers cannot be stopped, and previously issued signed storage URLs or direct Supabase access are not revoked by the switch. Older deployments that do not contain this gate can also bypass it if their URLs remain accessible. For schema cutovers or sensitive maintenance, separately block old deployments and direct access as needed and allow in-flight work to finish before proceeding.
+
 ## Customer previews and shop printing
 
 - Customers can preview and crop/rotate individual PDF pages or JPEG/PNG images before checkout. Save replaces the file the shop receives; **PDF cropping is not redaction**: cropped-out PDF content can still exist in the file. Do not use it to hide confidential material. Image editing re-encodes the image. Reset restores the current page's unsaved edits; a saved edit cannot be undone unless the original is uploaded again.

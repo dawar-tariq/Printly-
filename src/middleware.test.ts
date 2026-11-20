@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
-const state = vi.hoisted(() => ({ user: null as { id: string } | null, role: 'shop_staff', member: true, refresh: false }));
+const state = vi.hoisted(() => ({ user: null as { id: string } | null, role: 'shop_staff', member: true, refresh: false, maintenance: 'off' as 'on' | 'off' | 'unknown' }));
+vi.mock('@/lib/maintenance-server', async (original) => ({
+  ...(await original<typeof import('@/lib/maintenance-server')>()),
+  readMaintenanceState: async () => state.maintenance,
+}));
 vi.mock('@supabase/ssr', () => ({ createServerClient: (_url: string, _key: string, opts: { cookies: { setAll: (items: unknown[]) => void } }) => ({
   auth: { getUser: async () => {
     if (state.refresh) opts.cookies.setAll([{ name: 'refreshed', value: 'yes', options: { path: '/' } }]);
@@ -14,7 +18,7 @@ vi.mock('@supabase/ssr', () => ({ createServerClient: (_url: string, _key: strin
 }) }));
 import { middleware } from './middleware';
 
-beforeEach(() => { state.user = null; state.role = 'shop_staff'; state.member = true; state.refresh = false; });
+beforeEach(() => { state.user = null; state.role = 'shop_staff'; state.member = true; state.refresh = false; state.maintenance = 'off'; });
 const visit = (path: string) => middleware(new NextRequest(`https://printly.test${path}`));
 
 describe('session-aware portal entry', () => {
@@ -46,5 +50,72 @@ describe('session-aware portal entry', () => {
     expect(res.headers.get('set-cookie')).toContain('refreshed=yes');
     expect((await visit('/admin/login')).headers.get('location')).toBe('https://printly.test/admin');
     expect((await visit('/')).headers.get('location')).toBeNull();
+  });
+});
+
+describe('platform maintenance', () => {
+  it('replaces customer and shop pages with a self-contained, non-cacheable 503 notice', async () => {
+    state.maintenance = 'on';
+    for (const path of ['/', '/login', '/shop', '/shop/signup', '/s/p-demo1', '/s/p-demo1/order', '/track/123', '/other']) {
+      const response = await visit(path);
+      expect(response.status, path).toBe(503);
+      expect(response.headers.get('content-type')).toContain('text/html');
+      expect(response.headers.get('cache-control')).toContain('no-store');
+      expect(response.headers.get('retry-after')).toBe('60');
+      expect(response.headers.get('location')).toBeNull();
+      const html = await response.text();
+      expect(html).toContain('Maintenance in progress');
+      expect(html).toContain('We’re making things better');
+      expect(html).toContain('don’t pay again');
+      expect(html).toContain('href="/admin/login"');
+      expect(html).not.toContain('<script');
+    }
+  });
+
+  it('blocks non-admin APIs for reads and writes without running portal auth', async () => {
+    state.maintenance = 'on';
+    for (const path of ['/api/orders', '/api/orders/123/pay', '/api/shop/orders', '/api/shops/demo/public', '/api/administer']) {
+      const response = await middleware(new NextRequest(`https://printly.test${path}`, { method: 'POST' }));
+      expect(response.status, path).toBe(503);
+      expect(response.headers.get('cache-control')).toContain('no-store');
+      expect(await response.json()).toEqual({ error: { code: 'maintenance', message: expect.stringContaining('temporarily unavailable') } });
+    }
+  });
+
+  it('keeps admin routes accessible, with their normal authentication checks', async () => {
+    state.maintenance = 'on';
+    expect((await visit('/admin/login')).headers.get('location')).toBeNull();
+    expect((await visit('/admin/settings')).headers.get('location')).toBe('https://printly.test/admin/login?next=%2Fadmin%2Fsettings');
+    expect((await visit('/api/admin/settings')).headers.get('x-middleware-next')).toBe('1');
+    state.user = { id: 'admin' }; state.role = 'admin';
+    expect((await visit('/admin/settings')).headers.get('x-middleware-next')).toBe('1');
+    expect((await visit('/administration')).status).toBe(503);
+    // An admin browsing the public site sees the same notice as other visitors.
+    expect((await visit('/')).status).toBe(503);
+  });
+
+  it('reports changes immediately without caching and restores normal traffic when switched off', async () => {
+    state.maintenance = 'on';
+    const blocked = await visit('/api/maintenance-status');
+    expect(blocked.status).toBe(503);
+    expect((await blocked.json()).error.code).toBe('maintenance');
+    state.maintenance = 'off';
+    const open = await visit('/api/maintenance-status');
+    expect(open.status).toBe(200);
+    expect(open.headers.get('cache-control')).toContain('no-store');
+    expect(await open.json()).toEqual({ maintenance: false });
+    expect((await visit('/s/p-demo1/order')).headers.get('x-middleware-next')).toBe('1');
+    expect((await visit('/api/orders')).headers.get('x-middleware-next')).toBe('1');
+  });
+
+  it('fails closed with a generic notice if the setting cannot be checked', async () => {
+    state.maintenance = 'unknown';
+    const page = await visit('/track/123');
+    expect(page.status).toBe(503);
+    expect(await page.text()).toContain('Temporarily unavailable');
+    const api = await visit('/api/orders');
+    expect(api.status).toBe(503);
+    expect((await api.json()).error.code).toBe('maintenance_status_unavailable');
+    expect((await visit('/admin/login')).status).toBe(200);
   });
 });

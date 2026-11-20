@@ -1,11 +1,31 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 import { portalDestination, type Portal } from '@/lib/portal-auth';
+import { isAdminApi, isAdminPage, MAINTENANCE_STATUS_PATH } from '@/lib/maintenance';
+import { maintenanceApiResponse, maintenancePageResponse, maintenanceStatusResponse, readMaintenanceState } from '@/lib/maintenance-server';
 
 export async function middleware(req: NextRequest) {
-  let res = NextResponse.next({ request: req });
   const path = req.nextUrl.pathname.replace(/\/+$/, '') || '/';
+  const adminPage = isAdminPage(path);
+
+  // Admin sign-in, console and APIs remain available so maintenance can always
+  // be turned off. Their existing authentication and authorization still apply.
+  if (!adminPage && !isAdminApi(path)) {
+    const maintenance = await readMaintenanceState();
+    if (path === MAINTENANCE_STATUS_PATH) return maintenanceStatusResponse(maintenance);
+    if (maintenance !== 'off') {
+      return path === '/api' || path.startsWith('/api/')
+        ? maintenanceApiResponse(maintenance)
+        : maintenancePageResponse(maintenance);
+    }
+  }
+
+  let res = NextResponse.next({ request: req });
   const isEntry = path === '/' || path === '/login' || path === '/shop/signup' || path === '/admin/login';
+  const isShopPage = path === '/shop' || path.startsWith('/shop/');
+  // Preserve the existing portal session checks without requiring customer or
+  // API requests to be signed in after expanding the middleware matcher.
+  if (!isEntry && !isShopPage && !adminPage) return res;
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -55,5 +75,6 @@ export async function middleware(req: NextRequest) {
   return res;
 }
 
-// Public customer order and tracking links remain accessible regardless of shop sign-in.
-export const config = { matcher: ['/', '/login', '/shop/:path*', '/admin/:path*'] };
+// Gate public pages and APIs too, while leaving Next's assets available for
+// the administrator console. Public order/tracking pages still need no login.
+export const config = { matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'] };
