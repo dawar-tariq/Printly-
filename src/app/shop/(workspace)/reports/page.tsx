@@ -30,7 +30,7 @@ export default function ReportsPage() {
 
   const stats = data ? [
     { label: 'Revenue (collected)', value: formatPaise(data.revenue_paise), icon: IndianRupee, sub: `${data.orders_count} orders` },
-    { label: 'Net settlement (after 8% fee)', value: formatPaise(data.net_paise), icon: TrendingDown, sub: `−${formatPaise(data.commission_paise)} platform fee` },
+    { label: 'Net settlement (after platform fee)', value: formatPaise(data.net_paise), icon: TrendingDown, sub: `−${formatPaise(data.commission_paise)} platform fee` },
     { label: 'Avg. order value', value: formatPaise(data.avg_order_paise), icon: ShoppingBag, sub: 'paid orders' },
   ] : [];
 

@@ -30,7 +30,7 @@ export function ShopShell({ shop, reviewNote, children }: { shop: { id: string; 
 
   return (
     <div className="min-h-screen bg-neutral-100">
-      <header className="sticky top-0 z-30 bg-neutral-950 text-white">
+      <header className="no-print sticky top-0 z-30 bg-neutral-950 text-white">
         <div className="max-w-6xl mx-auto px-3 sm:px-4 h-14 flex items-center gap-3">
           <Link href="/" className="flex items-center gap-2 font-extrabold shrink-0"><span className="w-7 h-7 rounded-lg bg-orange-600 grid place-items-center"><Printer size={15} /></span><span className="hidden xs:inline">Printly</span></Link>
           <div className="min-w-0 flex-1">
@@ -39,7 +39,7 @@ export function ShopShell({ shop, reviewNote, children }: { shop: { id: string; 
           </div>
           <button onClick={signOut} disabled={signingOut} className="p-2 rounded-lg hover:bg-neutral-800 text-neutral-300" aria-label="Sign out"><LogOut size={18} /></button>
         </div>
-        <nav className="max-w-6xl mx-auto px-2 sm:px-3 flex items-center gap-1 overflow-x-auto pb-1.5">
+        <nav aria-label="Shop navigation" className="max-w-6xl w-full min-w-0 mx-auto px-2 sm:px-3 flex items-center gap-1 overflow-x-auto pb-1.5">
           {TABS.map(({ href, label, icon: Icon, exact }) => {
             const active = exact ? pathname === href : pathname.startsWith(href);
             return (
@@ -50,7 +50,7 @@ export function ShopShell({ shop, reviewNote, children }: { shop: { id: string; 
           })}
         </nav>
       </header>
-      <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4">
+      <main className="max-w-6xl min-w-0 mx-auto px-3 sm:px-4 py-4">
         {shop.kyc_status === 'pending' && (
           <div className="mb-4 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex items-start gap-2.5">
             <Hourglass size={16} className="mt-0.5 shrink-0" />

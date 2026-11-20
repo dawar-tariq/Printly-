@@ -43,4 +43,9 @@ describe('pricing engine', () => {
   it('throws a helpful error for unpriced services', () => {
     expect(() => computeQuote([{ service: 'scan', copies: 1, pages: 1 }], card)).toThrow(PricingError);
   });
+
+  it('does not quote amounts that cannot fit the database money columns', () => {
+    const expensive = [{ ...card[0], price_paise: 1_000_000 }];
+    expect(() => computeQuote([{ service: 'print', paper_size: 'A4', color: 'bw', sides: 'single', paper_gsm: 80, copies: 99, pages: 2000 }], expensive)).toThrow(/split it/i);
+  });
 });

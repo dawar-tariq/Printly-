@@ -40,6 +40,14 @@ export interface Quote {
 
 export class PricingError extends Error {}
 
+// Monetary columns in Postgres are signed 32-bit integers. Refuse a quote that
+// could not be stored exactly rather than displaying an unplaceable total.
+const MAX_STORED_PAISE = 2_147_483_647;
+function checkedPaise(value: number) {
+  if (!Number.isSafeInteger(value) || value < 0 || value > MAX_STORED_PAISE) throw new PricingError('This order is too large to price. Please split it into smaller orders.');
+  return value;
+}
+
 const OPTION_DIM_KEYS = ['paper_size', 'color', 'sides', 'paper_gsm'] as const;
 
 function dimEquals(rowVal: string | number | null, itemVal: string | number | null | undefined): boolean {
@@ -79,11 +87,13 @@ export function computeQuote(
 ): Quote {
   const rushBps = opts.rushBps ?? 1000;
   const gstBps = opts.gstBps ?? 1800;
+  if (![rushBps, gstBps].every((value) => Number.isInteger(value) && value >= 0 && value <= 5000)) throw new PricingError('The shop’s pricing settings need to be checked.');
   const lines: QuoteLine[] = items.map((item) => {
-    if (item.copies < 1 || item.pages < 1) throw new PricingError('copies and pages must be ≥ 1');
+    if (!Number.isInteger(item.copies) || !Number.isInteger(item.pages) || item.copies < 1 || item.pages < 1) throw new PricingError('copies and pages must be whole numbers ≥ 1');
     const rate = findRate(item, card);
     const qty = qtyFor(item, rate.unit);
-    const lineTotalPaise = rate.price_paise * qty;
+    checkedPaise(rate.price_paise);
+    const lineTotalPaise = checkedPaise(rate.price_paise * qty);
     return {
       service: item.service,
       description: lineDescription(item, rate.unit),
@@ -93,11 +103,11 @@ export function computeQuote(
       lineTotalPaise,
     };
   });
-  const subtotalPaise = lines.reduce((a, l) => a + l.lineTotalPaise, 0);
-  const rushFeePaise = opts.rush ? Math.round((subtotalPaise * rushBps) / 10000) : 0;
-  const taxable = subtotalPaise + rushFeePaise;
-  const taxPaise = Math.round((taxable * gstBps) / 10000);
-  return { lines, subtotalPaise, rushFeePaise, taxPaise, totalPaise: taxable + taxPaise };
+  const subtotalPaise = checkedPaise(lines.reduce((a, l) => a + l.lineTotalPaise, 0));
+  const rushFeePaise = opts.rush ? checkedPaise(Math.round((subtotalPaise * rushBps) / 10000)) : 0;
+  const taxable = checkedPaise(subtotalPaise + rushFeePaise);
+  const taxPaise = checkedPaise(Math.round((taxable * gstBps) / 10000));
+  return { lines, subtotalPaise, rushFeePaise, taxPaise, totalPaise: checkedPaise(taxable + taxPaise) };
 }
 
 function lineDescription(item: ItemSpec, unit: RateRow['unit']): string {

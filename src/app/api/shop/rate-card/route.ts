@@ -35,10 +35,11 @@ export async function PUT(req: Request) {
   if (!assert) return jsonError(403, 'forbidden', 'Not your shop');
 
   const admin = createAdminSupabase();
-  const { error: delErr } = await admin.from('rate_card').delete().eq('shop_id', shopId);
-  if (delErr) return jsonError(500, 'db', delErr.message);
-  const rows = parsed.data.rows.map((r) => ({ ...r, shop_id: shopId }));
-  const { error: insErr } = await admin.from('rate_card').insert(rows);
-  if (insErr) return jsonError(500, 'db', insErr.message);
-  return jsonOk({ ok: true, count: rows.length });
+  const { data: count, error } = await admin.rpc('replace_shop_rate_card', { p_shop_id: shopId, p_rows: parsed.data.rows });
+  if (error?.code === '23505') return jsonError(422, 'duplicate_rate', 'There are duplicate rate options. Please remove the duplicate and try again.');
+  if (error) {
+    console.error('Could not replace rate card:', error.message);
+    return jsonError(503, 'db', 'Could not save the rate card. Please retry.');
+  }
+  return jsonOk({ ok: true, count: count ?? parsed.data.rows.length });
 }

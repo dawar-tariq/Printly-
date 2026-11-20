@@ -31,6 +31,9 @@ export default function TrackPage() {
   const [comment, setComment] = useState('');
   const [reviewed, setReviewed] = useState(false);
   const [reviewBusy, setReviewBusy] = useState(false);
+  const [reportUtr, setReportUtr] = useState('');
+  const [reportBusy, setReportBusy] = useState(false);
+  const [reportMessage, setReportMessage] = useState<string | null>(null);
   const [disputeOpen, setDisputeOpen] = useState(false);
   const [disputeType, setDisputeType] = useState('other');
   const [disputeText, setDisputeText] = useState('');
@@ -73,6 +76,26 @@ export default function TrackPage() {
     if (res.ok) { setDisputeDone(true); setDisputeOpen(false); }
   };
 
+  const reportPayment = async () => {
+    if (reportBusy) return;
+    setReportBusy(true); setReportMessage(null);
+    try {
+      const res = await fetch(`/api/orders/${id}/payment-submitted`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ utr: reportUtr.trim() || undefined }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setReportMessage(data?.error?.message ?? 'Could not report the payment. Please retry or contact the shop.');
+      } else {
+        setReportMessage('Payment reported. The shop must still verify it.');
+        // A failed refresh does not mean the payment report failed.
+        await load().catch(() => {});
+      }
+    } catch { setReportMessage('Could not report the payment. Please retry or contact the shop before paying again.'); }
+    finally { setReportBusy(false); }
+  };
+
   if (track === 'loading') {
     return <div className="min-h-screen grid place-items-center"><Loader2 className="animate-spin text-orange-600" size={32} /></div>;
   }
@@ -89,6 +112,7 @@ export default function TrackPage() {
   }
 
   const awaitingConfirmation = track.payment_method === 'upi' && track.payment_status === 'submitted';
+  const awaitingPayment = track.payment_method === 'upi' && track.payment_status === 'pending';
   const rejected = track.payment_status === 'rejected';
   const codPending = track.payment_method === 'cod' && track.payment_status === 'cod_pending';
   const confirmed = track.payment_status === 'confirmed' || track.payment_status === 'cod_collected';
@@ -104,7 +128,7 @@ export default function TrackPage() {
       <main className="max-w-lg mx-auto px-4 pb-16">
         {/* Token card */}
         <section className="card mt-2 p-6 text-center">
-          <div className="text-xs font-bold uppercase tracking-widest text-neutral-400">{track.shop_name}{track.shop_city ? ` · ${track.shop_city}` : ''}</div>
+          <div className="break-words [overflow-wrap:anywhere] text-xs font-bold uppercase tracking-widest text-neutral-400">{track.shop_name}{track.shop_city ? ` · ${track.shop_city}` : ''}</div>
           {track.token ? (
             <>
               <div className="mt-2 text-[10px] uppercase tracking-[0.3em] text-neutral-400">Your token</div>
@@ -114,26 +138,48 @@ export default function TrackPage() {
             <>
               <Hourglass size={40} className="mx-auto mt-3 text-orange-500" />
               <div className="mt-2 text-lg font-extrabold">Waiting for payment confirmation</div>
-              <p className="text-sm text-neutral-500 mt-1 max-w-xs mx-auto">The shop is verifying your UPI payment. Your token appears here within a minute or two.</p>
+              <p className="text-sm text-neutral-500 mt-1 max-w-xs mx-auto">The shop is verifying your UPI payment. Your token will appear here once the shop confirms it.</p>
             </>
+          ) : awaitingPayment ? (
+            <div className="mt-3 text-lg font-extrabold">Payment not reported yet</div>
           ) : (
             <div className="mt-3 text-lg font-extrabold">Order received</div>
           )}
 
+          <p className="mt-3 text-xs text-neutral-500">Save this tracking link to check your order later.</p>
+
           {/* payment state banners */}
+          {awaitingPayment && (
+            <div className="mt-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs px-4 py-2.5 text-left">If you already paid, report it below from the browser you used to order, or contact the shop with your payment reference.</div>
+          )}
           {awaitingConfirmation && (
-            <div className="mt-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs px-4 py-2.5 flex items-center gap-2 text-left"><Wallet size={14} className="shrink-0" />You tapped “I’ve paid”. The shop will confirm once the money lands in their UPI.</div>
+            <div className="mt-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs px-4 py-2.5 flex items-center gap-2 text-left"><Wallet size={14} className="shrink-0" />A payment report was sent. The shop still needs to verify the transfer.</div>
           )}
           {rejected && (
-            <div className="mt-4 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs px-4 py-2.5 text-left">The shop could not verify your payment. Please check with the counter or pay again.</div>
+            <div className="mt-4 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs px-4 py-2.5 text-left">The shop could not verify your payment. Please check with the counter before paying again.</div>
           )}
           {codPending && (
             <div className="mt-4 rounded-xl bg-blue-50 border border-blue-200 text-blue-900 text-xs px-4 py-2.5 flex items-center gap-2 text-left"><Wallet size={14} className="shrink-0" />Cash on collection — pay ₹{(track.total_paise / 100).toFixed(2)} at the counter.</div>
           )}
           {confirmed && (
-            <div className="mt-4 rounded-xl bg-green-50 border border-green-200 text-green-900 text-xs px-4 py-2.5 flex items-center gap-2 text-left"><CheckCircle2 size={14} className="shrink-0" />Payment confirmed{track.payment_method === 'upi' ? ' via UPI' : ''}. {track.rush ? 'Rush order — you’re first in line.' : ''}</div>
+            <div className="mt-4 rounded-xl bg-green-50 border border-green-200 text-green-900 text-xs px-4 py-2.5 flex items-center gap-2 text-left"><CheckCircle2 size={14} className="shrink-0" />Payment confirmed{track.payment_method === 'upi' ? ' via UPI' : ''}. {track.rush ? 'The shop has been told this is a rush order.' : ''}</div>
           )}
         </section>
+
+        {track.status === 'draft' && track.payment_method === 'upi' && (awaitingPayment || rejected) && (
+          <section className="card mt-4 p-4 text-sm">
+            <h2 className="font-extrabold">Already sent the payment?</h2>
+            <p className="mt-1 text-xs leading-relaxed text-neutral-600">Only report a payment you have sent. The shop must still verify it. {rejected && 'Contact the shop before trying again; do not pay twice.'}</p>
+            <label className="label mt-3">UPI reference / UTR (optional)
+              <input value={reportUtr} onChange={(event) => setReportUtr(event.target.value)} maxLength={40} className="input" placeholder="e.g. 426178900123" />
+            </label>
+            <button type="button" disabled={reportBusy} onClick={() => void reportPayment()} className="btn btn-primary mt-3 min-h-11 w-full px-4 text-sm">
+              {reportBusy ? 'Reporting…' : 'Report payment to shop'}
+            </button>
+            {reportMessage && <p role="status" className="mt-2 text-xs text-neutral-700">{reportMessage}</p>}
+            <p className="mt-2 text-xs text-neutral-500">If your order session has expired, contact the shop and share this tracking link and your payment reference. <Link className="font-bold text-orange-800 underline" href={`/s/${encodeURIComponent(track.shop_slug)}`}>View shop details</Link></p>
+          </section>
+        )}
 
         {/* Stepper */}
         {track.token && (

@@ -19,7 +19,8 @@ export async function GET(req: Request) {
   const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
 
   if (lane === 'confirm') {
-    query = query.eq('status', 'draft').in('payment_status', ['submitted', 'pending']);
+    // In-progress uploads are drafts too, but have not entered UPI checkout.
+    query = query.eq('status', 'draft').eq('payment_method', 'upi').in('payment_status', ['submitted', 'pending']);
   } else if (lane === 'queued' || lane === 'printing' || lane === 'ready') {
     query = query.eq('status', lane);
   } else if (lane === 'completed') {

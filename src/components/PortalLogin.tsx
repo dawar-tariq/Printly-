@@ -75,7 +75,7 @@ function LoginForm({ portal }: { portal: Portal }) {
           <button type="submit" disabled={busy || !email || !password} className="btn btn-dark w-full h-12 mt-4">{busy ? <Loader2 className="animate-spin" size={18} /> : 'Sign in'}</button>
           {!isAdmin && <div className="mt-4 text-center text-xs text-neutral-500">New shop? <Link href="/shop/signup" className="font-bold text-orange-700 hover:underline">Apply to join Printly</Link></div>}
         </form>
-        <p className="text-center text-[11px] text-neutral-500 mt-4 flex items-center justify-center gap-1"><ShieldCheck size={12} /> Secure sign in</p>
+        <p className="text-center text-[11px] text-neutral-500 mt-4 flex items-center justify-center gap-1"><ShieldCheck size={12} /> Stay signed in on this device. Sign out on shared devices.</p>
       </div>
     </div>
   );

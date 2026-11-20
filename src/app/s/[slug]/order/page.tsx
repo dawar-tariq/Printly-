@@ -6,12 +6,14 @@ import Link from 'next/link';
 import QRCode from 'qrcode';
 import {
   Printer, Copy, ScanLine, BookOpen, Layers, UploadCloud, FileText, Loader2, CheckCircle2, XCircle,
-  ChevronLeft, ShieldCheck, Smartphone, Banknote, Link2, FolderInput, Trash2, Zap, Wallet,
+  ChevronLeft, ShieldCheck, Smartphone, Banknote, Link2, FolderInput, Trash2, Zap, Wallet, Eye, RefreshCw,
 } from 'lucide-react';
 import { Logo } from '@/components/Logo';
+import { DocumentEditor } from '@/components/DocumentEditor';
+import { fileMime, isPreviewable, isWord, MAX_DOCUMENT_BYTES, MAX_DOCUMENT_PAGES } from '@/lib/document-shared';
 import { createBrowserSupabase } from '@/lib/supabase-client';
 import { cn } from '@/lib/utils';
-import { formatPaiseExact, formatPaise } from '@/lib/format';
+import { formatPaiseExact } from '@/lib/format';
 
 type Service = 'print' | 'photocopy' | 'scan' | 'bind' | 'laminate';
 type Step = 'service' | 'files' | 'options' | 'checkout' | 'upi';
@@ -23,14 +25,17 @@ interface UploadedFile {
   size: number;
   page_count: number | null;
   source: 'upload' | 'dropbox';
-  state: 'uploading' | 'ready' | 'error';
+  state: 'uploading' | 'ready' | 'removing' | 'error';
   error?: string;
+  localFile?: File;
+  pendingId?: string;
+  pendingPath?: string;
 }
 interface ShopPublic {
   shop: { slug: string; name: string; city: string; upi_id: string | null; eta_minutes: number; rating_avg: number; rating_count: number; status: string };
   services: { service: string; enabled: boolean }[];
 }
-interface QuoteResp { quote: { lines: { service: string; description: string; unitPricePaise: number; qty: number; lineTotalPaise: number }[]; subtotalPaise: number; rushFeePaise: number; taxPaise: number; totalPaise: number }; rush: boolean }
+interface QuoteResp { quote: { lines: { service: string; description: string; unitPricePaise: number; qty: number; lineTotalPaise: number }[]; subtotalPaise: number; rushFeePaise: number; taxPaise: number; totalPaise: number }; rush: boolean; quote_token: string }
 
 const SERVICE_META: Record<Service, { label: string; icon: typeof Printer; blurb: string }> = {
   print: { label: 'Print', icon: Printer, blurb: 'PDF / Word / images' },
@@ -42,6 +47,11 @@ const SERVICE_META: Record<Service, { label: string; icon: typeof Printer; blurb
 
 export default function OrderWizard() {
   const { slug } = useParams<{ slug: string }>();
+  // A shop change starts a separate wizard; never carry a draft to another shop.
+  return <OrderWizardForShop key={slug} slug={slug} />;
+}
+
+function OrderWizardForShop({ slug }: { slug: string }) {
   const router = useRouter();
   const [shopData, setShopData] = useState<ShopPublic | null>(null);
   const [step, setStep] = useState<Step>('service');
@@ -49,6 +59,7 @@ export default function OrderWizard() {
   const [shopLoading, setShopLoading] = useState(true);
   const [orderId, setOrderId] = useState<string | null>(null);
   const [files, setFiles] = useState<UploadedFile[]>([]);
+  const [editingFile, setEditingFile] = useState<UploadedFile | null>(null);
   const [dropboxLink, setDropboxLink] = useState('');
   const [dropboxBusy, setDropboxBusy] = useState(false);
   const [banner, setBanner] = useState<string | null>(null);
@@ -72,20 +83,30 @@ export default function OrderWizard() {
   const [method, setMethod] = useState<'upi' | 'cod'>('upi');
   const [busy, setBusy] = useState(false);
   const [quote, setQuote] = useState<QuoteResp | null>(null);
+  const [quoteLoading, setQuoteLoading] = useState(false);
+  const [quoteRefresh, setQuoteRefresh] = useState(0);
+  const checkoutInFlight = useRef(false);
 
   // upi screen
   const [upi, setUpi] = useState<{ link: string; pa: string; pn: string; am: string; tn: string; shop_name: string; total_paise: number } | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [utr, setUtr] = useState('');
-  const [secondsLeft, setSecondsLeft] = useState(300);
 
   const fileInput = useRef<HTMLInputElement>(null);
+  // Refs, not rendered state, coordinate simultaneous calls before React rerenders.
+  const draft = useRef<{ slug: string; id: string | null; pending: Promise<string | null> | null }>({ slug, id: null, pending: null });
+  const importingDropbox = useRef(false);
+  if (draft.current.slug !== slug) draft.current = { slug, id: null, pending: null };
 
   useEffect(() => {
     const controller = new AbortController();
     setShopLoading(true);
     setShopData(null);
     setService(null);
+    setOrderId(null);
+    setFiles([]);
+    setEditingFile(null);
+    setStep('service');
     fetch(`/api/shops/${encodeURIComponent(slug)}/public`, { signal: controller.signal })
       .then((r) => { if (!r.ok) throw new Error('Shop unavailable'); return r.json(); })
       .then(setShopData)
@@ -94,67 +115,147 @@ export default function OrderWizard() {
     return () => controller.abort();
   }, [slug]);
 
-  const ensureOrder = useCallback(async (): Promise<string | null> => {
-    if (orderId) return orderId;
-    const res = await fetch('/api/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ shop_slug: slug }) });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) { setBanner(data?.error?.message ?? 'Could not start order'); return null; }
-    setOrderId(data.order_id);
-    return data.order_id;
-  }, [orderId, slug]);
+  const ensureOrder = useCallback((): Promise<string | null> => {
+    const current = draft.current;
+    if (current.id) return Promise.resolve(current.id);
+    if (current.pending) return current.pending;
+    const pending = (async () => {
+      try {
+        const res = await fetch('/api/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ shop_slug: slug }) });
+        const data = await res.json().catch(() => ({}));
+        if (draft.current !== current) return null;
+        if (!res.ok || typeof data.order_id !== 'string') { setBanner(data?.error?.message ?? 'Could not start order'); return null; }
+        current.id = data.order_id;
+        setOrderId(data.order_id);
+        return data.order_id;
+      } finally { current.pending = null; }
+    })();
+    current.pending = pending;
+    return pending;
+  }, [slug]);
 
-  const uploadOne = useCallback(async (file: File) => {
-    const oid = await ensureOrder();
-    if (!oid) return;
-    const localId = crypto.randomUUID();
-    setFiles((f) => [...f, { id: localId, name: file.name, mime: file.type || 'application/octet-stream', size: file.size, page_count: null, source: 'upload', state: 'uploading' }]);
-    try {
-      const presign = await fetch(`/api/orders/${oid}/files`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: file.name, mime: file.type || 'application/octet-stream', size: file.size }),
-      });
-      const pdata = await presign.json();
-      if (!presign.ok) throw new Error(pdata?.error?.message ?? 'Upload rejected');
-
-      const supabase = createBrowserSupabase();
-      const { error } = await supabase.storage.from('order-files').uploadToSignedUrl(pdata.path, pdata.token, file);
-      if (error) throw new Error(error.message);
-
-      const fin = await fetch(`/api/orders/${oid}/files/${pdata.file_id}/finalize`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: pdata.path, original_name: file.name, mime: file.type || 'application/octet-stream', size_bytes: file.size, source: 'upload' }),
-      });
-      const fdata = await fin.json();
-      if (!fin.ok) throw new Error(fdata?.error?.message ?? 'Could not read file');
-
-      setFiles((f) => f.map((x) => (x.id === localId ? { ...x, id: fdata.file_id, page_count: fdata.page_count, state: 'ready' } : x)));
-    } catch (e) {
-      setFiles((f) => f.map((x) => (x.id === localId ? { ...x, state: 'error', error: e instanceof Error ? e.message : 'Upload failed' } : x)));
+  const removeUpload = useCallback(async (oid: string, fileId: string, path?: string) => {
+    const response = await fetch(`/api/orders/${oid}/files/${fileId}`, {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(path ? { path } : {}),
+    });
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      throw new Error(result?.error?.message ?? 'Could not remove this file. Please retry.');
     }
-  }, [ensureOrder]);
+  }, []);
+
+  const uploadOne = useCallback(async (file: File, retry?: UploadedFile) => {
+    const localId = retry?.id ?? crypto.randomUUID();
+    const mime = fileMime(file.name, file.type || 'application/octet-stream');
+    if (retry) setFiles((all) => all.map((entry) => entry.id === localId ? { ...entry, state: 'uploading', error: undefined } : entry));
+    else setFiles((all) => [...all, { id: localId, name: file.name, mime, size: file.size, page_count: null, source: 'upload', state: 'uploading', localFile: file }]);
+    let pendingId = retry?.pendingId;
+    let pendingPath = retry?.pendingPath;
+    try {
+      const oid = await ensureOrder();
+      if (!oid) throw new Error('Could not start the order. Please try again.');
+      if (!isPreviewable(mime) && !isWord(mime)) throw new Error('Only PDF, Word, JPEG and PNG files are supported.');
+      if (!file.size || file.size > MAX_DOCUMENT_BYTES) throw new Error('File must be non-empty and no larger than 25 MB.');
+      // A failed request may already have uploaded or finalized the previous attempt.
+      if (pendingId && pendingPath) {
+        await removeUpload(oid, pendingId, pendingPath);
+        pendingId = undefined; pendingPath = undefined;
+      }
+      const presign = await fetch(`/api/orders/${oid}/files`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: file.name, mime, size: file.size }),
+      });
+      const pdata = await presign.json().catch(() => ({}));
+      if (!presign.ok) throw new Error(pdata?.error?.message ?? 'Upload rejected');
+      pendingId = pdata.file_id; pendingPath = pdata.path;
+      setFiles((all) => all.map((entry) => entry.id === localId ? { ...entry, pendingId, pendingPath } : entry));
+      const supabase = createBrowserSupabase();
+      // Supabase sends Blobs as multipart; its part MIME comes from the File, not the option.
+      const upload = file.type === mime ? file : new File([file], file.name, { type: mime, lastModified: file.lastModified });
+      const { error } = await supabase.storage.from('order-files').uploadToSignedUrl(pdata.path, pdata.token, upload, { contentType: mime });
+      if (error) throw new Error(error.message);
+      const fin = await fetch(`/api/orders/${oid}/files/${pdata.file_id}/finalize`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: pdata.path, original_name: file.name, mime }),
+      });
+      const fdata = await fin.json().catch(() => ({}));
+      if (!fin.ok) throw new Error(fdata?.error?.message ?? 'Could not read file');
+      setFiles((all) => all.map((entry) => entry.id === localId ? { ...entry, id: fdata.file_id, page_count: fdata.page_count, state: 'ready', localFile: undefined, pendingId: undefined, pendingPath: undefined } : entry));
+    } catch (err) {
+      setFiles((all) => all.map((entry) => entry.id === localId ? { ...entry, state: 'error', pendingId, pendingPath, error: err instanceof Error ? err.message : 'Upload failed' } : entry));
+    }
+  }, [ensureOrder, removeUpload]);
+
+  const removeFile = useCallback(async (file: UploadedFile) => {
+    setFiles((all) => all.map((entry) => entry.id === file.id ? { ...entry, state: 'removing' } : entry));
+    try {
+      if (orderId && (file.state === 'ready' || file.pendingId)) await removeUpload(orderId, file.pendingId ?? file.id, file.pendingPath);
+      setFiles((all) => all.filter((entry) => entry.id !== file.id));
+    } catch (err) {
+      setBanner(err instanceof Error ? err.message : 'Could not remove this file. Please retry.');
+      // The server may already have detached the file even if storage cleanup
+      // failed. Keep checkout disabled until removal is successfully retried.
+      setFiles((all) => all.map((entry) => entry.id === file.id ? { ...file, state: 'error', pendingId: file.pendingId ?? (file.state === 'ready' ? file.id : undefined), error: 'Removal was not completed. Please retry removal.' } : entry));
+    }
+  }, [orderId, removeUpload]);
 
   const importDropbox = useCallback(async (links: string[]) => {
-    const oid = await ensureOrder();
-    if (!oid) return;
+    if (importingDropbox.current) return;
+    const available = Math.max(0, 10 - files.length);
+    if (!available) { setBanner('You can add up to 10 files.'); return; }
+    if (links.length > available) setBanner(`Only ${available} more file(s) can be added.`);
+    importingDropbox.current = true;
     setDropboxBusy(true);
-    setBanner(null);
     try {
+      const oid = await ensureOrder();
+      if (!oid) return;
       const res = await fetch(`/api/orders/${oid}/import-dropbox`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ links }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ links: links.slice(0, available) }),
       });
-      const data = await res.json();
-      for (const r of data?.results ?? []) {
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error?.message ?? 'Dropbox import failed.');
+      for (const r of data.results ?? []) {
         if (r.ok) {
-          setFiles((f) => [...f, { id: r.file_id!, name: r.name ?? 'Dropbox file', mime: 'application/pdf', size: 0, page_count: r.page_count ?? 1, source: 'dropbox', state: 'ready' }]);
-        } else {
-          setBanner(`Dropbox import failed: ${r.error}`);
-        }
+          setFiles((all) => [...all, { id: r.file_id, name: r.name ?? 'Dropbox file', mime: r.mime, size: r.size, page_count: r.page_count, source: 'dropbox', state: 'ready' }]);
+        } else setBanner(`Dropbox import failed: ${r.error}`);
       }
-    } finally {
-      setDropboxBusy(false);
       setDropboxLink('');
+    } catch (err) { setBanner(err instanceof Error ? err.message : 'Dropbox import failed. Please retry.'); }
+    finally { importingDropbox.current = false; setDropboxBusy(false); }
+  }, [ensureOrder, files.length]);
+
+  const saveEditedFile = useCallback(async (file: UploadedFile, edited: Blob) => {
+    if (!orderId) throw new Error('The order session has expired. Please start a new order.');
+    const endpoint = `/api/orders/${orderId}/files/${file.id}/edit`;
+    let path: string | null = null;
+    try {
+      const prepare = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ size: edited.size }) });
+      const token = await prepare.json().catch(() => ({}));
+      if (!prepare.ok) throw new Error(token?.error?.message ?? 'Could not prepare the edited file.');
+      path = token.path;
+      const { error } = await createBrowserSupabase().storage.from('order-files').uploadToSignedUrl(token.path, token.token, edited, { contentType: file.mime });
+      if (error) throw new Error(error.message);
+      const finish = () => fetch(endpoint, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: token.path, revision: token.revision }) });
+      // Finalization is idempotent; retry once when the response is lost.
+      let response: Response;
+      try { response = await finish(); } catch { response = await finish(); }
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result?.error?.message ?? 'Could not save the edited file.');
+      setFiles((all) => all.map((entry) => entry.id === file.id ? { ...entry, size: result.size ?? edited.size, page_count: result.page_count ?? entry.page_count } : entry));
+      if (result.cleanup_warning) setBanner('The edited file was saved, but the previous copy could not be removed from storage. Please contact the shop.');
+      path = null;
+    } catch (err) {
+      if (path) {
+        // The edit endpoint will refuse to delete the current saved file.
+        const discard = await fetch(endpoint, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) }).catch(() => null);
+        if (discard?.status === 409) {
+          setFiles((all) => all.map((entry) => entry.id === file.id ? { ...entry, size: edited.size } : entry));
+          setBanner('The edited file was saved. Please reopen its preview to check it.');
+          return;
+        }
+        if (!discard?.ok) setBanner('Could not remove an unfinished edit from storage. Please contact the shop.');
+      }
+      throw err;
     }
-  }, [ensureOrder]);
+  }, [orderId]);
 
   const openDropboxChooser = useCallback(() => {
     const appKey = process.env.NEXT_PUBLIC_DROPBOX_APP_KEY;
@@ -202,66 +303,76 @@ export default function OrderWizard() {
   }, [files, service, copies, color, sides, gsm, size, binding, lamination, bindingMain]);
 
   const pushItems = useCallback(async () => {
-    const oid = await ensureOrder();
-    if (!oid) return false;
-    const items = buildItems();
-    const res = await fetch(`/api/orders/${oid}/items`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items }),
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      setBanner(data?.error?.message ?? 'Could not save items');
-      return false;
-    }
-    return true;
+    try {
+      const oid = await ensureOrder();
+      if (!oid) return false;
+      const res = await fetch(`/api/orders/${oid}/items`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: buildItems() }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setBanner(data?.error?.message ?? 'Could not save items');
+        return false;
+      }
+      return true;
+    } catch { setBanner('Could not save your options. Please check your connection and retry.'); return false; }
   }, [buildItems, ensureOrder]);
 
-  const loadQuote = useCallback(async () => {
-    if (!orderId) return;
-    const res = await fetch(`/api/orders/${orderId}/quote`, { cache: 'no-store' });
-    if (res.ok) setQuote(await res.json());
-  }, [orderId]);
+  // The displayed quote must use the same rush setting and shop rate as checkout.
+  useEffect(() => {
+    if (step !== 'checkout' || !orderId) return;
+    const controller = new AbortController();
+    setQuote(null); setQuoteLoading(true);
+    fetch(`/api/orders/${orderId}/quote?rush=${rush ? '1' : '0'}`, { cache: 'no-store', signal: controller.signal })
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.error?.message ?? 'Could not calculate the total.');
+        if (!controller.signal.aborted) setQuote(data);
+      })
+      .catch((err) => { if (!controller.signal.aborted) setBanner(err instanceof Error ? err.message : 'Could not calculate the total.'); })
+      .finally(() => { if (!controller.signal.aborted) setQuoteLoading(false); });
+    return () => controller.abort();
+  }, [step, orderId, rush, quoteRefresh]);
 
-  // refresh quote when arriving at checkout
-  useEffect(() => { if (step === 'checkout') loadQuote(); }, [step, loadQuote, rush]);
-
-  const totalPages = useMemo(() => files.filter((f) => f.state === 'ready').reduce((a, f) => a + (f.page_count ?? 1), 0), [files]);
+  const totalPages = useMemo(() => files.filter((f) => f.state === 'ready').reduce((a, f) => a + (f.page_count ?? 0), 0), [files]);
   const readyCount = files.filter((f) => f.state === 'ready').length;
+  const filesComplete = files.length > 0 && files.every((f) => f.state === 'ready' && Number.isInteger(f.page_count) && (f.page_count ?? 0) >= 1 && (f.page_count ?? 0) <= MAX_DOCUMENT_PAGES);
+  const fileOperations = files.some((f) => f.state === 'uploading' || f.state === 'removing');
   const hasDropboxChooser = !!process.env.NEXT_PUBLIC_DROPBOX_APP_KEY;
 
   const submitPayment = useCallback(async () => {
-    if (!orderId) return;
+    if (!orderId || !quote || checkoutInFlight.current) return;
+    checkoutInFlight.current = true;
     setBusy(true);
     setBanner(null);
     try {
-      const ok = await pushItems();
-      if (!ok) return;
       const contactOk = name.trim().length > 0 && phone.replace(/\D/g, '').length >= 8;
       if (!contactOk) { setBanner('Please enter your name and a valid phone number'); return; }
       const res = await fetch(`/api/orders/${orderId}/pay`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ method, customer_name: name.trim(), customer_phone: phone.trim(), customer_email: email.trim(), notes: notes.trim(), rush }),
+        body: JSON.stringify({ method, customer_name: name.trim(), customer_phone: phone.trim(), customer_email: email.trim(), notes: notes.trim(), rush, quote_token: quote.quote_token }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) { setBanner(data?.error?.message ?? 'Could not place order'); return; }
-      if (data.mode === 'cod') {
+      if (!res.ok) {
+        setBanner(data?.error?.message ?? 'Could not place order');
+        if (data?.error?.code === 'quote_changed') { setQuote(null); setQuoteRefresh((value) => value + 1); }
+        return;
+      }
+      if (data.mode === 'cod' || data.mode === 'placed') {
         router.push(`/track/${orderId}`);
         return;
       }
+      if (data.mode !== 'upi' || typeof data.link !== 'string') throw new Error('Invalid checkout response');
       setUpi(data);
       setStep('upi');
       try { setQrDataUrl(await QRCode.toDataURL(data.link, { width: 560, margin: 1, errorCorrectionLevel: 'M' })); } catch { setQrDataUrl(null); }
-      setSecondsLeft(300);
+    } catch {
+      setBanner('Could not complete checkout. Retry with the same details; if you already paid, contact the shop before paying again.');
     } finally {
+      checkoutInFlight.current = false;
       setBusy(false);
     }
-  }, [orderId, pushItems, name, phone, email, notes, method, rush, router]);
-
-  useEffect(() => {
-    if (step !== 'upi') return;
-    const t = setInterval(() => setSecondsLeft((s) => (s > 0 ? s - 1 : 0)), 1000);
-    return () => clearInterval(t);
-  }, [step]);
+  }, [orderId, quote, name, phone, email, notes, method, rush, router]);
 
   const confirmPaid = useCallback(async () => {
     if (!orderId) return;
@@ -272,7 +383,8 @@ export default function OrderWizard() {
       });
       if (res.ok) router.push(`/track/${orderId}`);
       else { const d = await res.json().catch(() => ({})); setBanner(d?.error?.message ?? 'Something went wrong'); }
-    } finally { setBusy(false); }
+    } catch { setBanner('Could not notify the shop. Please retry, or contact the shop if you already paid.'); }
+    finally { setBusy(false); }
   }, [orderId, utr, router]);
 
   /* ---------- render ---------- */
@@ -283,7 +395,7 @@ export default function OrderWizard() {
     <div className="min-h-screen bg-[radial-gradient(1200px_600px_at_50%_-10%,#ffedd5,transparent)]">
       <header className="max-w-lg mx-auto px-4 h-14 flex items-center justify-between no-print">
         {step === 'service' ? <Logo /> : (
-          <button onClick={() => { const prev: Record<Step, Step | null> = { service: null, files: 'service', options: 'files', checkout: 'options', upi: null }; const p = prev[step]; if (p) setStep(p); }} className="p-2 -ml-2 text-neutral-500"><ChevronLeft size={22} /></button>
+          <button disabled={busy} aria-label="Go back" onClick={() => { const prev: Record<Step, Step | null> = { service: null, files: 'service', options: 'files', checkout: 'options', upi: null }; const p = prev[step]; if (p) setStep(p); }} className="p-2 -ml-2 text-neutral-500 disabled:opacity-40"><ChevronLeft size={22} /></button>
         )}
         <span className="text-xs font-semibold text-neutral-500 max-w-[60%] truncate">{shopName}</span>
       </header>
@@ -345,12 +457,19 @@ export default function OrderWizard() {
         {step === 'files' && (
           <section>
             <h1 className="text-2xl font-extrabold tracking-tight">Add your files</h1>
-            <p className="text-sm text-neutral-500 mt-1">PDF, Word or images · max 25 MB each · up to 10 files</p>
+            <p className="text-sm text-neutral-500 mt-1">PDF, Word, JPEG or PNG · max 25 MB each · up to 10 files · images up to 40 megapixels</p>
 
-            <input ref={fileInput} type="file" multiple accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,application/pdf,image/*" className="hidden"
-              onChange={(e) => { Array.from(e.target.files ?? []).forEach(uploadOne); e.target.value = ''; }} />
+            <input ref={fileInput} type="file" multiple accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" className="hidden" disabled={dropboxBusy}
+              onChange={(event) => {
+                const selected = Array.from(event.target.files ?? []);
+                const available = Math.max(0, 10 - files.length);
+                if (selected.length > available) setBanner(`Only ${available} more file(s) can be added.`);
+                else setBanner(null);
+                selected.slice(0, available).forEach((file) => void uploadOne(file));
+                event.target.value = '';
+              }} />
 
-            <button onClick={() => fileInput.current?.click()} className="mt-5 w-full rounded-2xl border-2 border-dashed border-orange-300 bg-orange-50/60 hover:bg-orange-50 transition-colors py-10 grid place-items-center">
+            <button type="button" disabled={dropboxBusy || files.length >= 10} onClick={() => fileInput.current?.click()} className="mt-5 w-full rounded-2xl border-2 border-dashed border-orange-300 bg-orange-50/60 py-10 grid place-items-center transition-colors hover:bg-orange-50 disabled:opacity-50">
               <UploadCloud size={36} className="text-orange-600" />
               <span className="mt-2 font-bold text-orange-900">Tap to upload from device</span>
               <span className="text-xs text-orange-800/60 mt-1">Gallery, Drive downloads, file manager…</span>
@@ -360,39 +479,55 @@ export default function OrderWizard() {
             <div className="mt-3 card p-3">
               <div className="flex items-center gap-2 text-sm font-bold text-neutral-700"><FolderInput size={16} /> Import from Dropbox</div>
               <div className="mt-2 flex gap-2">
-                <input value={dropboxLink} onChange={(e) => setDropboxLink(e.target.value)} placeholder="Paste a Dropbox share link…" className="input h-11 flex-1 text-sm" inputMode="url" />
-                <button onClick={() => importDropbox([dropboxLink.trim()])} disabled={dropboxBusy || !dropboxLink.trim()} className="btn btn-dark h-11 px-4 text-sm">
+                <input value={dropboxLink} onChange={(e) => setDropboxLink(e.target.value)} placeholder="Paste a Dropbox share link…" className="input h-11 min-w-0 flex-1 text-sm" inputMode="url" />
+                <button onClick={() => importDropbox([dropboxLink.trim()])} disabled={dropboxBusy || fileOperations || files.length >= 10 || !dropboxLink.trim()} className="btn btn-dark h-11 px-4 text-sm">
                   {dropboxBusy ? <Loader2 size={16} className="animate-spin" /> : 'Add'}
                 </button>
               </div>
               {hasDropboxChooser && (
-                <button onClick={openDropboxChooser} className="mt-2 text-xs text-blue-700 font-semibold hover:underline flex items-center gap-1"><Link2 size={12} /> Browse my Dropbox…</button>
+                <button disabled={dropboxBusy || fileOperations || files.length >= 10} onClick={openDropboxChooser} className="mt-2 text-xs text-blue-700 font-semibold hover:underline flex items-center gap-1 disabled:opacity-50"><Link2 size={12} /> Browse my Dropbox…</button>
               )}
-              <p className="mt-1.5 text-[11px] text-neutral-400">Link must allow anyone with the link to view — we copy the file to the shop, then it never leaves their counter.</p>
+              <p className="mt-1.5 text-[11px] text-neutral-500">The link must allow viewing. We copy the file into private order storage for your shop.</p>
             </div>
 
             {/* file list */}
             <ul className="mt-4 space-y-2">
               {files.map((f) => (
-                <li key={f.id} className="card px-4 py-3 flex items-center gap-3">
-                  <FileText size={22} className="text-neutral-500 shrink-0" />
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold truncate">{f.name}</div>
-                    <div className="text-[11px] text-neutral-400">
-                      {f.state === 'uploading' && 'Uploading…'}
-                      {f.state === 'ready' && `${f.page_count ?? '?'} page${(f.page_count ?? 1) > 1 ? 's' : ''} · ${f.source === 'dropbox' ? 'from Dropbox' : 'uploaded'}`}
-                      {f.state === 'error' && <span className="text-red-600">{f.error}</span>}
+                <li key={f.id} className="card px-4 py-3">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <FileText size={22} className="mt-0.5 shrink-0 text-neutral-500" />
+                    <div className="min-w-0 flex-1">
+                      <div className="break-all text-sm font-semibold">{f.name}</div>
+                      <div className="text-[11px] text-neutral-500">
+                        {f.state === 'uploading' && 'Uploading…'}
+                        {f.state === 'removing' && 'Removing…'}
+                        {f.state === 'ready' && `${f.page_count === null ? 'Page count needed' : `${f.page_count} page${f.page_count !== 1 ? 's' : ''}`} · ${f.source === 'dropbox' ? 'from Dropbox' : 'uploaded'}`}
+                        {f.state === 'error' && <span role="alert" className="text-red-700">{f.error}</span>}
+                      </div>
                     </div>
+                    {(f.state === 'uploading' || f.state === 'removing') && <Loader2 size={18} className="shrink-0 animate-spin text-orange-600" />}
+                    {f.state === 'ready' && <CheckCircle2 size={18} className="shrink-0 text-green-600" />}
                   </div>
-                  {f.state === 'uploading' && <Loader2 size={18} className="animate-spin text-orange-600 shrink-0" />}
-                  {f.state === 'ready' && <CheckCircle2 size={18} className="text-green-600 shrink-0" />}
-                  <button onClick={() => setFiles((all) => all.filter((x) => x.id !== f.id))} className="p-2 text-neutral-400 hover:text-red-600"><Trash2 size={17} /></button>
+                  {f.state === 'ready' && isWord(f.mime) && <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                    <p>Word cannot be previewed or counted here. Open it in Word and enter the number of pages; the price depends on this count. The shop will verify the layout.</p>
+                    <label className="mt-2 block font-bold">Pages in this Word file
+                      <input type="number" min="1" max={MAX_DOCUMENT_PAGES} value={f.page_count ?? ''} placeholder="Enter page count" className="input mt-1 h-10 text-sm" onChange={(event) => {
+                        const value = Number(event.target.value);
+                        setFiles((all) => all.map((entry) => entry.id === f.id ? { ...entry, page_count: Number.isInteger(value) && value >= 1 && value <= MAX_DOCUMENT_PAGES ? value : null } : entry));
+                      }} />
+                    </label>
+                  </div>}
+                  <div className="mt-2 flex flex-wrap gap-2 pl-8">
+                    {f.state === 'ready' && isPreviewable(f.mime) && <button type="button" onClick={() => setEditingFile(f)} className="btn btn-ghost min-h-9 px-3 text-xs"><Eye size={14} />Preview &amp; edit</button>}
+                    {f.state === 'error' && f.localFile && <button type="button" onClick={() => void uploadOne(f.localFile!, f)} className="btn btn-ghost min-h-9 px-3 text-xs"><RefreshCw size={14} />Retry upload</button>}
+                    {(f.state === 'ready' || f.state === 'error') && <button type="button" onClick={() => void removeFile(f)} className="btn btn-ghost min-h-9 px-3 text-xs text-red-700"><Trash2 size={14} />Remove</button>}
+                  </div>
                 </li>
               ))}
             </ul>
-
-            <button disabled={readyCount === 0} onClick={async () => { const ok = await pushItems(); if (ok) setStep('options'); }} className="btn btn-primary w-full py-4 text-lg mt-6">
-              Continue {readyCount > 0 && `· ${totalPages} page${totalPages !== 1 ? 's' : ''}`}
+            {files.length > 0 && !filesComplete && <p className="mt-3 text-xs text-neutral-600">Finish uploads, remove errors and enter every Word page count before continuing.</p>}
+            <button disabled={!filesComplete || dropboxBusy || busy} onClick={async () => { setBusy(true); try { const ok = await pushItems(); if (ok) setStep('options'); } finally { setBusy(false); } }} className="btn btn-primary w-full py-4 text-lg mt-6">
+              {busy ? 'Saving…' : <>Continue {filesComplete && `· ${totalPages} page${totalPages !== 1 ? 's' : ''}`}</>}
             </button>
           </section>
         )}
@@ -487,7 +622,7 @@ export default function OrderWizard() {
               )}
             </div>
 
-            <button onClick={async () => { const ok = await pushItems(); if (ok) setStep('checkout'); }} className="btn btn-primary w-full py-4 text-lg mt-6">Continue to payment</button>
+            <button disabled={busy} onClick={async () => { setBusy(true); try { const ok = await pushItems(); if (ok) setStep('checkout'); } finally { setBusy(false); } }} className="btn btn-primary w-full py-4 text-lg mt-6">{busy ? 'Saving…' : 'Continue to payment'}</button>
           </section>
         )}
 
@@ -495,18 +630,18 @@ export default function OrderWizard() {
         {step === 'checkout' && (
           <section>
             <h1 className="text-2xl font-extrabold tracking-tight">Almost there</h1>
-            <p className="text-sm text-neutral-500 mt-1">Where do we send the token?</p>
+            <p className="text-sm text-neutral-500 mt-1">Add your contact details for the shop. Your token appears on the tracking page.</p>
 
-            <div className="card mt-4 p-4 space-y-3">
-              <div><label className="label">Your name *</label><input value={name} onChange={(e) => setName(e.target.value)} className="input" placeholder="e.g. Aisha Khan" autoComplete="name" /></div>
-              <div><label className="label">Phone *</label><input value={phone} onChange={(e) => setPhone(e.target.value)} className="input" placeholder="97970 00000" inputMode="numeric" autoComplete="tel" /></div>
-              <div><label className="label">Email (for the receipt)</label><input value={email} onChange={(e) => setEmail(e.target.value)} className="input" placeholder="you@example.com" inputMode="email" type="email" /></div>
-              <div><label className="label">Notes for the shop</label><input value={notes} onChange={(e) => setNotes(e.target.value)} className="input" placeholder="e.g. double-sided, spiral on left edge…" /></div>
-            </div>
+            <fieldset disabled={busy} className="card mt-4 p-4 space-y-3">
+              <div><label className="label">Your name *<input value={name} onChange={(e) => setName(e.target.value)} className="input" placeholder="e.g. Aisha Khan" autoComplete="name" /></label></div>
+              <div><label className="label">Phone *<input value={phone} onChange={(e) => setPhone(e.target.value)} className="input" placeholder="97970 00000" inputMode="numeric" autoComplete="tel" /></label></div>
+              <div><label className="label">Email (optional)<input value={email} onChange={(e) => setEmail(e.target.value)} className="input" placeholder="you@example.com" inputMode="email" type="email" /></label></div>
+              <div><label className="label">Notes for the shop<input value={notes} onChange={(e) => setNotes(e.target.value)} className="input" placeholder="e.g. double-sided, spiral on left edge…" /></label></div>
+            </fieldset>
 
             {/* rush */}
-            <button onClick={() => setRush(!rush)} className={cn('w-full mt-3 flex items-center justify-between rounded-xl border-2 px-4 py-3 text-left', rush ? 'border-orange-600 bg-orange-50' : 'border-neutral-200 bg-white')}>
-              <span><span className="font-semibold text-sm flex items-center gap-1.5"><Zap size={14} className="text-orange-600" />Rush order (+10%)</span><br /><span className="text-[11px] text-neutral-500">Shop prioritises you in the queue</span></span>
+            <button disabled={busy} onClick={() => setRush(!rush)} className={cn('w-full mt-3 flex items-center justify-between rounded-xl border-2 px-4 py-3 text-left disabled:opacity-60', rush ? 'border-orange-600 bg-orange-50' : 'border-neutral-200 bg-white')}>
+              <span><span className="font-semibold text-sm flex items-center gap-1.5"><Zap size={14} className="text-orange-600" />Rush order</span><br /><span className="text-[11px] text-neutral-500">Flag this order as urgent to the shop; any surcharge is shown in the total.</span></span>
               <span className={cn('w-6 h-6 rounded-md border-2 grid place-items-center', rush ? 'bg-orange-600 border-orange-600 text-white' : 'border-neutral-300')}>{rush && '✓'}</span>
             </button>
 
@@ -516,13 +651,13 @@ export default function OrderWizard() {
                 <div className="flex items-center justify-between font-bold"><span>Order summary</span><span>{readyCount} file{readyCount !== 1 ? 's' : ''}</span></div>
                 <ul className="mt-2 space-y-1 text-neutral-600">
                   {quote.quote.lines.map((l, i) => (
-                    <li key={i} className="flex justify-between gap-4"><span className="truncate">{l.description}</span><span className="tabular-nums">{formatPaise(l.lineTotalPaise)}</span></li>
+                    <li key={i} className="flex justify-between gap-4"><span className="truncate">{l.description}</span><span className="tabular-nums">{formatPaiseExact(l.lineTotalPaise)}</span></li>
                   ))}
                 </ul>
                 <div className="border-t border-neutral-100 mt-2 pt-2 space-y-1 text-neutral-600">
-                  <div className="flex justify-between"><span>Subtotal</span><span className="tabular-nums">{formatPaise(quote.quote.subtotalPaise)}</span></div>
-                  {quote.quote.rushFeePaise > 0 && <div className="flex justify-between"><span>Rush fee</span><span className="tabular-nums">{formatPaise(quote.quote.rushFeePaise)}</span></div>}
-                  <div className="flex justify-between"><span>GST (incl.)</span><span className="tabular-nums">{formatPaise(quote.quote.taxPaise)}</span></div>
+                  <div className="flex justify-between"><span>Subtotal</span><span className="tabular-nums">{formatPaiseExact(quote.quote.subtotalPaise)}</span></div>
+                  {quote.quote.rushFeePaise > 0 && <div className="flex justify-between"><span>Rush fee</span><span className="tabular-nums">{formatPaiseExact(quote.quote.rushFeePaise)}</span></div>}
+                  <div className="flex justify-between"><span>GST</span><span className="tabular-nums">{formatPaiseExact(quote.quote.taxPaise)}</span></div>
                 </div>
                 <div className="border-t border-neutral-200 mt-2 pt-2 flex justify-between items-baseline">
                   <span className="font-extrabold">Total payable</span>
@@ -531,16 +666,18 @@ export default function OrderWizard() {
               </div>
             )}
 
+            {quoteLoading && <p role="status" className="mt-3 text-center text-sm text-neutral-500">Calculating your total…</p>}
+            {!quoteLoading && !quote && <button type="button" disabled={busy} onClick={() => setQuoteRefresh((value) => value + 1)} className="btn btn-ghost mt-3 w-full min-h-11 text-sm">Retry total</button>}
             {/* method tabs */}
             <div className="grid grid-cols-2 gap-2 mt-3">
               {(['upi', 'cod'] as const).map((m) => (
-                <button key={m} onClick={() => setMethod(m)} className={cn('h-12 rounded-xl border-2 font-bold text-sm flex items-center justify-center gap-2', method === m ? 'border-orange-600 bg-orange-50 text-orange-900' : 'border-neutral-200 bg-white')}>
+                <button key={m} disabled={busy} onClick={() => setMethod(m)} className={cn('h-12 rounded-xl border-2 font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-60', method === m ? 'border-orange-600 bg-orange-50 text-orange-900' : 'border-neutral-200 bg-white')}>
                   {m === 'upi' ? <><Wallet size={16} /> UPI · Pay now</> : <><Banknote size={16} /> Cash at counter</>}
                 </button>
               ))}
             </div>
 
-            <button disabled={busy} onClick={submitPayment} className="btn btn-primary w-full py-4 text-lg mt-4">
+            <button disabled={busy || quoteLoading || !quote} onClick={submitPayment} className="btn btn-primary w-full py-4 text-lg mt-4">
               {busy ? <Loader2 size={20} className="animate-spin" /> : method === 'upi' ? 'Proceed to pay' : 'Place order (Cash on collection)'}
             </button>
             <p className="mt-2 text-center text-[11px] text-neutral-400 flex items-center justify-center gap-1"><ShieldCheck size={12} /> Payment goes directly to the shop’s UPI · Printly never holds your money</p>
@@ -556,11 +693,7 @@ export default function OrderWizard() {
                 <div className="mt-1 text-sm text-neutral-300">Paying to</div>
                 <div className="text-xl font-extrabold tracking-tight">{upi.shop_name}</div>
                 <div className="mt-3 text-5xl font-black tabular-nums tracking-tight">₹{(upi.total_paise / 100).toFixed(2)}</div>
-                <div className="mt-1 text-[11px] text-neutral-500">Amount locked for this order · cannot be changed</div>
-                <div className="absolute top-4 right-4 text-right">
-                  <div className="text-[10px] text-neutral-500 uppercase">Expires</div>
-                  <div className="font-mono font-bold text-orange-400">{String(Math.floor(secondsLeft / 60)).padStart(2, '0')}:{String(secondsLeft % 60).padStart(2, '0')}</div>
-                </div>
+                <div className="mt-1 text-[11px] text-neutral-500">Check this amount in your UPI app before paying</div>
               </div>
 
               <div className="bg-white px-6 py-6 text-center border-x border-neutral-100">
@@ -587,10 +720,12 @@ export default function OrderWizard() {
                 <p className="mt-2 text-center text-[10px] text-neutral-400">The shop confirms your payment, then your order enters the print queue. Keep this screen open.</p>
               </div>
             </div>
-            <button onClick={() => router.push(`/track/${orderId}`)} className="w-full text-center text-sm text-neutral-500 mt-4 hover:underline">I paid — take me to tracking</button>
+            <button disabled={busy} onClick={() => router.push(`/track/${orderId}`)} className="w-full text-center text-sm text-neutral-500 mt-4 hover:underline disabled:opacity-50">Go to tracking without marking payment</button>
           </section>
         )}
       </main>
+      {editingFile && orderId && <DocumentEditor url={`/api/orders/${orderId}/files/${editingFile.id}`} mime={editingFile.mime} name={editingFile.name}
+        onClose={() => setEditingFile(null)} onSave={(edited) => saveEditedFile(editingFile, edited)} />}
     </div>
   );
 }

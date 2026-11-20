@@ -36,7 +36,7 @@ export default function HomePage() {
           </div>
           <div className="mt-6 flex items-center gap-4 text-sm text-neutral-500">
             <span className="flex items-center gap-1.5"><Star size={15} className="fill-amber-400 text-amber-400" /> 4.6 (128 ratings)</span>
-            <span className="flex items-center gap-1.5"><ShieldCheck size={15} /> Files deleted after 30 days</span>
+            <span className="flex items-center gap-1.5"><ShieldCheck size={15} /> Files sent securely to your shop</span>
           </div>
         </div>
 
@@ -76,7 +76,7 @@ export default function HomePage() {
             {[
               { icon: QrCode, step: '1', title: 'Scan the shop QR', body: 'On the window, at the counter, or on the receipt. Opens instantly in your browser.' },
               { icon: UploadCloud, step: '2', title: 'Upload & choose options', body: 'PDF, DOC or images. Copies, colour, paper size, binding. Instant price with GST — no surprises.' },
-              { icon: Banknote, step: '3', title: 'Pay & collect', body: 'Pay the shop directly via UPI (or cash). Get a token like A-023. We ping you when it’s ready.' },
+              { icon: Banknote, step: '3', title: 'Pay & collect', body: 'Pay the shop directly via UPI (or cash). Get a token like A-023 and track when it is ready.' },
             ].map(({ icon: Icon, step, title, body }) => (
               <div key={step} className="rounded-2xl bg-neutral-900 border border-neutral-800 p-6">
                 <div className="flex items-center gap-3">
@@ -118,7 +118,7 @@ export default function HomePage() {
           <h2 className="text-3xl font-extrabold tracking-tight">Run your shop like magic.</h2>
           <p className="mt-3 text-neutral-600">No hardware, no new apps to learn. Orders land in one queue, customers pay you directly on UPI (₹0 fees), and you get the file, the token and the spec — all in one screen.</p>
           <ul className="mt-5 space-y-2.5 text-[15px]">
-            {['Zero commission on offline/cash sales', 'Your own UPI QR — money comes straight to your account', 'File arrives before the customer does', 'Works on any phone or the shop PC'].map((t) => (
+            {['See order totals and platform fees in your dashboard', 'Your own UPI QR — money comes straight to your account', 'File arrives before the customer does', 'Works on any phone or the shop PC'].map((t) => (
               <li key={t} className="flex items-start gap-2"><CheckCircle2 size={18} className="text-green-600 mt-0.5 shrink-0" />{t}</li>
             ))}
           </ul>

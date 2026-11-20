@@ -1,13 +1,22 @@
-import { createAdminSupabase } from '@/lib/supabase';
 import { jsonOk, jsonError } from '@/lib/api';
 import { computeQuote, PricingError } from '@/lib/pricing';
 import { loadOrderWithRates } from '@/lib/order-quote';
+import { requestHasDraftAccess } from '@/lib/draft-access';
+import { quoteToken } from '@/lib/quote-token';
 
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const loaded = await loadOrderWithRates(id);
+  if (!requestHasDraftAccess(req, id)) return jsonError(403, 'draft_session', 'Your order session expired. Please start a new order.');
+  let loaded;
+  try { loaded = await loadOrderWithRates(id); }
+  catch { return jsonError(503, 'db', 'Could not calculate the total. Please retry.'); }
   if (!loaded) return jsonError(404, 'order_not_found', 'Order not found');
   const { order, items, card, gstBps, rushBps } = loaded;
+  if (order.status !== 'draft' || order.payment_method) return jsonError(409, 'order_locked', 'The order has already entered checkout.');
+  if (!items.length) return jsonError(422, 'empty_order', 'Add at least one item.');
+  const requestedRush = new URL(req.url).searchParams.get('rush');
+  const rush = requestedRush === '1' ? true : requestedRush === '0' ? false : !!order.rush;
+  const rushBpsShop = (order as unknown as { shops: { rush_surcharge_bps: number | null } }).shops?.rush_surcharge_bps ?? rushBps;
 
   try {
     const quote = computeQuote(
@@ -16,9 +25,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         paper_gsm: i.paper_gsm, option: i.option, copies: i.copies, pages: i.pages,
       })),
       card,
-      { rush: order.rush, rushBps, gstBps },
+      { rush, rushBps: rushBpsShop, gstBps },
     );
-    return jsonOk({ quote, rush: order.rush });
+    const version = Number(order.draft_version);
+    if (!Number.isSafeInteger(version) || version < 0) return jsonError(503, 'db', 'Could not verify the order. Please retry.');
+    return jsonOk({ quote, rush, quote_token: quoteToken(id, version, rush, quote) }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (e) {
     if (e instanceof PricingError) return jsonError(422, 'pricing', e.message);
     throw e;

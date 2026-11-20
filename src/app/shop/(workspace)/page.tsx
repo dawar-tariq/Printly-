@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   Loader2, CheckCircle2, XCircle, Printer, PackageCheck, Package, Banknote, Clock,
   AlertCircle, User, ChevronRight, Zap, IndianRupee, RefreshCw,
@@ -17,6 +18,9 @@ interface OrderCard {
 }
 
 export default function ShopBoardPage() {
+  const router = useRouter();
+  const [lookup, setLookup] = useState('');
+  const [lookupError, setLookupError] = useState<string | null>(null);
   const [confirmQueue, setConfirmQueue] = useState<OrderCard[]>([]);
   const [lanes, setLanes] = useState<{ queued: OrderCard[]; printing: OrderCard[]; ready: OrderCard[] }>({ queued: [], printing: [], ready: [] });
   const [completedToday, setCompletedToday] = useState(0);
@@ -94,14 +98,14 @@ export default function ShopBoardPage() {
         {orders.map((o) => (
           <div key={o.id} className="bg-white rounded-xl border border-neutral-200 p-3 shadow-sm">
             <div className="flex items-start justify-between gap-2">
-              <Link href={`/shop/orders/${o.id}`} className="group">
+              <Link href={`/shop/orders/${o.id}`} className="group min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="text-2xl font-black tracking-tight text-neutral-900 group-hover:text-orange-700">{o.token ?? '—'}</span>
                   {o.rush && <span className="chip bg-red-100 text-red-700"><Zap size={10} />RUSH</span>}
                 </div>
-                <div className="mt-0.5 text-[11px] text-neutral-500 flex items-center gap-1"><User size={10} />{o.customer_name || 'Walk-in'} · {o.customer_phone}</div>
+                <div className="mt-0.5 text-[11px] text-neutral-500 flex min-w-0 items-center gap-1"><User size={10} className="shrink-0" /><span className="min-w-0 truncate">{o.customer_name || 'Walk-in'} · {o.customer_phone}</span></div>
               </Link>
-              <div className="text-right">
+              <div className="text-right shrink-0">
                 <div className="text-sm font-extrabold tabular-nums">{formatPaise(o.total_paise)}</div>
                 <span className={cn('chip mt-0.5', o.payment_method === 'cod' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800')}>{o.payment_method === 'cod' ? 'COD' : 'UPI ✓'}</span>
               </div>
@@ -124,6 +128,23 @@ export default function ShopBoardPage() {
 
   return (
     <div>
+      <details className="card mb-4 p-3">
+        <summary className="cursor-pointer text-sm font-bold text-neutral-700">Find an order with its tracking link</summary>
+        <form className="mt-3 flex flex-wrap gap-2" onSubmit={(event) => {
+          event.preventDefault();
+          const match = lookup.trim().match(/(?:^|\/track\/)([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(?=\/?(?:$|[?#]))/i);
+          if (!match) { setLookupError('Enter the full tracking link or order ID.'); return; }
+          setLookupError(null);
+          router.push(`/shop/orders/${match[1]}`);
+        }}>
+          <label className="min-w-0 flex-1 basis-48 text-xs font-semibold text-neutral-600">Tracking link or order ID
+            <input value={lookup} onChange={(event) => setLookup(event.target.value)} maxLength={2048} className="input mt-1 w-full text-sm" placeholder="Paste the customer’s tracking link" />
+          </label>
+          <button type="submit" className="btn btn-ghost min-h-10 self-end px-4 text-sm">Find order</button>
+          {lookupError && <p role="alert" className="w-full text-xs text-red-700">{lookupError}</p>}
+        </form>
+        <p className="mt-2 text-xs text-neutral-500">Only orders for your shop can be opened.</p>
+      </details>
       {/* Awaiting payment confirmation */}
       {confirmQueue.length > 0 && (
         <section className="rounded-2xl border-2 border-amber-400 bg-amber-50 overflow-hidden mb-4">
@@ -131,9 +152,9 @@ export default function ShopBoardPage() {
             <h2 className="text-xs font-extrabold uppercase tracking-widest text-amber-900 flex items-center gap-2"><AlertCircle size={14} />Payment confirmation ({confirmQueue.length})</h2>
             <button onClick={load} className="p-1.5 text-amber-800 hover:bg-amber-100 rounded-lg"><RefreshCw size={15} /></button>
           </div>
-          <div className="p-2 grid gap-2 md:grid-cols-2">
+          <div className="p-2 grid min-w-0 grid-cols-1 gap-2 md:grid-cols-2">
             {confirmQueue.map((o) => (
-              <div key={o.id} className="bg-white rounded-xl border border-amber-200 p-3">
+              <div key={o.id} className="min-w-0 bg-white rounded-xl border border-amber-200 p-3">
                 <div className="flex items-start justify-between gap-2">
                   <Link href={`/shop/orders/${o.id}`} className="min-w-0">
                     <div className="text-[11px] font-bold text-neutral-500">ORDER #{o.id.slice(0, 8).toUpperCase()}</div>
@@ -150,11 +171,12 @@ export default function ShopBoardPage() {
                     value={utrEdit[o.id] ?? o.utr ?? ''}
                     onChange={(e) => setUtrEdit((m) => ({ ...m, [o.id]: e.target.value }))}
                     placeholder="UTR / ref no. (optional)"
-                    className="input h-9 text-xs font-mono flex-1"
+                    className="input h-9 min-w-0 text-xs font-mono flex-1"
                   />
                 </div>
+                {o.payment_status === 'pending' && <p className="mt-2 text-xs text-amber-900">Waiting for the customer to mark the payment as sent. If they contacted you, open the order to record their report.</p>}
                 <div className="mt-2 flex items-center gap-2">
-                  <button disabled={busyId === o.id} onClick={() => confirmPayment(o.id, 'confirm')} className="btn btn-primary h-9 px-4 text-xs flex-1">
+                  <button disabled={busyId === o.id || o.payment_status !== 'submitted'} onClick={() => confirmPayment(o.id, 'confirm')} className="btn btn-primary h-9 px-4 text-xs flex-1">
                     {busyId === o.id ? <Loader2 size={14} className="animate-spin" /> : <><CheckCircle2 size={14} /> Payment received</>}
                   </button>
                   <button disabled={busyId === o.id} onClick={() => confirmPayment(o.id, 'reject')} className="btn btn-ghost h-9 px-3 text-xs text-red-700"><XCircle size={14} />Not received</button>

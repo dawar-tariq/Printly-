@@ -190,7 +190,7 @@ export default function ShopSignupPage() {
 
   return (
     <div className="min-h-screen bg-[radial-gradient(1000px_500px_at_50%_-10%,#ffedd5,transparent)]">
-      <header className="max-w-3xl mx-auto px-4 h-14 flex items-center"><Logo /></header>
+      <header className="max-w-3xl mx-auto px-4 min-h-14 flex items-center justify-between gap-3"><Logo /><Link href="/login" aria-label="Already have a shop? Sign in" className="btn btn-dark h-10 shrink-0 px-4 text-sm"><span className="hidden sm:inline">Already have a shop?</span>Sign in</Link></header>
       <main className="max-w-3xl mx-auto px-4 pb-16">
         <div className="flex items-center gap-3 mt-2">
           <span className="w-11 h-11 rounded-2xl bg-orange-100 text-orange-700 grid place-items-center"><Store size={22} /></span>
@@ -207,7 +207,7 @@ export default function ShopSignupPage() {
             const active = i === step;
             const complete = i < step;
             return (
-              <li key={s.key} className={cn('rounded-2xl border p-3 text-center transition-colors', active ? 'border-orange-300 bg-orange-50' : complete ? 'border-green-200 bg-green-50' : 'border-neutral-200 bg-white')}>
+              <li key={s.key} className={cn('min-w-0 rounded-2xl border px-1 py-3 sm:p-3 text-center transition-colors', active ? 'border-orange-300 bg-orange-50' : complete ? 'border-green-200 bg-green-50' : 'border-neutral-200 bg-white')}>
                 <span className={cn('mx-auto w-8 h-8 rounded-full grid place-items-center', active ? 'bg-orange-600 text-white' : complete ? 'bg-green-600 text-white' : 'bg-neutral-100 text-neutral-500')}>
                   {complete ? <Check size={15} /> : <Icon size={15} />}
                 </span>

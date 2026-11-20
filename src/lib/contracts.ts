@@ -127,5 +127,5 @@ export const statusTransitionInput = z.object({
   to: z.enum(['printing', 'ready', 'collected', 'queued', 'cancelled']),
   note: z.string().max(300).optional(),
 });
-export const confirmPaymentInput = z.object({ action: z.enum(['confirm', 'reject']), utr: z.string().max(40).optional() });
+export const confirmPaymentInput = z.object({ action: z.enum(['confirm', 'reject', 'report']), utr: z.string().max(40).optional() });
 export const statusActionNote = z.object({ note: z.string().max(300).optional() });

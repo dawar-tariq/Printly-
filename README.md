@@ -6,8 +6,12 @@ Printly is a Next.js and Supabase application for customer print orders, shop op
 
 1. Install dependencies with `pnpm install`.
 2. Copy `.env.example` to `.env.local` and configure the Supabase URL, anon key, service-role key, and site URL. The service-role key is server-only; never commit it or expose it in the browser.
-3. Apply the SQL migrations in `supabase/migrations` in order, including `0007`–`0009` for shop identities, name-proof review, and private shop columns.
+3. Apply all SQL migrations in `supabase/migrations` in order, including `0007`–`0009` for shop identities and privacy and `0010` for transactional draft, pricing and payment safeguards. The new APIs depend on `0010` and are not compatible with the old schema.
 4. Run `pnpm dev`. Checks: `pnpm typecheck`, `pnpm test`, and `pnpm build`.
+
+### Production rollout of `0010`
+
+Use a planned maintenance window and a verified database backup. Stop new checkouts, apply `0010` transactionally, deploy the matching application, and verify customer checkout and shop payment confirmation before reopening. Do not leave the old code running against the new schema or deploy the new code against the old schema. Customers with pre-upgrade drafts must restart them; a customer who already sent a UPI payment should **not** pay again. If their old browser session cannot report the payment, the shop can find the order using its tracking link, record the customer's report, then independently verify and confirm the transfer.
 
 ## Shop QR standee
 
@@ -27,3 +31,16 @@ Print on A4 portrait at actual size (100%), with browser headers and footers dis
 - Names are compared without regard to case or repeated spaces. A unique name needs no name proof. An existing name requires a shop photo or a GSTIN in the correct format, and stays paused pending an administrator's review. A GSTIN format check does not establish ownership or registration. Photos are stored in the private `shop-name-proofs` bucket, accessible to administrators only. Owners can replace evidence in Settings if changes are requested.
 - Demo credentials in the historical seed are publicly known and are suitable only for isolated development. Change a seeded admin password in **Admin → Settings** and a seeded shop password in **Shop → Settings & QR** before using a shared deployment. Provision real accounts before real-world use.
 - The current shop application creates email-confirmed accounts without sending a verification email. This bypasses Supabase's email-confirmation setting; implement and configure verified-email onboarding (including production SMTP and redirect URLs) before relying on email address ownership or launching publicly.
+
+## Customer previews and shop printing
+
+- Customers can preview and crop/rotate individual PDF pages or JPEG/PNG images before checkout. Save replaces the file the shop receives; **PDF cropping is not redaction**: cropped-out PDF content can still exist in the file. Do not use it to hide confidential material. Image editing re-encodes the image. Reset restores the current page's unsaved edits; a saved edit cannot be undone unless the original is uploaded again.
+- Files may be up to 25 MiB each, with at most 10 per order; images are limited to 40 megapixels and PDFs to 2,000 pages. Password-protected/unreadable PDFs must be unlocked or repaired before upload. PDF/image page counts are checked against the file. Word cannot be previewed or reliably counted here: customers must enter the page count from Word, and the shop should confirm layout and price before printing.
+- Removing a draft file detaches it and its linked draft items and attempts to delete its storage object. Failed cleanup is recorded for retry, but storage and the database are separate: a delayed signed upload can still leave an orphan after cleanup. Draft operations and previews require a 24-hour, order-scoped, HttpOnly cookie; a tracking link alone does not grant file access. Starting checkout locks file/option edits. Existing drafts created before this change have no draft cookie and must be restarted; placed orders and tracking links are unaffected. Expired drafts also need to be restarted.
+- The shop's **Preview & print** shows the file and its linked customer settings. The browser/OS print dialog supplies printer selection and print preview; the operator must check paper size, copies, colour, sides and physical output. The dialog cannot prove a print succeeded. The optional physical-print check is local to that visit and does not change order status. For PDFs up to 20 pages the no-download print flow prepares raster pages at up to 144 dpi; for finer detail or longer documents, open the PDF in a compatible browser viewer or download it. Browser and printer support varies, especially on mobile; verify with the actual device.
+- Order files are stored in a private Supabase bucket. An automatic draft/30-day file purge and automatic orphan-cleanup job are **not implemented** in this repository; configure and verify retention and orphan cleanup before promising automatic deletion to customers.
+- The tracking page is the source of order updates. The application does not currently send automatic status notifications or email receipts; customers should save their tracking link. From the original browser, they can also report an already-sent UPI payment on that page while their draft session is valid. If their session has expired, the shop can find the order by tracking link and record the customer's report; this is not payment confirmation, and staff must still verify the transfer separately.
+
+## Session behavior
+
+Supabase's cookie-backed session persists across ordinary browser restarts and refreshes while valid. Signed-in linked shop staff visiting the homepage, shop sign-in, or shop application are directed to their workspace; customer shop links and tracking remain public. Private browsing, cleared/blocked cookies, explicit sign-out, revoked/expired refresh tokens or server-side session policies can still require sign-in. Sign out on shared devices.

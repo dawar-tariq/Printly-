@@ -2,7 +2,7 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { createServerSupabase } from '@/lib/supabase';
 import { Logo } from '@/components/Logo';
-import { Star, MapPin, Clock, Printer, FileText, ScanLine, BookOpen, Layers, Copy, ArrowRight, ShieldCheck } from 'lucide-react';
+import { Star, MapPin, Phone, Clock, Printer, FileText, ScanLine, BookOpen, Layers, Copy, ArrowRight, ShieldCheck } from 'lucide-react';
 import { formatPaise } from '@/lib/format';
 import { findPublicShop } from '@/lib/public-shop';
 import { publicShopPath } from '@/lib/shop-identity';
@@ -56,11 +56,12 @@ export default async function ShopLandingPage({ params }: { params: Promise<{ sl
         {/* Shop card */}
         <section className="card p-5 mt-2">
           <div className="flex items-start justify-between gap-3">
-            <div>
-              <h1 className="text-2xl font-extrabold tracking-tight">{shop.name}</h1>
+            <div className="min-w-0">
+              <h1 className="break-words [overflow-wrap:anywhere] text-2xl font-extrabold tracking-tight">{shop.name}</h1>
               <p className="mt-1 text-xs font-semibold text-neutral-500">Shop code <span className="font-mono">{shop.short_code}</span></p>
-              <p className="mt-1 text-sm text-neutral-500 flex items-center gap-1.5"><MapPin size={14} />{shop.address}{shop.city ? `, ${shop.city}` : ''}</p>
-              <p className="mt-1 text-sm text-neutral-500 flex items-center gap-1.5"><Clock size={14} />Avg. ready in ~{shop.eta_minutes} min</p>
+              <p className="mt-1 flex items-start gap-1.5 text-sm text-neutral-500"><MapPin size={14} className="mt-1 shrink-0" /><span className="break-words [overflow-wrap:anywhere]">{shop.address}{shop.city ? `, ${shop.city}` : ''}</span></p>
+              {shop.phone && <a href={`tel:${shop.phone.replace(/[^\d+]/g, '')}`} className="mt-1 flex items-center gap-1.5 break-all text-sm font-semibold text-orange-800 hover:underline"><Phone size={14} className="shrink-0" />{shop.phone}</a>}
+              <p className="mt-1 text-sm text-neutral-500 flex items-center gap-1.5"><Clock size={14} className="shrink-0" />Estimated ready time: ~{shop.eta_minutes} min</p>
             </div>
             <div className="text-right shrink-0">
               <div className="flex items-center gap-1 justify-end font-bold"><Star size={16} className="fill-amber-400 text-amber-400" />{shop.rating_avg || '—'}</div>

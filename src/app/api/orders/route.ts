@@ -2,6 +2,7 @@ import { createAdminSupabase } from '@/lib/supabase';
 import { jsonOk, jsonError } from '@/lib/api';
 import { createOrderInput } from '@/lib/contracts';
 import { findPublicShop } from '@/lib/public-shop';
+import { setDraftCookie } from '@/lib/draft-access';
 
 export async function POST(req: Request) {
   const parsed = createOrderInput.safeParse(await req.json().catch(() => ({})));
@@ -18,5 +19,7 @@ export async function POST(req: Request) {
     .select('id')
     .single();
   if (error) return jsonError(500, 'db', error.message);
-  return jsonOk({ order_id: order.id, shop_id: shop.id });
+  const response = jsonOk({ order_id: order.id, shop_id: shop.id });
+  setDraftCookie(response, order.id);
+  return response;
 }
