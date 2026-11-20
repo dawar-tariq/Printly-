@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Loader2, Save, Plus, Trash2, QrCode, Download, CheckCircle2, Store, Wallet, Zap, Info,
+  Loader2, Save, Plus, Trash2, QrCode, Download, CheckCircle2, Store, Wallet, Zap, Info, FileText,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { publicShopPath } from '@/lib/shop-identity';
@@ -168,7 +168,10 @@ export default function ShopSettingsPage() {
           <div className="mt-2 text-xs text-neutral-600">Shop code: <b className="font-mono">{shortCode}</b></div>
           <a href={publicShopPath(shortCode)} className="mt-1 block text-xs font-mono text-orange-700 hover:underline" target="_blank" rel="noreferrer">{publicShopPath(shortCode)}</a>
           <p className="mt-1 text-[11px] text-neutral-500">This permanent code keeps your link separate, even if another shop has the same name.</p>
-          <a href="/api/shop/qr?download=1" className="btn btn-dark h-10 px-4 mt-3 inline-flex text-sm"><Download size={15} />Download PNG</a>
+          <div className="mt-3 flex flex-wrap justify-center gap-2 sm:justify-start">
+            <a href="/api/shop/qr?download=1" className="btn btn-dark h-10 px-4 text-sm"><Download size={15} />Download PNG</a>
+            <a href="/shop/standee" className="btn btn-primary h-10 px-4 text-sm"><FileText size={15} />Create A4 standee</a>
+          </div>
         </div>
       </section>
 

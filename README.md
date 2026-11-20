@@ -9,6 +9,16 @@ Printly is a Next.js and Supabase application for customer print orders, shop op
 3. Apply the SQL migrations in `supabase/migrations` in order, including `0007`–`0009` for shop identities, name-proof review, and private shop columns.
 4. Run `pnpm dev`. Checks: `pnpm typecheck`, `pnpm test`, and `pnpm build`.
 
+## Shop QR standee
+
+Open **Shop → Settings & QR → Create A4 standee**. The workspace uses the signed-in account's linked shop and its owner's saved profile; it does not create another shop or accept a shop ID from the browser. Generate again after editing saved details. If details change between preview and export, the export asks for a fresh preview. Shops that are not active and approved can still prepare the standee, but customers cannot place orders until the shop is active.
+
+The standee QR opens `/s/p-<code>/order` for that shop. Set `NEXT_PUBLIC_SITE_URL` to the canonical site origin (no path, query, or credentials; HTTPS in production); the request's Host header is never used as a fallback. The existing simple QR in Settings remains available and points to the shop landing page. Standee responses are private and uncached.
+
+The preview, one-page vector PDF, 300-dpi PNG and print view come from the same A4 artwork. The PDF embeds fonts for template text; shop and owner names are shaped as vector outlines for consistent complex-script rendering. Bundled fonts cover Latin, Arabic and Devanagari; unsupported characters or names that cannot fit produce a visible error instead of missing glyphs or clipping. Font licences are in `src/assets/standee-fonts/`.
+
+Print on A4 portrait at actual size (100%), with browser headers and footers disabled. Always check the print preview and scan a paper copy with the phones and printer you plan to use. Automated tests decode both shops' generated PNGs and PDF rasters, including simulated grayscale, but do not substitute for physical Android/iPhone and paper tests.
+
 ## Access and shop identity
 
 - Shop sign-in: `/login`. The public shop application is `/shop/signup`.
