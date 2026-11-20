@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { publicShopPath } from '@/lib/shop-identity';
+import { AccountPassword } from '@/components/AccountPassword';
 import { useRouter } from 'next/navigation';
 
 interface RateRow {
@@ -313,6 +314,8 @@ export default function ShopSettingsPage() {
         })}
         <p className="mt-3 text-[10px] text-neutral-400 flex items-center gap-1"><Info size={11} />Empty dims act as “any / default”. Customers see the exact price before paying — round numbers work best.</p>
       </section>
+
+      <AccountPassword portal="shop" />
     </div>
   );
 }
