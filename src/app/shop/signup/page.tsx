@@ -233,7 +233,7 @@ export default function ShopSignupPage() {
               {nameCheck.name === normalizedName && nameCheck.status === 'duplicate' && (
                 <div className="sm:col-span-2 rounded-2xl border border-amber-300 bg-amber-50 p-4" role="status">
                   <p className="font-bold text-sm text-amber-950">Another shop already uses this name</p>
-                  <p className="mt-1 text-xs text-amber-900">You can still apply. Provide either a shop photo here or a GSTIN below. Our team will review it before approval; the format alone does not verify ownership.</p>
+                  <p className="mt-1 text-xs text-amber-900">You can still apply. Provide either a shop photo or a GSTIN. Our team will review it before approval; the format alone does not verify ownership.</p>
                   <label htmlFor="signup-photo" className="label mt-3">Shop photo (JPEG, PNG or WebP, up to 3 MB)</label>
                   <input id="signup-photo" className="input text-sm" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => {
                     const file = event.target.files?.[0] ?? null;
@@ -242,6 +242,8 @@ export default function ShopSignupPage() {
                     } else { setPhoto(file); setError(null); }
                   }} />
                   <p className="mt-1 text-xs text-amber-900">Only the review team can see your photo. No photo is needed if you provide a GSTIN in the correct format.</p>
+                  <label htmlFor="signup-gstin" className="label mt-3">GSTIN (instead of a photo)</label>
+                  <input id="signup-gstin" className="input" value={form.gstin} onChange={set('gstin')} placeholder="01ABCDE1234F1Z5" />
                 </div>
               )}
               <div className="sm:col-span-2"><label className="label">Your name *</label><input className="input" value={form.owner_name} onChange={set('owner_name')} placeholder="Owner / manager name" autoComplete="name" /></div>
@@ -252,7 +254,6 @@ export default function ShopSignupPage() {
               <div className="sm:col-span-2"><label className="label">Shop address *</label><input className="input" value={form.address} onChange={set('address')} placeholder="Shop number, street, landmark" /></div>
               <div><label className="label">City *</label><input className="input" value={form.city} onChange={set('city')} placeholder="Srinagar" /></div>
               <div><label className="label">PIN code</label><input className="input" value={form.pincode} onChange={set('pincode')} placeholder="190001" inputMode="numeric" /></div>
-              <div><label className="label">GSTIN (optional)</label><input className="input" value={form.gstin} onChange={set('gstin')} placeholder="01ABCDE1234F1Z5" /></div>
               <div><label className="label">Your UPI ID</label><input className="input" value={form.upi_id} onChange={set('upi_id')} placeholder="name@okaxis" /></div>
               <p className="sm:col-span-2 text-[11px] text-neutral-500 -mt-1">Customers pay directly to this UPI ID. Printly never touches your money. You can change it anytime in Settings.</p>
             </div>

@@ -24,6 +24,8 @@ describe('name proof in onboarding', () => {
     fillRequired();
     await screen.findByText('This name is available. No name proof is required.');
     expect(screen.queryByLabelText(/Shop photo/)).toBeNull();
+    expect(screen.queryByLabelText(/GSTIN/)).toBeNull();
+    expect(screen.queryByPlaceholderText('01ABCDE1234F1Z5')).toBeNull();
     expect((screen.getByRole('button', { name: /Continue/ }) as HTMLButtonElement).disabled).toBe(false);
   });
 
@@ -34,6 +36,7 @@ describe('name proof in onboarding', () => {
     fillRequired();
     await screen.findByText('Another shop already uses this name');
     expect(screen.getByLabelText(/Shop photo/)).toBeTruthy();
+    expect(screen.getByLabelText(/GSTIN \(instead of a photo\)/)).toBeTruthy();
     const next = screen.getByRole('button', { name: /Continue/ }) as HTMLButtonElement;
     expect(next.disabled).toBe(true);
     fireEvent.change(screen.getByPlaceholderText('01ABCDE1234F1Z5'), { target: { value: 'invalid' } });
