@@ -50,6 +50,26 @@ export const dropboxImportInput = z.object({
   links: z.array(z.string().url().max(2000)).min(1).max(10),
 });
 
+export const SHOP_SERVICES = ['print', 'photocopy', 'scan', 'bind', 'laminate'] as const;
+export const BUSINESS_TYPES = ['digital_printing', 'photocopy', 'stationery', 'internet_cafe', 'other'] as const;
+export const REGISTRATION_TYPES = ['unregistered', 'gstin', 'udyam', 'shop_license', 'other'] as const;
+export const INVENTORY_CATEGORIES = ['paper', 'ink', 'binding', 'laminate', 'other'] as const;
+
+export const inventoryItemInput = z.object({
+  name: z.string().min(1).max(120),
+  category: z.enum(INVENTORY_CATEGORIES).default('other'),
+  qty: z.number().min(0).max(1_000_000).default(0),
+  unit: z.string().min(1).max(30).default('sheets'),
+  low_stock_threshold: z.number().min(0).max(1_000_000).default(100),
+});
+export type InventoryItemInput = z.infer<typeof inventoryItemInput>;
+
+export const businessHoursInput = z.object({
+  open_time: z.string().max(10).optional(),
+  close_time: z.string().max(10).optional(),
+  weekly_off: z.string().max(40).optional(),
+}).optional();
+
 export const shopSignupInput = z.object({
   shop_name: z.string().min(2).max(80),
   owner_name: z.string().min(2).max(80),
@@ -60,7 +80,24 @@ export const shopSignupInput = z.object({
   city: z.string().min(2).max(80),
   gstin: z.string().max(20).optional(),
   upi_id: z.string().max(80).optional(),
+  // --- Onboarding wizard (optional for backwards compatibility) ---
+  business_type: z.enum(BUSINESS_TYPES).optional(),
+  legal_business_name: z.string().max(120).optional(),
+  year_established: z.number().int().min(1900).max(2100).nullable().optional(),
+  staff_count: z.number().int().min(1).max(100).optional(),
+  printer_count: z.number().int().min(0).max(100).optional(),
+  avg_daily_jobs: z.number().int().min(0).max(10000).optional(),
+  printer_details: z.string().max(500).optional(),
+  pincode: z.string().max(10).optional(),
+  alternate_phone: z.string().max(16).optional(),
+  registration_type: z.enum(REGISTRATION_TYPES).optional(),
+  registration_number: z.string().max(40).optional(),
+  business_hours: businessHoursInput,
+  referral_source: z.string().max(80).optional(),
+  services: z.array(z.enum(SHOP_SERVICES)).min(1).max(5).optional(),
+  inventory: z.array(inventoryItemInput).max(30).optional(),
 });
+export type ShopSignupInput = z.infer<typeof shopSignupInput>;
 
 export const settingsInput = z.object({
   name: z.string().min(2).max(80).optional(),

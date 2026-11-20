@@ -34,7 +34,8 @@ function slugify(name: string) {
 export async function POST(req: Request) {
   const parsed = shopSignupInput.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) return jsonError(422, 'validation', parsed.error.issues[0]?.message ?? 'Invalid input');
-  const { shop_name, owner_name, email, password, phone, address, city, gstin, upi_id } = parsed.data;
+  const d = parsed.data;
+  const { shop_name, owner_name, email, password, phone, address, city, gstin, upi_id } = d;
 
   const admin = createAdminSupabase();
 
@@ -66,14 +67,53 @@ export async function POST(req: Request) {
   if (shopErr || !shop) return jsonError(500, 'db', shopErr?.message ?? 'Could not create shop');
 
   await admin.from('shop_staff').insert({ shop_id: shop.id, user_id: userId, role: 'owner' });
+
+  // Services: only the ones the owner picked (default: all five).
+  const ALL_SERVICES = ['print', 'photocopy', 'scan', 'bind', 'laminate'];
+  const chosen = d.services && d.services.length > 0 ? d.services : ALL_SERVICES;
   await admin.from('shop_services').insert(
-    ['print', 'photocopy', 'scan', 'bind', 'laminate'].map((service, i) => ({ shop_id: shop.id, service, enabled: true, display_order: i + 1 })),
+    ALL_SERVICES.map((service, i) => ({ shop_id: shop.id, service, enabled: chosen.includes(service as never), display_order: i + 1 })),
   );
   await admin.from('rate_card').insert(
     DEFAULT_RATES.map(([service, paper_size, color, sides, paper_gsm, option, unit, price_paise]) => ({
       shop_id: shop.id, service, paper_size, color, sides, paper_gsm, option, unit, price_paise,
     })),
   );
+
+  // Structured onboarding details (best-effort: never block signup if the
+  // table is missing on an older deployment).
+  const onboardingRow = {
+    shop_id: shop.id,
+    business_type: d.business_type ?? 'other',
+    legal_business_name: d.legal_business_name || null,
+    year_established: d.year_established ?? null,
+    staff_count: d.staff_count ?? 1,
+    printer_count: d.printer_count ?? 1,
+    avg_daily_jobs: d.avg_daily_jobs ?? 0,
+    printer_details: d.printer_details ?? '',
+    pincode: d.pincode ?? '',
+    alternate_phone: d.alternate_phone || null,
+    registration_type: d.registration_type ?? 'unregistered',
+    registration_number: d.registration_number || null,
+    business_hours: d.business_hours ?? {},
+    referral_source: d.referral_source || null,
+  };
+  await admin.from('shop_onboarding').upsert(onboardingRow, { onConflict: 'shop_id' });
+
+  // Starting inventory submitted during onboarding.
+  const inventory = (d.inventory ?? []).filter((i) => i.name.trim());
+  if (inventory.length > 0) {
+    await admin.from('inventory_items').insert(
+      inventory.map((i) => ({
+        shop_id: shop.id,
+        name: i.name.trim(),
+        category: i.category,
+        qty: i.qty,
+        unit: i.unit || 'sheets',
+        low_stock_threshold: i.low_stock_threshold,
+      })),
+    );
+  }
 
   return jsonOk({ ok: true, slug: shop.slug, message: 'Application received — we will verify and activate your shop within 24–48h' });
 }

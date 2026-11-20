@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { Logo } from '@/components/Logo';
 import { createBrowserSupabase } from '@/lib/supabase-client';
-import { LayoutDashboard, Settings, Boxes, BarChart3, LogOut, Printer, ExternalLink } from 'lucide-react';
+import { LayoutDashboard, Settings, Boxes, BarChart3, LogOut, Printer, ExternalLink, Hourglass, PenLine, Ban } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const TABS = [
@@ -49,7 +49,27 @@ export function ShopShell({ shop, children }: { shop: { id: string; name: string
           })}
         </nav>
       </header>
-      <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4">{children}</main>
+      <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4">
+        {shop.kyc_status === 'pending' && (
+          <div className="mb-4 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex items-start gap-2.5">
+            <Hourglass size={16} className="mt-0.5 shrink-0" />
+            <div><b>Verification in progress.</b> Our team is reviewing your application — usually within 24–48h. You can explore Inventory and Settings meanwhile; orders open once you&apos;re approved.</div>
+          </div>
+        )}
+        {shop.kyc_status === 'changes_requested' && (
+          <div className="mb-4 rounded-2xl border border-sky-300 bg-sky-50 px-4 py-3 text-sm text-sky-900 flex items-start gap-2.5">
+            <PenLine size={16} className="mt-0.5 shrink-0" />
+            <div><b>We need a little more info.</b> Please check Settings / Inventory and update the details our team asked for, then contact support to re-submit.</div>
+          </div>
+        )}
+        {shop.kyc_status === 'rejected' && (
+          <div className="mb-4 rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900 flex items-start gap-2.5">
+            <Ban size={16} className="mt-0.5 shrink-0" />
+            <div><b>Application not approved.</b> Please contact Printly support to understand what&apos;s needed before re-applying.</div>
+          </div>
+        )}
+        {children}
+      </main>
     </div>
   );
 }
