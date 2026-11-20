@@ -133,7 +133,6 @@ export default function HomePage() {
           <div className="flex items-center gap-4">
             <span className="hidden sm:inline">Made for Indian print shops</span>
             <Link href="/login">Shop sign in</Link>
-            <Link href="/admin/login">Admin sign in</Link>
           </div>
         </div>
       </footer>

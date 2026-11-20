@@ -19,8 +19,7 @@ export default async function ShopLayout({ children }: { children: React.ReactNo
           <Store size={40} className="mx-auto text-orange-600" />
           <h1 className="mt-4 text-2xl font-extrabold">No shop linked yet</h1>
           <p className="mt-2 text-sm text-neutral-600">Your account isn’t linked to a shop. If you applied, we’re verifying it — you’ll be notified within 24–48h.</p>
-          {staff.isAdmin && <Link href="/admin" className="btn btn-dark h-11 px-6 mt-5 inline-flex">Open admin console</Link>}
-          {!staff.isAdmin && <Link href="/shop/signup" className="btn btn-primary h-11 px-6 mt-5 inline-flex">Apply for your shop</Link>}
+          <Link href="/shop/signup" className="btn btn-primary h-11 px-6 mt-5 inline-flex">Apply for your shop</Link>
         </div>
       </div>
     );
