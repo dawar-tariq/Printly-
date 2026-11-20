@@ -1,3 +1,4 @@
+import { readJsonBody } from '@/lib/request-body';
 import { z } from 'zod';
 import { getSessionProfile, jsonOk, jsonError } from '@/lib/api';
 import { createAdminSupabase } from '@/lib/supabase';
@@ -22,7 +23,7 @@ const putInput = z.object({
 export async function PUT(req: Request) {
   const session = await getSessionProfile();
   if (!session || session.profile?.role !== 'admin') return jsonError(403, 'forbidden', 'Admin only');
-  const parsed = putInput.safeParse(await req.json().catch(() => ({})));
+  const parsed = putInput.safeParse(await readJsonBody(req));
   if (!parsed.success) return jsonError(422, 'validation', 'Invalid settings');
   const rows = Object.entries(parsed.data)
     .filter((entry): entry is [string, number | boolean] => entry[1] !== undefined)

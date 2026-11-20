@@ -32,6 +32,9 @@ export async function GET(req: Request) {
   }
 
   const { data, error } = await query.limit(100);
-  if (error) return jsonError(500, 'db', error.message);
+  if (error) {
+    console.error('Could not load shop orders:', error.code);
+    return jsonError(503, 'db', 'Could not load orders. Please try again.');
+  }
   return jsonOk({ orders: data ?? [] });
 }

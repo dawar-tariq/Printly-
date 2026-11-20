@@ -1,10 +1,14 @@
+import { readJsonBody } from '@/lib/request-body';
 import { randomUUID } from 'node:crypto';
 import { createAdminSupabase } from '@/lib/supabase';
+import { enforcePublicRateLimit } from '@/lib/rate-limit';
 import { jsonOk, jsonError } from '@/lib/api';
 import { dropboxImportInput } from '@/lib/contracts';
 import { requestHasDraftAccess } from '@/lib/draft-access';
-import { ALLOWED_FILE_MIMES, inspectUploadedFile, MAX_FILE_BYTES, MAX_ORDER_FILES } from '@/lib/upload-files';
+import { ALLOWED_FILE_MIMES, FileValidationError, inspectUploadedFile, MAX_FILE_BYTES, MAX_ORDER_FILES } from '@/lib/upload-files';
 import { discardFileObject } from '@/lib/draft-mutation';
+
+class DropboxImportError extends Error {}
 
 function isDropboxUrl(url: URL) {
   const host = url.hostname.toLowerCase();
@@ -15,27 +19,27 @@ function isDropboxUrl(url: URL) {
 /** Check each redirect, not just the original URL, before requesting it. */
 async function fetchDropbox(raw: string) {
   let url = new URL(raw);
-  if (!isDropboxUrl(url)) throw new Error('Not a Dropbox link');
+  if (!isDropboxUrl(url)) throw new DropboxImportError('Not a Dropbox link');
   url.searchParams.set('dl', '1');
   for (let i = 0; i < 6; i++) {
     const response = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(60_000) });
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get('location');
-      if (!location) throw new Error('Dropbox returned an invalid redirect');
+      if (!location) throw new DropboxImportError('Dropbox returned an invalid redirect');
       url = new URL(location, url);
-      if (!isDropboxUrl(url)) throw new Error('Dropbox link redirected to an unsupported site');
+      if (!isDropboxUrl(url)) throw new DropboxImportError('Dropbox link redirected to an unsupported site');
       continue;
     }
-    if (!response.ok) throw new Error(`Dropbox returned ${response.status}`);
+    if (!response.ok) throw new DropboxImportError(`Dropbox returned ${response.status}`);
     return response;
   }
-  throw new Error('Too many Dropbox redirects');
+  throw new DropboxImportError('Too many Dropbox redirects');
 }
 
 async function readLimited(response: Response) {
   const declared = Number(response.headers.get('content-length') ?? 0);
-  if (declared > MAX_FILE_BYTES) throw new Error('File exceeds 25 MB');
-  if (!response.body) throw new Error('Dropbox returned an empty file');
+  if (declared > MAX_FILE_BYTES) throw new DropboxImportError('File exceeds 25 MB');
+  if (!response.body) throw new DropboxImportError('Dropbox returned an empty file');
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
@@ -44,7 +48,7 @@ async function readLimited(response: Response) {
       const { done, value } = await reader.read();
       if (done) break;
       size += value.length;
-      if (size > MAX_FILE_BYTES) { await reader.cancel(); throw new Error('File exceeds 25 MB'); }
+      if (size > MAX_FILE_BYTES) { await reader.cancel().catch(() => {}); throw new DropboxImportError('File exceeds 25 MB'); }
       chunks.push(value);
     }
   } finally { reader.releaseLock(); }
@@ -59,7 +63,9 @@ const MIME_BY_EXT: Record<string, string> = {
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!requestHasDraftAccess(req, id)) return jsonError(403, 'draft_session', 'Your order session expired. Please start a new order.');
-  const parsed = dropboxImportInput.safeParse(await req.json().catch(() => ({})));
+  const limited = await enforcePublicRateLimit(req, 'dropbox_import');
+  if (limited) return limited;
+  const parsed = dropboxImportInput.safeParse(await readJsonBody(req));
   if (!parsed.success) return jsonError(422, 'validation', 'Provide 1–10 Dropbox links');
   const admin = createAdminSupabase();
   const { data: order } = await admin.from('orders').select('id, shop_id, status, payment_method').eq('id', id).maybeSingle();
@@ -90,12 +96,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       // may have created an object and needs guarded cleanup.
       uploaded = { path, fileId, name, mime, size: info.size, pageCount: info.pages };
       const { error: upErr } = await admin.storage.from('order-files').upload(path, buffer, { contentType: mime, upsert: false });
-      if (upErr) throw new Error('Could not upload the Dropbox file. Please retry.');
+      if (upErr) throw new DropboxImportError('Could not upload the Dropbox file. Please retry.');
       const { error: insErr } = await admin.from('order_files').insert({
         id: fileId, order_id: id, shop_id: order.shop_id, storage_path: path,
         original_name: name, mime, size_bytes: info.size, page_count: info.pages, source: 'dropbox',
       });
-      if (insErr) throw new Error('Could not finish importing the Dropbox file.');
+      if (insErr) throw new DropboxImportError('Could not finish importing the Dropbox file.');
       uploaded = null;
       fileCount++;
       results.push({ link, ok: true, file_id: fileId, page_count: info.pages, name, mime, size: info.size });
@@ -123,7 +129,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           continue;
         }
       }
-      results.push({ link, ok: false, error: e instanceof Error ? e.message : 'Import failed' });
+      const message = e instanceof DropboxImportError || e instanceof FileValidationError
+        ? e.message : 'Could not import the Dropbox file. Please try again.';
+      results.push({ link, ok: false, error: message });
     }
   }
   return jsonOk({ results }, { headers: { 'Cache-Control': 'private, no-store' } });

@@ -1,3 +1,4 @@
+import { readJsonBody } from '@/lib/request-body';
 import { z } from 'zod';
 import { assertStaffOfShop, jsonOk, jsonError } from '@/lib/api';
 import { createAdminSupabase } from '@/lib/supabase';
@@ -12,7 +13,7 @@ const patchInput = z.object({
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const parsed = patchInput.safeParse(await req.json().catch(() => ({})));
+  const parsed = patchInput.safeParse(await readJsonBody(req));
   if (!parsed.success) return jsonError(422, 'validation', 'Invalid patch');
   const admin = createAdminSupabase();
   const { data: item } = await admin.from('inventory_items').select('*').eq('id', id).maybeSingle();
@@ -28,7 +29,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (parsed.data.unit) update.unit = parsed.data.unit;
 
   const { error } = await admin.from('inventory_items').update(update).eq('id', id);
-  if (error) return jsonError(500, 'db', error.message);
+  if (error) {
+    console.error('Could not update inventory:', error.code);
+    return jsonError(503, 'db', 'Could not update inventory. Please try again.');
+  }
   return jsonOk({ ok: true });
 }
 
@@ -40,6 +44,9 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   const staff = await assertStaffOfShop(item.shop_id);
   if (!staff) return jsonError(403, 'forbidden', 'Not your shop');
   const { error } = await admin.from('inventory_items').delete().eq('id', id);
-  if (error) return jsonError(500, 'db', error.message);
+  if (error) {
+    console.error('Could not delete inventory:', error.code);
+    return jsonError(503, 'db', 'Could not delete inventory. Please try again.');
+  }
   return jsonOk({ ok: true });
 }

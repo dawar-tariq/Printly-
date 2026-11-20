@@ -16,7 +16,10 @@ export async function GET(req: Request) {
     .limit(200);
   if (kyc && kyc !== 'all') query = query.eq('kyc_status', kyc);
   const { data, error } = await query;
-  if (error) return jsonError(500, 'db', error.message);
+  if (error) {
+    console.error('Could not load shops for review:', error.code);
+    return jsonError(503, 'db', 'Could not load shops. Please try again.');
+  }
 
   let shops = (data ?? []) as Array<Record<string, unknown> & { id: string; name: string; city: string; phone: string; gstin: string | null; upi_id: string | null; address?: string }>;
   if (q) {

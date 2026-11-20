@@ -9,6 +9,7 @@ const state = vi.hoisted(() => ({
   tombstones: [] as Array<Record<string, unknown>>,
   objects: new Map<string, Uint8Array>(),
   signed: [] as string[], removed: [] as string[], staffShop: '', failStorageRemoval: false,
+  failSignedUpload: false, failSignedDownload: false,
 }));
 
 type Table = 'orders' | 'order_files' | 'order_items' | 'order_file_tombstones';
@@ -76,8 +77,13 @@ const admin = () => ({
     throw new Error(`Unexpected RPC ${name}`);
   },
   storage: { from: () => ({
-    createSignedUrl: async (path: string) => { state.signed.push(path); return { data: { signedUrl: `https://storage.example/${encodeURIComponent(path)}` }, error: null }; },
-    createSignedUploadUrl: async (_path: string) => ({ data: { token: 'upload-token' }, error: null }),
+    createSignedUrl: async (path: string, _seconds: number, options?: unknown) => {
+      if (options && state.failSignedDownload) return { data: null, error: { status: 500, message: 'sensitive storage diagnostic' } };
+      state.signed.push(path); return { data: { signedUrl: `https://storage.example/${encodeURIComponent(path)}` }, error: null };
+    },
+    createSignedUploadUrl: async (_path: string) => state.failSignedUpload
+      ? { data: null, error: { status: 500, message: 'sensitive storage diagnostic' } }
+      : { data: { token: 'upload-token' }, error: null },
     download: async (path: string) => state.objects.has(path) ? { data: new Blob([new Uint8Array(state.objects.get(path)!)]), error: null } : { data: null, error: { message: 'missing' } },
     remove: async (paths: string[]) => {
       if (state.failStorageRemoval) return { error: { message: 'temporary storage failure' } };
@@ -91,6 +97,8 @@ vi.mock('@/lib/api', async (original) => ({ ...(await original<typeof import('@/
 import { GET as customerPreview, DELETE as deleteFile } from './[fileId]/route';
 import { POST as beginEdit, PUT as finishEdit, DELETE as discardEdit } from './[fileId]/edit/route';
 import { GET as ownerPreview } from '@/app/api/shop/orders/[id]/files/[fileId]/preview/route';
+import { GET as ownerDownload } from '@/app/api/shop/orders/[id]/files/[fileId]/download/route';
+import { POST as beginUpload } from './route';
 
 const SECRET = 'integration-test-secret';
 const order1 = '11111111-1111-4111-8111-111111111111';
@@ -116,6 +124,7 @@ beforeEach(async () => {
   state.items = [{ id: 'item1', order_id: order1, file_id: file1 }, { id: 'item2', order_id: order2, file_id: file2 }];
   const pdf = await PDFDocument.create(); pdf.addPage(); const bytes = await pdf.save();
   state.objects = new Map([[path1, bytes], [path2, bytes]]); state.signed = []; state.removed = []; state.staffShop = shop1; state.tombstones = []; state.failStorageRemoval = false;
+  state.failSignedUpload = false; state.failSignedDownload = false;
 });
 
 describe('draft and shop file isolation', () => {
@@ -132,6 +141,15 @@ describe('draft and shop file isolation', () => {
     expect(ownerAllowed.status).toBe(302);
     expect(ownerAllowed.headers.get('cache-control')).toContain('no-store');
   });
+  it('does not expose storage diagnostics when preparing uploads or downloads fails', async () => {
+    state.failSignedUpload = true; state.failSignedDownload = true;
+    const upload = await beginUpload(request('POST', order1, { name: 'file.pdf', mime: 'application/pdf', size: 100 }), { params: Promise.resolve({ id: order1 }) });
+    const download = await ownerDownload(request('GET', null), params(order1, file1));
+    expect(upload.status).toBe(503);
+    expect(download.status).toBe(503);
+    expect(JSON.stringify(await upload.json())).not.toContain('sensitive storage diagnostic');
+    expect(JSON.stringify(await download.json())).not.toContain('sensitive storage diagnostic');
+  });
   it('removes the object, row and linked items only for that draft', async () => {
     expect((await deleteFile(request('DELETE', order2), params(order1, file1))).status).toBe(403);
     expect((await deleteFile(request('DELETE', order1, {}), params(order1, file1))).status).toBe(200);
@@ -139,6 +157,16 @@ describe('draft and shop file isolation', () => {
     expect(state.files.map((file) => file.id)).toEqual([file2]);
     expect(state.items.map((item) => item.id)).toEqual(['item2']);
     expect(state.objects.has(path2)).toBe(true);
+  });
+  it('does not delete a file when the optional request body is malformed or over the limit', async () => {
+    for (const body of ['{', 'null', JSON.stringify({ path: 'x'.repeat(128 * 1024) })]) {
+      const req = new Request('https://printly.test/api', { method: 'DELETE', headers: { cookie: `printly-draft=${makeDraftToken(order1, SECRET)}`, 'content-type': 'application/json' }, body });
+      expect((await deleteFile(req, params(order1, file1))).status).toBe(422);
+      expect(state.files.some((file) => file.id === file1)).toBe(true);
+      expect(state.objects.has(path1)).toBe(true);
+    }
+    // Backwards-compatible bodyless deletion remains possible.
+    expect((await deleteFile(request('DELETE', order1), params(order1, file1))).status).toBe(200);
   });
   it('keeps a cleanup record and retries when storage removal fails', async () => {
     state.failStorageRemoval = true;

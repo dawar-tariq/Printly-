@@ -1,3 +1,4 @@
+import { readJsonBody } from '@/lib/request-body';
 import { assertStaffOfShop, jsonOk, jsonError } from '@/lib/api';
 import { createAdminSupabase } from '@/lib/supabase';
 import { getStaffContext } from '@/lib/api';
@@ -18,14 +19,17 @@ export async function GET(req: Request) {
   const { data, error } = await admin.from('rate_card')
     .select('service, paper_size, color, sides, paper_gsm, option, unit, price_paise')
     .eq('shop_id', shopId).order('service').order('price_paise');
-  if (error) return jsonError(500, 'db', error.message);
+  if (error) {
+    console.error('Could not load the rate card:', error.code);
+    return jsonError(503, 'db', 'Could not load the rate card. Please try again.');
+  }
   return jsonOk({ rows: data ?? [] });
 }
 
 export async function PUT(req: Request) {
   const staff = await getStaffContext();
   if (!staff) return jsonError(401, 'unauthorized', 'Sign in required');
-  const parsed = rateCardPutInput.safeParse(await req.json().catch(() => ({})));
+  const parsed = rateCardPutInput.safeParse(await readJsonBody(req));
   if (!parsed.success) return jsonError(422, 'validation', parsed.error.issues[0]?.message ?? 'Invalid rate card');
 
   const url = new URL(req.url);

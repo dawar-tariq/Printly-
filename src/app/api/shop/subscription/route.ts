@@ -1,3 +1,4 @@
+import { readJsonBody } from '@/lib/request-body';
 import { z } from 'zod';
 import { getStaffContext, jsonError, jsonOk } from '@/lib/api';
 import { subscriptionMutationError } from '@/lib/subscription-server';
@@ -43,7 +44,7 @@ export async function POST(req: Request) {
   if (!ctx) return jsonError(403, 'forbidden', 'Shop sign-in required.');
   const { staff, shopId } = ctx;
   if (staff.subscriptionError) return jsonError(503, 'db', 'Could not check subscription status. Please retry.');
-  const parsed = input.safeParse(await req.json().catch(() => ({})));
+  const parsed = input.safeParse(await readJsonBody(req));
   if (!parsed.success) return jsonError(422, 'validation', 'Invalid subscription request.');
   const body = parsed.data;
   const result = body.action === 'start'

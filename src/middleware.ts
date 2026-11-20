@@ -4,6 +4,30 @@ import { portalDestination, type Portal } from '@/lib/portal-auth';
 import { isAdminApi, isAdminPage, MAINTENANCE_STATUS_PATH } from '@/lib/maintenance';
 import { maintenanceApiResponse, maintenancePageResponse, maintenanceStatusResponse, readMaintenanceState } from '@/lib/maintenance-server';
 
+// Browsers include Origin or Fetch Metadata on cross-site state-changing
+// requests. Never accept a different origin, including a sibling subdomain.
+// Requests without either header remain usable by non-browser API clients;
+// authentication and authorization are still checked by the route itself.
+function isCrossOriginMutation(req: NextRequest, path: string) {
+  if (!(path === '/api' || path.startsWith('/api/')) || ['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return false;
+  const site = req.headers.get('sec-fetch-site')?.toLowerCase();
+  if (site === 'cross-site' || site === 'same-site') return true;
+  const origin = req.headers.get('origin');
+  if (!origin) return false;
+  try {
+    const parsed = new URL(origin);
+    // Next can construct nextUrl using an internal bind address (for example
+    // 0.0.0.0) rather than the public Host. Compare with the incoming Host and
+    // forwarded scheme; the edge/proxy must overwrite forwarded headers.
+    const host = req.headers.get('host') ?? req.nextUrl.host;
+    const forwardedProto = req.headers.get('x-forwarded-proto');
+    const protocol = (forwardedProto ?? req.nextUrl.protocol.slice(0, -1)).toLowerCase();
+    if (!['http', 'https'].includes(protocol) || /[\s,\\/@?#]/.test(host)) return true;
+    const expected = new URL(`${protocol}://${host}`);
+    return expected.username !== '' || expected.password !== '' || parsed.origin !== expected.origin || origin !== parsed.origin;
+  } catch { return true; }
+}
+
 export async function middleware(req: NextRequest) {
   const path = req.nextUrl.pathname.replace(/\/+$/, '') || '/';
   const adminPage = isAdminPage(path);
@@ -18,6 +42,12 @@ export async function middleware(req: NextRequest) {
         ? maintenanceApiResponse(maintenance)
         : maintenancePageResponse(maintenance);
     }
+  }
+
+  if (isCrossOriginMutation(req, path)) {
+    return NextResponse.json({ error: { code: 'cross_origin', message: 'Cross-origin requests are not allowed.' } }, {
+      status: 403, headers: { 'Cache-Control': 'no-store' },
+    });
   }
 
   let res = NextResponse.next({ request: req });

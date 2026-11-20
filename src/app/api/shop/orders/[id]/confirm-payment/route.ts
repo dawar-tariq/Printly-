@@ -1,3 +1,4 @@
+import { readJsonBody } from '@/lib/request-body';
 import { assertStaffOfShop, jsonOk, jsonError } from '@/lib/api';
 import { createAdminSupabase } from '@/lib/supabase';
 import { confirmPaymentInput } from '@/lib/contracts';
@@ -5,7 +6,7 @@ import { draftMutationError } from '@/lib/draft-mutation';
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const parsed = confirmPaymentInput.safeParse(await req.json().catch(() => ({})));
+  const parsed = confirmPaymentInput.safeParse(await readJsonBody(req));
   if (!parsed.success) return jsonError(422, 'validation', 'Invalid action');
 
   const admin = createAdminSupabase();

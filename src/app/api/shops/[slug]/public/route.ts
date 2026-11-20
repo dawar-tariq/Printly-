@@ -7,7 +7,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ slug: s
   const { slug } = await params;
   const supabase = await createServerSupabase();
   const { data: shop, error } = await findPublicShop(supabase, slug);
-  if (error) return jsonError(500, 'db', error.message);
+  if (error) {
+    console.error('Could not load a public shop:', error.code);
+    return jsonError(503, 'db', 'Could not load this shop. Please try again.');
+  }
   if (!shop) return jsonError(404, 'not_found', 'Shop not found');
 
   const subscribed = shop.status === 'active' ? await shopHasSubscription(createAdminSupabase(), shop.id) : false;

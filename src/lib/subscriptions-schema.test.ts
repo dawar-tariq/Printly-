@@ -51,6 +51,8 @@ beforeAll(async () => {
   await db.query("insert into storage.objects(name,bucket_id) values ($1,'order-files'),($2,'order-files'),($3,'order-files')", [`${shop}/${queued}/file.pdf`, `${shop}/${upi}/file.pdf`, `${shop}/${closed}/file.pdf`]);
   await db.exec("insert into public.platform_settings(key,value) values ('commission_bps','800'::jsonb)");
   await db.exec(readFileSync('supabase/migrations/0011_subscriptions.sql', 'utf8'));
+  await db.exec(readFileSync('supabase/migrations/0012_security_hardening.sql', 'utf8'));
+  await db.exec(readFileSync('supabase/migrations/0013_public_abuse_limits.sql', 'utf8'));
 }, 30000);
 afterAll(async () => { await db?.close(); });
 
@@ -72,6 +74,47 @@ describe('subscription migration with the real preceding schema and policies', (
       ]);
       await expect(db.query('select * from public.subscription_plan')).rejects.toThrow(/permission denied/i);
       await expect(db.query("update public.profiles set role='admin' where id=$1", [owner])).rejects.toThrow(/permission denied/i);
+    } finally { await db.exec('reset role'); }
+  });
+  it('keeps tracking IDs in reviews and privileged writes behind the server role', async () => {
+    for (const role of ['anon', 'authenticated']) {
+      await db.exec(`set role ${role}`);
+      try {
+        await expect(db.query('select order_id from public.reviews')).rejects.toThrow(/permission denied/i);
+        await expect(db.query("insert into public.reviews(order_id, shop_id, rating) values ($1,$2,5)", [closed, shop])).rejects.toThrow(/permission denied/i);
+        await expect(db.query("insert into public.disputes(order_id, type, description, status) values ($1,'other','fake resolution','resolved_refund')", [closed])).rejects.toThrow(/permission denied/i);
+        await expect(db.query("update public.platform_settings set value='false'::jsonb")).rejects.toThrow(/permission denied/i);
+        await expect(db.query('select * from public.shop_counters')).rejects.toThrow(/permission denied/i);
+        await expect(db.query('select * from public.get_order_track($1)', [closed])).rejects.toThrow(/permission denied/i);
+      } finally { await db.exec('reset role'); }
+    }
+    await db.exec('set role service_role');
+    try {
+      expect((await db.query('select order_id from public.get_order_track($1)', [closed])).rows).toEqual([{ order_id: closed }]);
+      expect((await db.query('select order_id from public.reviews')).rows).toEqual([]);
+    } finally { await db.exec('reset role'); }
+  });
+  it('enforces distributed public limits atomically and denies clients direct access', async () => {
+    const key = 'a'.repeat(64);
+    for (const role of ['anon', 'authenticated']) {
+      await db.exec(`set role ${role}`);
+      try {
+        await expect(db.query('select * from public.security_rate_limits')).rejects.toThrow(/permission denied/i);
+        await expect(db.query("select public.consume_public_rate_limit('signup',$1)", [key])).rejects.toThrow(/permission denied/i);
+      } finally { await db.exec('reset role'); }
+    }
+    await db.exec('set role service_role');
+    try {
+      for (let i = 0; i < 10; i++) {
+        const { rows } = await db.query<{ result: { allowed: boolean } }>("select public.consume_public_rate_limit('signup',$1) as result", [key]);
+        expect(rows[0].result.allowed).toBe(true);
+      }
+      const blocked = await db.query<{ result: { allowed: boolean; retry_after: number } }>("select public.consume_public_rate_limit('signup',$1) as result", [key]);
+      expect(blocked.rows[0].result.allowed).toBe(false);
+      expect(blocked.rows[0].result.retry_after).toBeGreaterThan(0);
+      expect((await db.query<{ result: { allowed: boolean } }>("select public.consume_public_rate_limit('order_start',$1) as result", [key])).rows[0].result.allowed).toBe(true);
+      await db.query("update public.security_rate_limits set window_ends_at=now()-interval '1 second' where bucket='signup' and client_hash=$1", [key]);
+      expect((await db.query<{ result: { allowed: boolean } }>("select public.consume_public_rate_limit('signup',$1) as result", [key])).rows[0].result.allowed).toBe(true);
     } finally { await db.exec('reset role'); }
   });
   it('keeps permanent access and zero-commission checkout compatible with the full schema', async () => {

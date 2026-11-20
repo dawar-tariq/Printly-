@@ -1,10 +1,18 @@
 import 'server-only';
 import { randomUUID } from 'crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { MAX_JSON_BODY_BYTES, RequestBodyTooLarge, readBodyBytes, readJsonBody } from '@/lib/request-body';
 
 export const PROOF_BUCKET = 'shop-name-proofs';
 export const MAX_PROOF_BYTES = 3 * 1024 * 1024;
 export type PhotoProof = { bytes: Buffer; mime: 'image/jpeg' | 'image/png' | 'image/webp'; extension: 'jpg' | 'png' | 'webp' };
+
+class ProofValidationError extends Error {}
+
+/** Return only our own validation messages, never unexpected parser diagnostics. */
+export function proofSubmissionError(error: unknown): string {
+  return error instanceof ProofValidationError || error instanceof RequestBodyTooLarge ? error.message : 'Invalid form data.';
+}
 
 /** Check file signatures, not just the filename or the browser-provided MIME. */
 export function detectProofImage(bytes: Uint8Array): Pick<PhotoProof, 'mime' | 'extension'> | null {
@@ -16,11 +24,11 @@ export function detectProofImage(bytes: Uint8Array): Pick<PhotoProof, 'mime' | '
 
 export async function readPhotoProof(entry: FormDataEntryValue | null): Promise<PhotoProof | null> {
   if (!entry) return null;
-  if (typeof entry === 'string' || typeof entry.arrayBuffer !== 'function') throw new Error('Select a JPEG, PNG or WebP shop photo.');
-  if (entry.size === 0 || entry.size > MAX_PROOF_BYTES) throw new Error('Shop photo must be smaller than 3 MB.');
+  if (typeof entry === 'string' || typeof entry.arrayBuffer !== 'function') throw new ProofValidationError('Select a JPEG, PNG or WebP shop photo.');
+  if (entry.size === 0 || entry.size > MAX_PROOF_BYTES) throw new ProofValidationError('Shop photo must be smaller than 3 MB.');
   const bytes = Buffer.from(await entry.arrayBuffer());
   const type = detectProofImage(bytes);
-  if (!type || entry.type !== type.mime) throw new Error('Select a valid JPEG, PNG or WebP shop photo.');
+  if (!type || entry.type !== type.mime) throw new ProofValidationError('Select a valid JPEG, PNG or WebP shop photo.');
   return { bytes, ...type };
 }
 
@@ -39,13 +47,16 @@ export async function removePhotoProof(admin: SupabaseClient, path: string | nul
 
 /** Supports existing JSON clients and multipart forms with an optional photo. */
 export async function readProofSubmission(req: Request): Promise<{ payload: unknown; photo: PhotoProof | null }> {
-  if ((req.headers.get('content-type') ?? '').toLowerCase().includes('multipart/form-data')) {
-    const form = await req.formData();
+  const contentType = req.headers.get('content-type') ?? '';
+  if (contentType.toLowerCase().includes('multipart/form-data')) {
+    // Do not let formData() buffer an unbounded body before checking the photo.
+    const bytes = await readBodyBytes(req, MAX_PROOF_BYTES + MAX_JSON_BODY_BYTES);
+    const form = await new Response(bytes as BodyInit, { headers: { 'content-type': contentType } }).formData();
     const value = form.get('payload');
-    if (typeof value !== 'string') throw new Error('Invalid form data.');
+    if (typeof value !== 'string' || new TextEncoder().encode(value).byteLength > MAX_JSON_BODY_BYTES) throw new ProofValidationError('Invalid form data.');
     let payload: unknown;
-    try { payload = JSON.parse(value); } catch { throw new Error('Invalid form data.'); }
+    try { payload = JSON.parse(value); } catch { throw new ProofValidationError('Invalid form data.'); }
     return { payload, photo: await readPhotoProof(form.get('proof')) };
   }
-  return { payload: await req.json(), photo: null };
+  return { payload: await readJsonBody(req), photo: null };
 }

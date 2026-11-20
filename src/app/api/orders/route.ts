@@ -1,4 +1,6 @@
+import { readJsonBody } from '@/lib/request-body';
 import { createAdminSupabase } from '@/lib/supabase';
+import { enforcePublicRateLimit } from '@/lib/rate-limit';
 import { jsonOk, jsonError } from '@/lib/api';
 import { createOrderInput } from '@/lib/contracts';
 import { findPublicShop } from '@/lib/public-shop';
@@ -6,7 +8,9 @@ import { setDraftCookie } from '@/lib/draft-access';
 import { shopHasSubscription } from '@/lib/subscription-server';
 
 export async function POST(req: Request) {
-  const parsed = createOrderInput.safeParse(await req.json().catch(() => ({})));
+  const limited = await enforcePublicRateLimit(req, 'order_start');
+  if (limited) return limited;
+  const parsed = createOrderInput.safeParse(await readJsonBody(req));
   if (!parsed.success) return jsonError(422, 'validation', 'Invalid input');
   const admin = createAdminSupabase();
   const { data: shop, error: shopError } = await findPublicShop(admin, parsed.data.shop_slug);

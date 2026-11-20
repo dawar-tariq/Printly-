@@ -1,3 +1,4 @@
+import { readJsonBody } from '@/lib/request-body';
 import { assertStaffOfShop, getSessionProfile, jsonOk, jsonError } from '@/lib/api';
 import { createAdminSupabase } from '@/lib/supabase';
 import { statusTransitionInput } from '@/lib/contracts';
@@ -10,7 +11,7 @@ const ALLOWED: Record<string, string[]> = {
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const parsed = statusTransitionInput.safeParse(await req.json().catch(() => ({})));
+  const parsed = statusTransitionInput.safeParse(await readJsonBody(req));
   if (!parsed.success) return jsonError(422, 'validation', 'Invalid target status');
 
   const admin = createAdminSupabase();

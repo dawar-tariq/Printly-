@@ -26,11 +26,13 @@ const STEPS = [
 
 export default function TrackPage() {
   const { id } = useParams<{ id: string }>();
-  const [track, setTrack] = useState<Track | null | 'loading'>('loading');
+  const [track, setTrack] = useState<Track | null | 'loading' | 'unavailable'>('loading');
+  const [trackError, setTrackError] = useState(false);
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState('');
   const [reviewed, setReviewed] = useState(false);
   const [reviewBusy, setReviewBusy] = useState(false);
+  const [reviewError, setReviewError] = useState<string | null>(null);
   const [reportUtr, setReportUtr] = useState('');
   const [reportBusy, setReportBusy] = useState(false);
   const [reportMessage, setReportMessage] = useState<string | null>(null);
@@ -38,14 +40,24 @@ export default function TrackPage() {
   const [disputeType, setDisputeType] = useState('other');
   const [disputeText, setDisputeText] = useState('');
   const [disputeDone, setDisputeDone] = useState(false);
+  const [disputeBusy, setDisputeBusy] = useState(false);
+  const [disputeError, setDisputeError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const res = await fetch(`/api/orders/${id}/track`, { cache: 'no-store' });
-    if (res.ok) {
-      const data = await res.json();
-      setTrack(data.track);
-    } else {
-      setTrack(null);
+    try {
+      const res = await fetch(`/api/orders/${id}/track`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        setTrack(data.track); setTrackError(false);
+      } else if (res.status === 404) {
+        setTrack(null); setTrackError(false);
+      } else {
+        setTrack((previous) => previous && typeof previous === 'object' ? previous : 'unavailable');
+        setTrackError(true);
+      }
+    } catch {
+      setTrack((previous) => previous && typeof previous === 'object' ? previous : 'unavailable');
+      setTrackError(true);
     }
   }, [id]);
 
@@ -56,24 +68,38 @@ export default function TrackPage() {
   }, [load]);
 
   const submitReview = async () => {
-    if (rating === 0) return;
-    setReviewBusy(true);
+    if (rating === 0 || reviewBusy) return;
+    setReviewBusy(true); setReviewError(null);
     try {
       const res = await fetch(`/api/orders/${id}/review`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rating, comment }),
       });
-      if (res.ok || res.status === 409) setReviewed(true);
-    } finally { setReviewBusy(false); }
+      if (res.ok) setReviewed(true);
+      else {
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 409 && data?.error?.code === 'already_reviewed') setReviewed(true);
+        else setReviewError(data?.error?.message ?? 'Could not submit your rating. Please try again.');
+      }
+    } catch { setReviewError('Could not submit your rating. Please check your connection and try again.'); }
+    finally { setReviewBusy(false); }
   };
 
   const submitDispute = async () => {
-    if (disputeText.trim().length < 5) return;
-    const res = await fetch('/api/disputes', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ order_id: id, type: disputeType, description: disputeText.trim() }),
-    });
-    if (res.ok) { setDisputeDone(true); setDisputeOpen(false); }
+    if (disputeText.trim().length < 5 || disputeBusy) return;
+    setDisputeBusy(true); setDisputeError(null);
+    try {
+      const res = await fetch('/api/disputes', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order_id: id, type: disputeType, description: disputeText.trim() }),
+      });
+      if (res.ok) { setDisputeDone(true); setDisputeOpen(false); }
+      else {
+        const data = await res.json().catch(() => ({}));
+        setDisputeError(data?.error?.message ?? 'Could not submit your report. Please try again.');
+      }
+    } catch { setDisputeError('Could not submit your report. Please check your connection and try again.'); }
+    finally { setDisputeBusy(false); }
   };
 
   const reportPayment = async () => {
@@ -98,6 +124,17 @@ export default function TrackPage() {
 
   if (track === 'loading') {
     return <div className="min-h-screen grid place-items-center"><Loader2 className="animate-spin text-orange-600" size={32} /></div>;
+  }
+  if (track === 'unavailable') {
+    return (
+      <div className="min-h-screen grid place-items-center px-6 text-center">
+        <div>
+          <h1 className="text-2xl font-extrabold">Tracking is temporarily unavailable</h1>
+          <p className="text-neutral-500 mt-2 text-sm">Please check your connection and try again. Your order may still be in progress.</p>
+          <button type="button" onClick={() => void load()} className="btn btn-dark h-11 px-6 mt-6">Try again</button>
+        </div>
+      </div>
+    );
   }
   if (!track) {
     return (
@@ -126,6 +163,7 @@ export default function TrackPage() {
       </header>
 
       <main className="max-w-lg mx-auto px-4 pb-16">
+        {trackError && <p role="status" className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">Could not refresh the order. The information below may be out of date; we’ll keep trying.</p>}
         {/* Token card */}
         <section className="card mt-2 p-6 text-center">
           <div className="break-words [overflow-wrap:anywhere] text-xs font-bold uppercase tracking-widest text-neutral-400">{track.shop_name}{track.shop_city ? ` · ${track.shop_city}` : ''}</div>
@@ -219,13 +257,14 @@ export default function TrackPage() {
             <h2 className="font-bold">Rate your experience</h2>
             <div className="flex items-center gap-2 mt-2">
               {[1, 2, 3, 4, 5].map((s) => (
-                <button key={s} onClick={() => setRating(s)}>
+                <button key={s} type="button" aria-label={`${s} ${s === 1 ? 'star' : 'stars'}`} aria-pressed={rating === s} onClick={() => setRating(s)}>
                   <Star size={34} className={cn('transition-colors', rating >= s ? 'fill-amber-400 text-amber-400' : 'text-neutral-300')} />
                 </button>
               ))}
             </div>
-            <input value={comment} onChange={(e) => setComment(e.target.value)} className="input mt-3 text-sm" placeholder="Quick feedback for the shop (optional)" />
+            <input aria-label="Feedback for the shop (optional)" maxLength={500} value={comment} onChange={(e) => setComment(e.target.value)} className="input mt-3 text-sm" placeholder="Quick feedback for the shop (optional)" />
             <button onClick={submitReview} disabled={rating === 0 || reviewBusy} className="btn btn-primary h-11 px-6 mt-3">{reviewBusy ? <Loader2 size={17} className="animate-spin" /> : 'Submit rating'}</button>
+            {reviewError && <p role="alert" className="mt-2 text-xs text-red-700">{reviewError}</p>}
           </section>
         )}
         {reviewed && <div className="card mt-4 p-4 text-center text-sm font-semibold text-green-700">Thanks for the feedback!</div>}
@@ -252,8 +291,9 @@ export default function TrackPage() {
               <option value="overcharge">Overcharged</option>
               <option value="other">Something else</option>
             </select>
-            <textarea value={disputeText} onChange={(e) => setDisputeText(e.target.value)} className="input mt-2 min-h-24" placeholder="Describe the issue — the shop and Printly will see this." />
-            <button onClick={submitDispute} disabled={disputeText.trim().length < 5} className="btn btn-dark w-full h-12 mt-3">Submit report</button>
+            <textarea aria-label="Describe the issue" maxLength={1000} value={disputeText} onChange={(e) => setDisputeText(e.target.value)} className="input mt-2 min-h-24" placeholder="Describe the issue — the shop and Printly will see this." />
+            <button onClick={submitDispute} disabled={disputeBusy || disputeText.trim().length < 5} className="btn btn-dark w-full h-12 mt-3">{disputeBusy ? 'Submitting…' : 'Submit report'}</button>
+            {disputeError && <p role="alert" className="mt-2 text-xs text-red-700">{disputeError}</p>}
           </div>
         </div>
       )}

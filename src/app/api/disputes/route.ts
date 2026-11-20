@@ -1,9 +1,13 @@
+import { readJsonBody } from '@/lib/request-body';
 import { createAdminSupabase, createServerSupabase } from '@/lib/supabase';
+import { enforcePublicRateLimit } from '@/lib/rate-limit';
 import { jsonOk, jsonError } from '@/lib/api';
 import { disputeInput } from '@/lib/contracts';
 
 export async function POST(req: Request) {
-  const parsed = disputeInput.safeParse(await req.json().catch(() => ({})));
+  const limited = await enforcePublicRateLimit(req, 'order_feedback');
+  if (limited) return limited;
+  const parsed = disputeInput.safeParse(await readJsonBody(req));
   if (!parsed.success) return jsonError(422, 'validation', 'Invalid dispute');
   const supabase = await createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
@@ -17,6 +21,9 @@ export async function POST(req: Request) {
     type: parsed.data.type,
     description: parsed.data.description,
   }).select('id').single();
-  if (error) return jsonError(500, 'db', error.message);
+  if (error) {
+    console.error('Could not save an order dispute:', error.message);
+    return jsonError(503, 'db', 'Could not submit your report. Please try again.');
+  }
   return jsonOk({ ok: true, dispute_id: data.id });
 }

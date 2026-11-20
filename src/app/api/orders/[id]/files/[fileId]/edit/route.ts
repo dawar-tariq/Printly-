@@ -1,3 +1,4 @@
+import { readJsonBody } from '@/lib/request-body';
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { createAdminSupabase } from '@/lib/supabase';
@@ -34,7 +35,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const { id, fileId } = await params;
   const ctx = await context(req, id, fileId);
   if (ctx.error) return ctx.error;
-  const parsed = z.object({ size: z.number().int().min(1).max(MAX_FILE_BYTES) }).safeParse(await req.json().catch(() => ({})));
+  const parsed = z.object({ size: z.number().int().min(1).max(MAX_FILE_BYTES) }).safeParse(await readJsonBody(req));
   if (!parsed.success) return jsonError(422, 'validation', 'Edited file must be no larger than 25 MB.');
   const { admin, order, file } = ctx;
   const ext = file.mime === PDF_MIME ? 'pdf' : file.mime === 'image/png' ? 'png' : 'jpg';
@@ -49,7 +50,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
   const ctx = await context(req, id, fileId);
   if (ctx.error) return ctx.error;
   const { admin, order, file } = ctx;
-  const parsed = z.object({ path: z.string().max(500), revision: z.string().regex(/^[0-9a-f]{64}$/) }).safeParse(await req.json().catch(() => ({})));
+  const parsed = z.object({ path: z.string().max(500), revision: z.string().regex(/^[0-9a-f]{64}$/) }).safeParse(await readJsonBody(req));
   if (!parsed.success || !validEditPath(parsed.data.path, order.shop_id, id, fileId, file.mime)) return jsonError(422, 'validation', 'Invalid edited file.');
   const { path, revision } = parsed.data;
   // Retrying the same save after a lost response is harmless; also retry any
@@ -90,7 +91,7 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   const admin = createAdminSupabase();
   const { data: order } = await admin.from('orders').select('id, shop_id').eq('id', id).maybeSingle();
   if (!order) return jsonError(404, 'order_not_found', 'Order not found');
-  const { path } = await req.json().catch(() => ({})) as { path?: unknown };
+  const { path } = (await readJsonBody(req) ?? {}) as { path?: unknown };
   if (typeof path !== 'string' || !validEditPath(path, order.shop_id, id, fileId)) return jsonError(422, 'validation', 'Invalid edited file.');
   const result = await discardFileObject(admin, id, fileId, path);
   if (result.error) return draftMutationError(result.error);

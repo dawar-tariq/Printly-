@@ -9,7 +9,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   if (!file) return jsonError(404, 'not_found', 'File not found');
   if (!await assertStaffOfShop(file.shop_id, { recoveryOrderId: id })) return jsonError(403, 'forbidden', 'Not your shop or order is unavailable');
   const { data, error } = await admin.storage.from('order-files').createSignedUrl(file.storage_path, 60, { download: file.original_name });
-  if (error || !data) return jsonError(500, 'storage', error?.message ?? 'Could not sign URL');
+  if (error || !data) {
+    console.error('Could not create a signed download:', error?.status);
+    return jsonError(503, 'storage', 'Could not prepare the download. Please try again.');
+  }
   const response = NextResponse.redirect(data.signedUrl, 302);
   response.headers.set('Cache-Control', 'private, no-store, max-age=0');
   response.headers.set('Referrer-Policy', 'no-referrer');

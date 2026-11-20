@@ -1,3 +1,4 @@
+import { readJsonBody } from '@/lib/request-body';
 import { randomUUID } from 'node:crypto';
 import { createAdminSupabase } from '@/lib/supabase';
 import { jsonOk, jsonError } from '@/lib/api';
@@ -8,7 +9,7 @@ import { ALLOWED_FILE_MIMES, MAX_ORDER_FILES } from '@/lib/upload-files';
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!requestHasDraftAccess(req, id)) return jsonError(403, 'draft_session', 'Your order session expired. Please start a new order.');
-  const parsed = signedUploadRequest.safeParse(await req.json().catch(() => ({})));
+  const parsed = signedUploadRequest.safeParse(await readJsonBody(req));
   if (!parsed.success) return jsonError(422, 'validation', parsed.error.issues[0]?.message ?? 'Invalid file');
   if (!ALLOWED_FILE_MIMES.has(parsed.data.mime)) return jsonError(422, 'bad_type', 'Only PDF, Word or image (JPG/PNG) files are allowed');
 
@@ -25,6 +26,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const safeName = parsed.data.name.replace(/[^\w.\-() ]/g, '_').slice(-120) || 'file';
   const path = `${order.shop_id}/${id}/${fileId}-${safeName}`;
   const { data, error } = await admin.storage.from('order-files').createSignedUploadUrl(path);
-  if (error || !data) return jsonError(500, 'storage', error?.message ?? 'Could not create upload URL');
+  if (error || !data) {
+    console.error('Could not create a signed upload:', error?.status);
+    return jsonError(503, 'storage', 'Could not prepare the upload. Please try again.');
+  }
   return jsonOk({ file_id: fileId, path, token: data.token }, { headers: { 'Cache-Control': 'private, no-store' } });
 }

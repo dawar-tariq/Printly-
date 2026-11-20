@@ -1,3 +1,4 @@
+import { readJsonBody } from '@/lib/request-body';
 import { createAdminSupabase } from '@/lib/supabase';
 import { jsonOk, jsonError } from '@/lib/api';
 import { requestHasDraftAccess } from '@/lib/draft-access';
@@ -9,7 +10,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 export async function POST(req: Request, { params }: { params: Promise<{ id: string; fileId: string }> }) {
   const { id, fileId } = await params;
   if (!requestHasDraftAccess(req, id)) return jsonError(403, 'draft_session', 'Your order session expired. Please start a new order.');
-  const { path, original_name, mime } = (await req.json().catch(() => ({}))) as { path?: string; original_name?: string; mime?: string };
+  const { path, original_name, mime } = (await readJsonBody(req) ?? {}) as { path?: string; original_name?: string; mime?: string };
   if (typeof path !== 'string' || typeof original_name !== 'string' || !original_name.trim() || typeof mime !== 'string' || !UUID.test(fileId)) return jsonError(422, 'validation', 'Invalid file details');
 
   const admin = createAdminSupabase();

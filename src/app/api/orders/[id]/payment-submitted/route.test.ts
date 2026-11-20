@@ -26,6 +26,14 @@ describe('customer payment reporting', () => {
     expect((await POST(request({ utr: 'REF-123' }), params)).status).toBe(403);
     expect(state.calls).toHaveLength(0);
   });
+  it('accepts an empty optional body but rejects malformed or oversized reports', async () => {
+    expect((await POST(new Request('https://printly.test/api', { method: 'POST' }), params)).status).toBe(200);
+    expect(state.calls[0].args.p_utr).toBeNull();
+    for (const body of ['{', JSON.stringify({ utr: 'x'.repeat(128 * 1024) })]) {
+      expect((await POST(new Request('https://printly.test/api', { method: 'POST', body }), params)).status).toBe(422);
+    }
+    expect(state.calls).toHaveLength(1);
+  });
   it('records a report transactionally and leaves confirmation to the shop', async () => {
     const response = await POST(request({ utr: ' REF-123 ' }), params);
     expect(response.status).toBe(200);

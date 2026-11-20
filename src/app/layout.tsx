@@ -1,29 +1,28 @@
 import type { Metadata, Viewport } from 'next';
 import { MaintenanceGuard } from '@/components/MaintenanceGuard';
+import { siteOrigin } from '@/lib/site-origin';
 import './globals.css';
 
-const metadataBase = (() => {
-  try { return process.env.NEXT_PUBLIC_SITE_URL ? new URL(process.env.NEXT_PUBLIC_SITE_URL) : undefined; }
-  catch { return undefined; }
-})();
+const origin = siteOrigin(process.env.NEXT_PUBLIC_SITE_URL);
+const metadataBase = origin ? new URL(origin) : undefined;
 
 export const metadata: Metadata = {
   metadataBase,
-  title: 'Printly — Scan QR · Upload · Pay · Collect',
-  description: 'The simplest way to get documents printed at local Indian print shops. Scan the shop QR, upload your file, pay via UPI, collect with a token. No app, no queue.',
+  title: 'Printly — Less waiting. More doing.',
+  description: 'A simpler way to order from your local print shop. Scan, upload, pay the shop directly and follow your order—right from your browser.',
   applicationName: 'Printly',
   icons: {
     icon: [{ url: '/icon.svg', type: 'image/svg+xml' }, { url: '/favicon.ico', sizes: 'any' }],
     apple: '/apple-touch-icon.png',
   },
   openGraph: {
-    title: 'Printly — Scan QR · Upload · Pay · Collect',
-    description: 'The simplest way to get documents printed at local Indian print shops.',
+    title: 'Printly — Less waiting. More doing.',
+    description: 'A simpler way to order from your local print shop, and thoughtful tools for the shops behind it all.',
     siteName: 'Printly',
     type: 'website',
-    images: [{ url: '/brand/printly-share.png', width: 1200, height: 630, alt: 'Printly — Print anything. Skip the queue.' }],
+    ...(origin ? { images: [{ url: '/brand/printly-share.png', width: 1200, height: 630, alt: 'Printly — Print anything. Skip the queue.' }] } : {}),
   },
-  twitter: { card: 'summary_large_image', images: ['/brand/printly-share.png'] },
+  twitter: { card: 'summary_large_image', ...(origin ? { images: ['/brand/printly-share.png'] } : {}) },
 };
 
 export const viewport: Viewport = { width: 'device-width', initialScale: 1, themeColor: '#c2410c' };

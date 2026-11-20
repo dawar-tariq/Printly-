@@ -1,3 +1,4 @@
+import { readJsonBody } from '@/lib/request-body';
 import { z } from 'zod';
 import { getSessionProfile, jsonError, jsonOk } from '@/lib/api';
 import { createAdminSupabase } from '@/lib/supabase';
@@ -65,7 +66,7 @@ export async function GET(req: Request) {
 export async function PUT(req: Request) {
   const session = await getSessionProfile();
   if (!session || session.profile?.role !== 'admin') return jsonError(403, 'forbidden', 'Admin only.');
-  const parsed = settingsInput.safeParse(await req.json().catch(() => ({})));
+  const parsed = settingsInput.safeParse(await readJsonBody(req));
   if (!parsed.success) return jsonError(422, 'validation', 'Enter valid prices, UPI details and reminder days.');
   const { expected_version, ...changes } = parsed.data;
   if (!Object.keys(changes).length) return jsonError(422, 'validation', 'Choose a setting to update.');

@@ -17,6 +17,18 @@ const track = (payment_status: string) => ({
 });
 
 describe('UPI tracking recovery', () => {
+  it('distinguishes a temporary tracking failure from an unknown order and lets the customer retry', async () => {
+    let available = false;
+    vi.stubGlobal('fetch', vi.fn(async () => available
+      ? Response.json({ track: track('pending') })
+      : Response.json({ error: { message: 'Unavailable' } }, { status: 503 })));
+    render(<TrackPage />);
+    expect(await screen.findByText('Tracking is temporarily unavailable')).toBeTruthy();
+    expect(screen.queryByText('Order not found')).toBeNull();
+    available = true;
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByText('Payment not reported yet')).toBeTruthy();
+  });
   it('lets the original browser report a paid transfer without calling it confirmed', async () => {
     let status = 'pending';
     const fetcher = vi.fn(async (url: string, init?: RequestInit) => {

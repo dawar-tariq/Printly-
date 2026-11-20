@@ -3,7 +3,7 @@ import sharp from 'sharp';
 import { qrBrandBadgeSvg } from '@/lib/qr-brand';
 import { getStaffContext, jsonError } from '@/lib/api';
 import { createAdminSupabase } from '@/lib/supabase';
-import { publicShopPath } from '@/lib/shop-identity';
+import { standeeOrderUrl } from '@/lib/standee/shared';
 
 export async function GET(req: Request) {
   const staff = await getStaffContext();
@@ -12,8 +12,11 @@ export async function GET(req: Request) {
   const { data: shop } = await admin.from('shops').select('slug, short_code, name').eq('id', staff.shopIds[0]).single();
   if (!shop) return jsonError(404, 'not_found', 'Shop not found');
 
-  const base = process.env.NEXT_PUBLIC_SITE_URL ?? new URL(req.url).origin;
-  const url = `${base.replace(/\/$/, '')}${publicShopPath(shop.short_code)}`;
+  // Never encode an untrusted Host header into a shop's printable QR code.
+  // The standee validator enforces a configured canonical origin and shop code.
+  let url: string;
+  try { url = standeeOrderUrl(process.env.NEXT_PUBLIC_SITE_URL, shop.short_code).replace(/\/order$/, ''); }
+  catch { return jsonError(503, 'site_url', 'The shop URL is not configured correctly.'); }
   const size = 640;
   const code = await QRCode.toBuffer(url, {
     type: 'png', width: size, margin: 4,

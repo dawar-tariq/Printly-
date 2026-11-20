@@ -1,9 +1,10 @@
 import { randomBytes, randomUUID } from 'crypto';
 import { jsonOk, jsonError } from '@/lib/api';
+import { enforcePublicRateLimit } from '@/lib/rate-limit';
 import { createAdminSupabase } from '@/lib/supabase';
 import { shopSignupInput } from '@/lib/contracts';
 import { isGstinFormat, normalizeGstin, publicShopPath } from '@/lib/shop-identity';
-import { readProofSubmission, removePhotoProof, uploadPhotoProof } from '@/lib/name-proof';
+import { proofSubmissionError, readProofSubmission, removePhotoProof, uploadPhotoProof } from '@/lib/name-proof';
 
 const SHORT_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 function shortCode(len = 8) {
@@ -30,9 +31,11 @@ const DEFAULT_RATES: Array<[string, string | null, string | null, string | null,
 
 
 export async function POST(req: Request) {
+  const limited = await enforcePublicRateLimit(req, 'signup');
+  if (limited) return limited;
   let submission: Awaited<ReturnType<typeof readProofSubmission>>;
   try { submission = await readProofSubmission(req); }
-  catch (error) { return jsonError(422, 'validation', error instanceof Error ? error.message : 'Invalid form data'); }
+  catch (error) { return jsonError(422, 'validation', proofSubmissionError(error)); }
   const parsed = shopSignupInput.safeParse(submission.payload);
   if (!parsed.success) return jsonError(422, 'validation', parsed.error.issues[0]?.message ?? 'Invalid input');
   const d = parsed.data;
@@ -51,7 +54,10 @@ export async function POST(req: Request) {
   const { data: created, error: signUpErr } = await admin.auth.admin.createUser({
     email: d.email.trim(), password: d.password, email_confirm: true, user_metadata: { full_name: d.owner_name.trim() },
   });
-  if (signUpErr || !created.user) return jsonError(422, 'signup', signUpErr?.message ?? 'Could not create account');
+  if (signUpErr || !created.user) {
+    console.error('Could not create a shop account:', signUpErr?.code);
+    return jsonError(422, 'signup', 'Could not create your account. Check your details or sign in if you already have an account.');
+  }
   const userId = created.user.id;
   const shopId = randomUUID();
   let photoPath: string | null = null;
@@ -62,7 +68,7 @@ export async function POST(req: Request) {
   };
   if (submission.photo) {
     try { photoPath = await uploadPhotoProof(admin, shopId, submission.photo); }
-    catch (error) { await cleanup(); return jsonError(503, 'proof_upload', error instanceof Error ? error.message : 'Photo upload failed'); }
+    catch { await cleanup(); return jsonError(503, 'proof_upload', 'Could not upload your shop photo. Please try again.'); }
   }
 
   const rates = DEFAULT_RATES.map(([service, paper_size, color, sides, paper_gsm, option, unit, price_paise]) => ({

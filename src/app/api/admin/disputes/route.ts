@@ -1,3 +1,4 @@
+import { readJsonBody } from '@/lib/request-body';
 import { z } from 'zod';
 import { getSessionProfile, jsonOk, jsonError } from '@/lib/api';
 import { createAdminSupabase } from '@/lib/supabase';
@@ -13,7 +14,10 @@ export async function GET(req: Request) {
     .limit(100);
   if (status !== 'all') query = query.eq('status', status);
   const { data, error } = await query;
-  if (error) return jsonError(500, 'db', error.message);
+  if (error) {
+    console.error('Could not load disputes:', error.code);
+    return jsonError(503, 'db', 'Could not load disputes. Please try again.');
+  }
   return jsonOk({ disputes: data ?? [] });
 }
 
@@ -28,7 +32,7 @@ export async function POST(req: Request) {
   const url = new URL(req.url);
   const disputeId = url.searchParams.get('id');
   if (!disputeId) return jsonError(422, 'validation', 'Missing dispute id');
-  const parsed = resolveInput.safeParse(await req.json().catch(() => ({})));
+  const parsed = resolveInput.safeParse(await readJsonBody(req));
   if (!parsed.success) return jsonError(422, 'validation', 'Invalid action');
 
   const admin = createAdminSupabase();
@@ -40,6 +44,9 @@ export async function POST(req: Request) {
         ? { status: 'resolved_reject', resolution_note: note ?? '', resolved_by: session.user.id, resolved_at: new Date().toISOString() }
         : { status: 'resolved_refund', resolution_note: note ?? '', resolved_by: session.user.id, resolved_at: new Date().toISOString() };
   const { error } = await admin.from('disputes').update(update).eq('id', disputeId);
-  if (error) return jsonError(500, 'db', error.message);
+  if (error) {
+    console.error('Could not update dispute:', error.code);
+    return jsonError(503, 'db', 'Could not update this dispute. Please try again.');
+  }
   return jsonOk({ ok: true, action });
 }

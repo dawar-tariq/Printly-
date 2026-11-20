@@ -1,3 +1,4 @@
+import { readJsonBody } from '@/lib/request-body';
 import { z } from 'zod';
 import { getSessionProfile, jsonOk, jsonError } from '@/lib/api';
 import { createAdminSupabase } from '@/lib/supabase';
@@ -13,7 +14,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const session = await getSessionProfile();
   if (!session || session.profile?.role !== 'admin') return jsonError(403, 'forbidden', 'Admin only');
 
-  const parsed = actionInput.safeParse(await req.json().catch(() => ({})));
+  const parsed = actionInput.safeParse(await readJsonBody(req));
   if (!parsed.success) return jsonError(422, 'validation', 'Invalid action');
 
   const admin = createAdminSupabase();
@@ -53,7 +54,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
 
   const { data: updated, error } = await admin.from('shops').update(update).eq('id', id).eq('updated_at', shop.updated_at).select('id').maybeSingle();
-  if (error) return jsonError(500, 'db', error.message);
+  if (error) {
+    console.error('Could not update shop review:', error.code);
+    return jsonError(503, 'db', 'Could not update the shop review. Please try again.');
+  }
   if (!updated) return jsonError(409, 'shop_changed', 'The shop changed during review. Refresh the page and review it again.');
   if (action === 'approve') {
     await admin.from('shop_staff').upsert({ shop_id: id, user_id: shop.owner_id, role: 'owner' }, { onConflict: 'shop_id,user_id' });

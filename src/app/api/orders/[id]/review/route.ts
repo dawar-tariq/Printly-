@@ -1,10 +1,14 @@
+import { readJsonBody } from '@/lib/request-body';
 import { createAdminSupabase } from '@/lib/supabase';
+import { enforcePublicRateLimit } from '@/lib/rate-limit';
 import { jsonOk, jsonError } from '@/lib/api';
 import { reviewInput } from '@/lib/contracts';
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const parsed = reviewInput.safeParse(await req.json().catch(() => ({})));
+  const limited = await enforcePublicRateLimit(req, 'order_feedback');
+  if (limited) return limited;
+  const parsed = reviewInput.safeParse(await readJsonBody(req));
   if (!parsed.success) return jsonError(422, 'validation', 'Invalid review');
   const admin = createAdminSupabase();
   const { data: order } = await admin.from('orders').select('id, shop_id, status').eq('id', id).maybeSingle();
@@ -16,7 +20,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   });
   if (error) {
     if (error.code === '23505') return jsonError(409, 'already_reviewed', 'This order was already rated');
-    return jsonError(500, 'db', error.message);
+    console.error('Could not save an order review:', error.message);
+    return jsonError(503, 'db', 'Could not submit your rating. Please try again.');
   }
   const { data: agg } = await admin.from('reviews').select('rating').eq('shop_id', order.shop_id);
   if (agg && agg.length) {

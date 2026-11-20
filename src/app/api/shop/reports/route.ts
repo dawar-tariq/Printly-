@@ -17,7 +17,10 @@ export async function GET(req: Request) {
     .select('id, total_paise, payment_status, status, created_at, order_items(service, line_total_paise)')
     .eq('shop_id', shopId)
     .gte('created_at', since.toISOString());
-  if (error) return jsonError(500, 'db', error.message);
+  if (error) {
+    console.error('Could not load shop reports:', error.code);
+    return jsonError(503, 'db', 'Could not load reports. Please try again.');
+  }
 
   const paid = (orders ?? []).filter((o) => o.payment_status === 'confirmed' || o.payment_status === 'cod_collected');
   const revenue = paid.reduce((a, o) => a + (o.total_paise ?? 0), 0);

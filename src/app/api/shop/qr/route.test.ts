@@ -50,6 +50,16 @@ describe('branded shop QR code', () => {
     expect(Array.from(png.data.slice(0, 4))).toEqual([255, 255, 255, 255]);
   });
 
+  it('never uses a caller-controlled host when the canonical site URL is missing or invalid', async () => {
+    vi.stubEnv('NEXT_PUBLIC_SITE_URL', '');
+    expect((await GET(new Request('https://attacker.example/api/shop/qr'))).status).toBe(503);
+    vi.stubEnv('NEXT_PUBLIC_SITE_URL', 'https://trusted.example/path');
+    expect((await GET(new Request('https://attacker.example/api/shop/qr'))).status).toBe(503);
+    vi.stubEnv('NEXT_PUBLIC_SITE_URL', 'https://trusted.example');
+    const response = await GET(new Request('https://attacker.example/api/shop/qr'));
+    expect(decode(Buffer.from(await response.arrayBuffer()))).toBe('https://trusted.example/s/p-ab234567');
+  });
+
   it('denies a user with no linked shop', async () => {
     mocks.staff.mockResolvedValue({ shopIds: [] });
     const response = await GET(new Request('https://printly.example/api/shop/qr'));

@@ -11,7 +11,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const { data: shop, error } = await admin.from('shops')
     .select('id, owner_id, slug, short_code, name, address, city, phone, gstin, upi_id, kyc_status, status, eta_minutes, rush_surcharge_bps, rating_avg, rating_count, created_at, updated_at, owner:profiles!shops_owner_id_fkey(id, email, full_name, phone, created_at)')
     .eq('id', id).maybeSingle();
-  if (error) return jsonError(500, 'db', error.message);
+  if (error) {
+    console.error('Could not load shop details:', error.code);
+    return jsonError(503, 'db', 'Could not load this shop. Please try again.');
+  }
   if (!shop) return jsonError(404, 'not_found', 'Shop not found');
 
   const [obRes, svcRes, invRes, ratesRes, staffRes, subscriptionRes] = await Promise.all([

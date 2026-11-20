@@ -1,3 +1,4 @@
+import { readJsonBody } from '@/lib/request-body';
 import { NextResponse } from 'next/server';
 import { createAdminSupabase } from '@/lib/supabase';
 import { jsonError, jsonOk } from '@/lib/api';
@@ -34,12 +35,14 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string; fileId: string }> }) {
   const { id, fileId } = await params;
   if (!requestHasDraftAccess(req, id)) return jsonError(403, 'draft_session', 'Your order session expired. Please start a new order.');
-  const body = await req.json().catch(() => ({})) as { path?: unknown };
-  if (!UUID.test(fileId) || (body.path !== undefined && (typeof body.path !== 'string' || body.path.length > 500))) return jsonError(422, 'validation', 'Invalid file details.');
+  const body = await readJsonBody(req, { allowEmpty: true });
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return jsonError(422, 'validation', 'Invalid file details.');
+  const { path } = body as { path?: unknown };
+  if (!UUID.test(fileId) || (path !== undefined && (typeof path !== 'string' || path.length > 500))) return jsonError(422, 'validation', 'Invalid file details.');
   const admin = createAdminSupabase();
   // First detach and tombstone the path transactionally; no delayed finalize
   // can attach it while storage cleanup is in progress.
-  const { error } = await admin.rpc('remove_draft_file', { p_order_id: id, p_file_id: fileId, p_path: body.path ?? null });
+  const { error } = await admin.rpc('remove_draft_file', { p_order_id: id, p_file_id: fileId, p_path: path ?? null });
   if (error) return draftMutationError(error);
   if (!await cleanupFileObjects(admin, id, fileId)) return jsonError(503, 'storage', 'The file was removed from the order, but its storage copy could not be removed. Please retry removal.');
   return jsonOk({ ok: true }, { headers: { 'Cache-Control': 'private, no-store' } });

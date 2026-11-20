@@ -4,6 +4,7 @@ const state = vi.hoisted(() => ({ status: 'active', subscribed: true as boolean 
 vi.mock('@/lib/public-shop', () => ({ findPublicShop: async () => ({ data: { id: 'shop', status: state.status }, error: null }) }));
 vi.mock('@/lib/subscription-server', () => ({ shopHasSubscription: async () => state.subscribed }));
 vi.mock('@/lib/draft-access', () => ({ setDraftCookie: vi.fn() }));
+vi.mock('@/lib/rate-limit', () => ({ enforcePublicRateLimit: async () => null }));
 vi.mock('@/lib/supabase', () => ({ createAdminSupabase: () => ({ from: () => ({
   insert: () => { state.inserts++; return { select: () => ({ single: async () => ({ data: state.insertError ? null : { id: 'order' }, error: state.insertError ? { message: state.insertError } : null }) }) }; },
 }) }) }));

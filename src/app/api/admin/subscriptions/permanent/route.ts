@@ -1,3 +1,4 @@
+import { readJsonBody } from '@/lib/request-body';
 import { z } from 'zod';
 import { getSessionProfile, jsonError, jsonOk } from '@/lib/api';
 import { createAdminSupabase } from '@/lib/supabase';
@@ -7,7 +8,7 @@ const input = z.object({ shop_id: z.string().uuid(), enabled: z.boolean(), note:
 export async function POST(req: Request) {
   const session = await getSessionProfile();
   if (!session || session.profile?.role !== 'admin') return jsonError(403, 'forbidden', 'Admin only.');
-  const parsed = input.safeParse(await req.json().catch(() => ({})));
+  const parsed = input.safeParse(await readJsonBody(req));
   if (!parsed.success) return jsonError(422, 'validation', 'Invalid subscription action.');
   const admin = createAdminSupabase();
   const { data, error } = await admin.rpc('set_shop_permanent_subscription', {

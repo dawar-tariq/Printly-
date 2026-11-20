@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { getStaffContext, jsonError, jsonOk } from '@/lib/api';
 import { createAdminSupabase } from '@/lib/supabase';
-import { readProofSubmission, removePhotoProof, uploadPhotoProof } from '@/lib/name-proof';
+import { proofSubmissionError, readProofSubmission, removePhotoProof, uploadPhotoProof } from '@/lib/name-proof';
 import { isGstinFormat } from '@/lib/shop-identity';
 
 const input = z.object({ gstin: z.string().max(20).optional() });
@@ -15,7 +15,7 @@ export async function POST(req: Request) {
   if (!shop || shop.owner_id !== staff.user.id) return jsonError(403, 'forbidden', 'Only the shop owner can submit name proof.');
   let submission: Awaited<ReturnType<typeof readProofSubmission>>;
   try { submission = await readProofSubmission(req); }
-  catch (error) { return jsonError(422, 'validation', error instanceof Error ? error.message : 'Invalid form data'); }
+  catch (error) { return jsonError(422, 'validation', proofSubmissionError(error)); }
   const parsed = input.safeParse(submission.payload);
   if (!parsed.success) return jsonError(422, 'validation', 'Invalid GSTIN.');
   if (!submission.photo && !isGstinFormat(parsed.data.gstin ?? '')) {
@@ -24,7 +24,7 @@ export async function POST(req: Request) {
   let photoPath: string | null = null;
   if (submission.photo) {
     try { photoPath = await uploadPhotoProof(admin, shopId, submission.photo); }
-    catch (error) { return jsonError(503, 'proof_upload', error instanceof Error ? error.message : 'Photo upload failed'); }
+    catch { return jsonError(503, 'proof_upload', 'Could not upload your shop photo. Please try again.'); }
   }
   const { data, error } = await admin.rpc('resubmit_shop_name_proof', { p_shop_id: shopId, p_gstin: parsed.data.gstin || null, p_photo_path: photoPath });
   if (error || !data) {

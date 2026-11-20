@@ -1,7 +1,7 @@
 import { getStaffContext, jsonOk, jsonError } from '@/lib/api';
 import { createAdminSupabase } from '@/lib/supabase';
 import { settingsInput } from '@/lib/contracts';
-import { readProofSubmission, removePhotoProof, uploadPhotoProof } from '@/lib/name-proof';
+import { proofSubmissionError, readProofSubmission, removePhotoProof, uploadPhotoProof } from '@/lib/name-proof';
 
 async function shopIdFor(req: Request) {
   const staff = await getStaffContext();
@@ -15,7 +15,7 @@ export async function PUT(req: Request) {
   if (!shopId) return jsonError(403, 'forbidden', 'Not your shop');
   let submission: Awaited<ReturnType<typeof readProofSubmission>>;
   try { submission = await readProofSubmission(req); }
-  catch (error) { return jsonError(422, 'validation', error instanceof Error ? error.message : 'Invalid form data'); }
+  catch (error) { return jsonError(422, 'validation', proofSubmissionError(error)); }
   const parsed = settingsInput.safeParse(submission.payload);
   if (!parsed.success) return jsonError(422, 'validation', parsed.error.issues[0]?.message ?? 'Invalid settings');
   const { services, ...fields } = parsed.data;
@@ -23,7 +23,7 @@ export async function PUT(req: Request) {
   let photoPath: string | null = null;
   if (submission.photo) {
     try { photoPath = await uploadPhotoProof(admin, shopId, submission.photo); }
-    catch (error) { return jsonError(503, 'proof_upload', error instanceof Error ? error.message : 'Photo upload failed'); }
+    catch { return jsonError(503, 'proof_upload', 'Could not upload your shop photo. Please try again.'); }
   }
 
   const { data: identity, error } = await admin.rpc('update_shop_identity', {

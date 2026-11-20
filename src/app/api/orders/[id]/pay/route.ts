@@ -1,3 +1,4 @@
+import { readJsonBody } from '@/lib/request-body';
 import { z } from 'zod';
 import { jsonOk, jsonError } from '@/lib/api';
 import { loadOrderWithRates } from '@/lib/order-quote';
@@ -17,7 +18,7 @@ type Shop = { name: string; upi_id: string | null; eta_minutes: number; rush_sur
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!requestHasDraftAccess(req, id)) return jsonError(403, 'draft_session', 'Your order session expired. Please start a new order.');
-  const parsed = payInput.safeParse(await req.json().catch(() => ({})));
+  const parsed = payInput.safeParse(await readJsonBody(req));
   if (!parsed.success) return jsonError(422, 'validation', 'Please refresh the order and review the total before checkout.');
 
   let loaded;

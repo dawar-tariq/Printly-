@@ -1,3 +1,4 @@
+import { readJsonBody } from '@/lib/request-body';
 import { z } from 'zod';
 import { getStaffContext, jsonOk, jsonError } from '@/lib/api';
 import { createAdminSupabase } from '@/lib/supabase';
@@ -15,7 +16,10 @@ export async function GET(req: Request) {
   if (!shopId) return jsonError(403, 'forbidden', 'No shop');
   const admin = createAdminSupabase();
   const { data, error } = await admin.from('inventory_items').select('*').eq('shop_id', shopId).order('category').order('name');
-  if (error) return jsonError(500, 'db', error.message);
+  if (error) {
+    console.error('Could not load inventory:', error.code);
+    return jsonError(503, 'db', 'Could not load inventory. Please try again.');
+  }
   return jsonOk({ items: data ?? [] });
 }
 
@@ -30,10 +34,13 @@ const createInput = z.object({
 export async function POST(req: Request) {
   const shopId = await shopIdFor(req);
   if (!shopId) return jsonError(403, 'forbidden', 'No shop');
-  const parsed = createInput.safeParse(await req.json().catch(() => ({})));
+  const parsed = createInput.safeParse(await readJsonBody(req));
   if (!parsed.success) return jsonError(422, 'validation', 'Invalid item');
   const admin = createAdminSupabase();
   const { data, error } = await admin.from('inventory_items').insert({ ...parsed.data, shop_id: shopId }).select('id').single();
-  if (error) return jsonError(500, 'db', error.message);
+  if (error) {
+    console.error('Could not add inventory:', error.code);
+    return jsonError(503, 'db', 'Could not add inventory. Please try again.');
+  }
   return jsonOk({ ok: true, id: data.id });
 }

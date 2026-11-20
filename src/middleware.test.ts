@@ -53,6 +53,37 @@ describe('session-aware portal entry', () => {
   });
 });
 
+describe('cross-origin mutation protection', () => {
+  it('blocks cross-origin and same-site sibling-origin API writes, including admin routes', async () => {
+    for (const [path, headers] of [
+      ['/api/shop/signup', { origin: 'https://evil.test' }],
+      ['/api/orders', { origin: 'null' }],
+      ['/api/admin/settings', { origin: 'https://sibling.printly.test', 'sec-fetch-site': 'same-site' }],
+      ['/api/shop/settings', { 'sec-fetch-site': 'cross-site' }],
+    ] as Array<[string, Record<string, string>]>) {
+      const response = await middleware(new NextRequest(`https://printly.test${path}`, { method: 'POST', headers }));
+      expect(response.status, path).toBe(403);
+      expect((await response.json()).error.code).toBe('cross_origin');
+    }
+  });
+  it('permits same-origin browser writes, headerless API clients and public GETs', async () => {
+    for (const headers of [{ origin: 'https://printly.test', 'sec-fetch-site': 'same-origin' }, {}] as Record<string, string>[]) {
+      const response = await middleware(new NextRequest('https://printly.test/api/orders', { method: 'POST', headers }));
+      expect(response.headers.get('x-middleware-next')).toBe('1');
+    }
+    expect((await middleware(new NextRequest('https://printly.test/api/shops/demo/public', { headers: { origin: 'https://other.test' } }))).headers.get('x-middleware-next')).toBe('1');
+  });
+  it('compares with the public host and forwarded scheme rather than an internal bind address', async () => {
+    const proxied = (origin: string, host = 'printly.test') => new NextRequest('http://0.0.0.0:3000/api/orders', {
+      method: 'POST', headers: { origin, host, 'x-forwarded-proto': 'https', 'sec-fetch-site': 'same-origin' },
+    });
+    expect((await middleware(proxied('https://printly.test'))).headers.get('x-middleware-next')).toBe('1');
+    expect((await middleware(proxied('https://other.test'))).status).toBe(403);
+    expect((await middleware(proxied('http://printly.test'))).status).toBe(403);
+    expect((await middleware(proxied('https://printly.test', 'evil.test,printly.test'))).status).toBe(403);
+  });
+});
+
 describe('platform maintenance', () => {
   it('replaces customer and shop pages with a self-contained, non-cacheable 503 notice', async () => {
     state.maintenance = 'on';

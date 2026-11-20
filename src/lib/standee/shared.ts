@@ -1,4 +1,5 @@
 import { publicShopPath } from '@/lib/shop-identity';
+import { siteOrigin } from '@/lib/site-origin';
 
 export const STANDEE_THEMES = {
   orange: { label: 'Printly orange', accent: '#c2410c', cream: '#fffaf4', peach: '#fff0e3', border: '#edc5aa' },
@@ -21,14 +22,9 @@ export function isStandeeTheme(value: string): value is StandeeTheme {
 
 /** The canonical site URL is configured on the server, never taken from a request Host header. */
 export function standeeOrderUrl(siteUrl: string | undefined, shortCode: string, production = process.env.NODE_ENV === 'production'): string {
-  if (!siteUrl || !/^[a-z0-9]{4,16}$/i.test(shortCode)) throw new Error('The shop URL is not configured correctly.');
-  let base: URL;
-  try { base = new URL(siteUrl); } catch { throw new Error('The shop URL is not configured correctly.'); }
-  if (!['http:', 'https:'].includes(base.protocol) || (production && base.protocol !== 'https:') ||
-      base.username || base.password || base.search || base.hash || !['', '/'].includes(base.pathname)) {
-    throw new Error('The shop URL is not configured correctly.');
-  }
-  const result = `${base.origin}${publicShopPath(shortCode)}/order`;
+  const origin = siteOrigin(siteUrl, production);
+  if (!origin || !/^[a-z0-9]{4,16}$/i.test(shortCode)) throw new Error('The shop URL is not configured correctly.');
+  const result = `${origin}${publicShopPath(shortCode)}/order`;
   // Keep QR modules generously sized on A4; reject an unexpectedly long host.
   if (new TextEncoder().encode(result).length > 180) throw new Error('The shop URL is too long to print reliably.');
   return result;

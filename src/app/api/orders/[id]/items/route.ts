@@ -1,3 +1,4 @@
+import { readJsonBody } from '@/lib/request-body';
 import { createAdminSupabase } from '@/lib/supabase';
 import { jsonOk, jsonError } from '@/lib/api';
 import { itemsReplaceInput } from '@/lib/contracts';
@@ -8,7 +9,7 @@ import { draftMutationError } from '@/lib/draft-mutation';
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!requestHasDraftAccess(req, id)) return jsonError(403, 'draft_session', 'Your order session expired. Please start a new order.');
-  const parsed = itemsReplaceInput.safeParse(await req.json().catch(() => ({})));
+  const parsed = itemsReplaceInput.safeParse(await readJsonBody(req));
   if (!parsed.success) return jsonError(422, 'validation', parsed.error.issues[0]?.message ?? 'Invalid items');
 
   const admin = createAdminSupabase();

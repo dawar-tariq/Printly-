@@ -6,11 +6,13 @@ const mocks = vi.hoisted(() => {
   const deleteUser = vi.fn();
   const upload = vi.fn();
   const remove = vi.fn();
-  return { rpc, createUser, deleteUser, upload, remove, admin: {
+  const limit = vi.fn();
+  return { rpc, createUser, deleteUser, upload, remove, limit, admin: {
     rpc, auth: { admin: { createUser, deleteUser } }, storage: { from: () => ({ upload, remove }) },
   } };
 });
 vi.mock('server-only', () => ({}));
+vi.mock('@/lib/rate-limit', () => ({ enforcePublicRateLimit: mocks.limit }));
 vi.mock('@/lib/supabase', () => ({ createAdminSupabase: () => mocks.admin }));
 vi.mock('@/lib/api', () => ({
   jsonOk: (data: unknown) => Response.json(data),
@@ -25,6 +27,7 @@ function request(body: unknown) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.limit.mockResolvedValue(null);
   mocks.createUser.mockResolvedValue({ data: { user: { id: 'b2222222-2222-4222-8222-222222222221' } }, error: null });
   mocks.deleteUser.mockResolvedValue({ error: null });
   mocks.upload.mockResolvedValue({ error: null });
@@ -36,6 +39,12 @@ beforeEach(() => {
 });
 
 describe('shop signup', () => {
+  it('stops a rate-limited request before checking names or creating accounts', async () => {
+    mocks.limit.mockResolvedValueOnce(Response.json({ error: { code: 'rate_limited' } }, { status: 429 }));
+    expect((await POST(request(base))).status).toBe(429);
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.createUser).not.toHaveBeenCalled();
+  });
   it('creates a unique-name application without proof and assigns a code URL', async () => {
     const response = await POST(request(base));
     const body = await response.json();
@@ -48,6 +57,13 @@ describe('shop signup', () => {
     expect(params.p_services).toHaveLength(5);
   });
 
+  it('does not expose authentication-provider error details', async () => {
+    mocks.createUser.mockResolvedValueOnce({ data: { user: null }, error: { code: 'unexpected_failure', message: 'internal diagnostic that must stay private' } });
+    const response = await POST(request(base));
+    expect(response.status).toBe(422);
+    expect(JSON.stringify(await response.json())).not.toContain('internal diagnostic');
+    expect(mocks.rpc).toHaveBeenCalledTimes(1);
+  });
   it('rejects a duplicate without proof before creating an account', async () => {
     mocks.rpc.mockResolvedValueOnce({ data: true, error: null });
     const response = await POST(request(base));

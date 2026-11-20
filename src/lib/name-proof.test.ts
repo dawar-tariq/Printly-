@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 vi.mock('server-only', () => ({}));
-import { detectProofImage, readPhotoProof } from './name-proof';
+import { detectProofImage, proofSubmissionError, readPhotoProof, readProofSubmission } from './name-proof';
 
 describe('private proof photo validation', () => {
   it('accepts supported signatures and rejects spoofed files', async () => {
@@ -14,5 +14,19 @@ describe('private proof photo validation', () => {
   it('rejects oversized evidence before reading it', async () => {
     const file = new File([new Uint8Array(3 * 1024 * 1024 + 1)], 'shop.png', { type: 'image/png' });
     await expect(readPhotoProof(file)).rejects.toThrow('3 MB');
+  });
+  it('shows known validation messages but hides unexpected parser diagnostics', async () => {
+    let validationError: unknown;
+    try { await readPhotoProof(new File(['not an image'], 'shop.jpg', { type: 'image/jpeg' })); }
+    catch (error) { validationError = error; }
+    expect(proofSubmissionError(validationError)).toMatch(/valid JPEG/);
+    expect(proofSubmissionError(new Error('sensitive parser diagnostic'))).toBe('Invalid form data.');
+  });
+  it('caps the complete multipart body even when no length is declared', async () => {
+    const form = new FormData();
+    form.append('payload', '{}');
+    form.append('proof', new File([new Uint8Array(3 * 1024 * 1024 + 128 * 1024)], 'shop.png', { type: 'image/png' }));
+    const req = new Request('https://printly.test/api/shop/signup', { method: 'POST', body: form });
+    await expect(readProofSubmission(req)).rejects.toThrow('Request body is too large');
   });
 });

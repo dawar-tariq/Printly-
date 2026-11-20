@@ -7,8 +7,10 @@ const state = vi.hoisted(() => ({
   lookupFails: false, discardOk: true, discardInUse: false,
   discardCalls: [] as Array<{ order: string; file: string; path: string }>,
 }));
+vi.mock('@/lib/rate-limit', () => ({ enforcePublicRateLimit: async () => null }));
 vi.mock('@/lib/upload-files', () => ({
   ALLOWED_FILE_MIMES: new Set(['application/pdf']), MAX_FILE_BYTES: 25 * 1024 * 1024, MAX_ORDER_FILES: 10,
+  FileValidationError: class FileValidationError extends Error {},
   inspectUploadedFile: async (buffer: Buffer) => ({ size: buffer.length, pages: 1 }),
 }));
 vi.mock('@/lib/draft-mutation', () => ({
@@ -87,6 +89,12 @@ describe('Dropbox import cleanup', () => {
     expect(results[0].error).toMatch(/contact the shop/i);
     expect(state.saved).not.toBeNull();
     expect(state.discardCalls).toHaveLength(1);
+  });
+  it('does not expose unexpected network diagnostics to a customer', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('sensitive network diagnostic'); }));
+    const { results } = await (await POST(request(), params)).json();
+    expect(results[0]).toMatchObject({ ok: false, error: 'Could not import the Dropbox file. Please try again.' });
+    expect(JSON.stringify(results)).not.toContain('sensitive network diagnostic');
   });
   it('rejects redirects to non-Dropbox hosts', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 302, headers: { location: 'https://example.com/private' } })));
