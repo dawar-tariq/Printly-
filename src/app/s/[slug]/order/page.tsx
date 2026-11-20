@@ -45,7 +45,8 @@ export default function OrderWizard() {
   const router = useRouter();
   const [shopData, setShopData] = useState<ShopPublic | null>(null);
   const [step, setStep] = useState<Step>('service');
-  const [service, setService] = useState<Service>('print');
+  const [service, setService] = useState<Service | null>(null);
+  const [shopLoading, setShopLoading] = useState(true);
   const [orderId, setOrderId] = useState<string | null>(null);
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [dropboxLink, setDropboxLink] = useState('');
@@ -81,7 +82,16 @@ export default function OrderWizard() {
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    fetch(`/api/shops/${slug}/public`).then((r) => (r.ok ? r.json() : null)).then(setShopData);
+    const controller = new AbortController();
+    setShopLoading(true);
+    setShopData(null);
+    setService(null);
+    fetch(`/api/shops/${encodeURIComponent(slug)}/public`, { signal: controller.signal })
+      .then((r) => { if (!r.ok) throw new Error('Shop unavailable'); return r.json(); })
+      .then(setShopData)
+      .catch(() => { if (!controller.signal.aborted) setBanner('Could not load this shop. Please check the link and try again.'); })
+      .finally(() => { if (!controller.signal.aborted) setShopLoading(false); });
+    return () => controller.abort();
   }, [slug]);
 
   const ensureOrder = useCallback(async (): Promise<string | null> => {
@@ -163,6 +173,7 @@ export default function OrderWizard() {
   }, [importDropbox]);
 
   const buildItems = useCallback(() => {
+    if (!service) return [];
     const ready = files.filter((f) => f.state === 'ready');
     const items: Array<Record<string, unknown>> = [];
     for (const f of ready) {
@@ -298,23 +309,35 @@ export default function OrderWizard() {
           <section>
             <h1 className="text-2xl font-extrabold tracking-tight">What do you need?</h1>
             <p className="text-sm text-neutral-500 mt-1">Pick a service to get started.</p>
-            <div className="grid grid-cols-2 gap-3 mt-5">
+            {shopLoading && <p className="mt-5 text-sm text-neutral-500" role="status">Loading services…</p>}
+            {!shopLoading && shopData && !shopData.services.some((s) => s.enabled) && <p className="mt-5 text-sm text-neutral-500">This shop has no services available right now.</p>}
+            <div className="grid grid-cols-2 gap-3 mt-5" aria-label="Choose a service">
               {(Object.keys(SERVICE_META) as Service[])
-                .filter((s) => !shopData || shopData.services.length === 0 || shopData.services.some((x) => x.service === s && x.enabled))
+                .filter((s) => shopData?.services.some((x) => x.service === s && x.enabled))
                 .map((s) => {
                   const M = SERVICE_META[s];
                   const Icon = M.icon;
                   const activeSel = service === s;
                   return (
-                    <button key={s} onClick={() => setService(s)} className={cn('card p-4 text-left transition-all border-2', activeSel ? 'border-orange-600 ring-2 ring-orange-600/20' : 'border-transparent')}>
-                      <Icon size={26} className="text-orange-700" />
+                    <button key={s} type="button" aria-pressed={activeSel} onClick={() => setService(s)}
+                      className={cn('rounded-2xl border-2 p-4 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-orange-700', activeSel ? 'border-orange-600 bg-orange-100 ring-2 ring-orange-500/30' : 'border-neutral-200 bg-white hover:border-orange-300')}>
+                      <span className="flex items-start justify-between gap-2">
+                        <Icon size={26} className="text-orange-700" />
+                        {activeSel && <CheckCircle2 size={20} className="text-orange-700" aria-hidden="true" />}
+                      </span>
                       <div className="mt-2 font-bold">{M.label}</div>
-                      <div className="text-[11px] text-neutral-500">{M.blurb}</div>
+                      <div className="text-[11px] text-neutral-600">{M.blurb}</div>
+                      {activeSel && <span className="mt-2 block text-xs font-bold text-orange-800">Selected</span>}
                     </button>
                   );
                 })}
             </div>
-            <button onClick={async () => { await ensureOrder(); setStep('files'); }} className="btn btn-primary w-full h-13 py-4 text-lg mt-6">Continue</button>
+            <button disabled={!service || !shopData || shopData.shop.status !== 'active' || busy} onClick={async () => {
+              setBusy(true);
+              try { if (await ensureOrder()) setStep('files'); }
+              catch { setBanner('Could not start the order. Please try again.'); }
+              finally { setBusy(false); }
+            }} className="btn btn-primary w-full h-13 py-4 text-lg mt-6">{busy ? 'Starting order…' : 'Continue'}</button>
           </section>
         )}
 

@@ -9,7 +9,7 @@ export default function HomePage() {
       <header className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
         <Logo />
         <nav className="flex items-center gap-2 sm:gap-4 text-sm font-medium">
-          <Link href="/s/demo-prints" className="hidden sm:inline text-neutral-600 hover:text-neutral-900">Try demo shop</Link>
+          <Link href="/s/p-demo1" className="hidden sm:inline text-neutral-600 hover:text-neutral-900">Try demo shop</Link>
           <Link href="/shop/signup" className="hidden sm:inline text-neutral-600 hover:text-neutral-900">For shop owners</Link>
           <Link href="/login" className="btn btn-dark px-4 h-9 text-sm">Shop login</Link>
         </nav>
@@ -27,7 +27,7 @@ export default function HomePage() {
             Scan the shop&apos;s QR, upload your document, pay with UPI, and collect on your phone&apos;s turn. From Lal Chowk to your campus.
           </p>
           <div className="mt-7 flex flex-wrap items-center gap-3">
-            <Link href="/s/demo-prints" className="btn btn-primary h-12 px-6 text-base">
+            <Link href="/s/p-demo1" className="btn btn-primary h-12 px-6 text-base">
               Try the demo flow <ArrowRight size={18} />
             </Link>
             <Link href="/shop/signup" className="btn btn-ghost h-12 px-6 text-base">
@@ -132,7 +132,8 @@ export default function HomePage() {
           <Logo href="/" />
           <div className="flex items-center gap-4">
             <span className="hidden sm:inline">Made for Indian print shops</span>
-            <Link href="/login">Shop / Admin login</Link>
+            <Link href="/login">Shop sign in</Link>
+            <Link href="/admin/login">Admin sign in</Link>
           </div>
         </div>
       </footer>

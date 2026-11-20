@@ -11,7 +11,7 @@ export async function GET(req: Request) {
 
   const admin = createAdminSupabase();
   let query = admin.from('shops')
-    .select('id, name, slug, address, city, phone, gstin, upi_id, kyc_status, status, commission_bps, created_at, owner:profiles!shops_owner_id_fkey(email, full_name)')
+    .select('id, name, slug, short_code, address, city, phone, gstin, upi_id, kyc_status, status, commission_bps, created_at, owner:profiles!shops_owner_id_fkey(email, full_name)')
     .order('created_at', { ascending: false })
     .limit(200);
   if (kyc && kyc !== 'all') query = query.eq('kyc_status', kyc);
@@ -21,7 +21,7 @@ export async function GET(req: Request) {
   let shops = (data ?? []) as Array<Record<string, unknown> & { id: string; name: string; city: string; phone: string; gstin: string | null; upi_id: string | null; address?: string }>;
   if (q) {
     shops = shops.filter((s) =>
-      [s.name, s.city, s.phone, s.slug, s.gstin ?? '', s.upi_id ?? '', (s.owner as { email?: string } | null)?.email ?? '']
+      [s.name, s.city, s.phone, s.slug, s.short_code, s.gstin ?? '', s.upi_id ?? '', (s.owner as { email?: string } | null)?.email ?? '']
         .join(' ').toLowerCase().includes(q),
     );
   }

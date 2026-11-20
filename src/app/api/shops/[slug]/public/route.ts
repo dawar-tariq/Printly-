@@ -1,14 +1,11 @@
 import { createServerSupabase } from '@/lib/supabase';
 import { jsonOk, jsonError } from '@/lib/api';
+import { findPublicShop } from '@/lib/public-shop';
 
 export async function GET(_req: Request, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const supabase = await createServerSupabase();
-  const { data: shop, error } = await supabase
-    .from('shops')
-    .select('id, slug, name, address, city, phone, upi_id, kyc_status, status, eta_minutes, rating_avg, rating_count, gstin')
-    .eq('slug', slug)
-    .maybeSingle();
+  const { data: shop, error } = await findPublicShop(supabase, slug);
   if (error) return jsonError(500, 'db', error.message);
   if (!shop) return jsonError(404, 'not_found', 'Shop not found');
 

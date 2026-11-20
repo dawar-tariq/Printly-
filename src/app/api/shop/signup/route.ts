@@ -1,12 +1,13 @@
-import { randomBytes } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 import { jsonOk, jsonError } from '@/lib/api';
 import { createAdminSupabase } from '@/lib/supabase';
 import { shopSignupInput } from '@/lib/contracts';
+import { isGstinFormat, normalizeGstin, publicShopPath } from '@/lib/shop-identity';
+import { readProofSubmission, removePhotoProof, uploadPhotoProof } from '@/lib/name-proof';
 
 const SHORT_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-function shortCode(len = 5) {
-  const bytes = randomBytes(len);
-  return Array.from(bytes, (b) => SHORT_CODE_ALPHABET[b % SHORT_CODE_ALPHABET.length]).join('');
+function shortCode(len = 8) {
+  return Array.from(randomBytes(len), (b) => SHORT_CODE_ALPHABET[b % SHORT_CODE_ALPHABET.length]).join('');
 }
 
 const DEFAULT_RATES: Array<[string, string | null, string | null, string | null, number | null, string | null, string, number]> = [
@@ -27,93 +28,85 @@ const DEFAULT_RATES: Array<[string, string | null, string | null, string | null,
   ['laminate', 'A3', null, null, null, null, 'sheet', 2000],
 ];
 
-function slugify(name: string) {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 48) || 'shop';
-}
 
 export async function POST(req: Request) {
-  const parsed = shopSignupInput.safeParse(await req.json().catch(() => ({})));
+  let submission: Awaited<ReturnType<typeof readProofSubmission>>;
+  try { submission = await readProofSubmission(req); }
+  catch (error) { return jsonError(422, 'validation', error instanceof Error ? error.message : 'Invalid form data'); }
+  const parsed = shopSignupInput.safeParse(submission.payload);
   if (!parsed.success) return jsonError(422, 'validation', parsed.error.issues[0]?.message ?? 'Invalid input');
   const d = parsed.data;
-  const { shop_name, owner_name, email, password, phone, address, city, gstin, upi_id } = d;
-
   const admin = createAdminSupabase();
+  const shopName = d.shop_name.trim();
+  const gstin = normalizeGstin(d.gstin || (d.registration_type === 'gstin' ? d.registration_number ?? '' : ''));
 
-  // 1) create the auth user
+  // Friendly early check, before creating an account; the locked database
+  // function repeats this check atomically to handle simultaneous signups.
+  const { data: duplicate, error: checkError } = await admin.rpc('shop_name_exists', { p_name: shopName, p_exclude: null });
+  if (checkError) return jsonError(503, 'name_check', 'Could not check the shop name. Please try again.');
+  if (duplicate && !submission.photo && !isGstinFormat(gstin)) {
+    return jsonError(409, 'duplicate_name_requires_proof', 'This name is already in use. Add a shop photo or a valid-format GSTIN for review.');
+  }
+
   const { data: created, error: signUpErr } = await admin.auth.admin.createUser({
-    email, password, email_confirm: true, user_metadata: { full_name: owner_name },
+    email: d.email.trim(), password: d.password, email_confirm: true, user_metadata: { full_name: d.owner_name.trim() },
   });
   if (signUpErr || !created.user) return jsonError(422, 'signup', signUpErr?.message ?? 'Could not create account');
   const userId = created.user.id;
-
-  // profile is created by trigger; make sure role is shop_staff
-  await admin.from('profiles').update({ role: 'shop_staff', full_name: owner_name, phone }).eq('id', userId);
-
-  // 2) unique slug + short code
-  const base = slugify(shop_name);
-  let slug = base;
-  for (let i = 2; i < 50; i++) {
-    const { data: exists } = await admin.from('shops').select('id').eq('slug', slug).maybeSingle();
-    if (!exists) break;
-    slug = `${base}-${i}`;
-  }
-  const shortCodeValue = shortCode(6);
-
-  // 3) shop (pending KYC) + staff + default catalog + default rate card
-  const { data: shop, error: shopErr } = await admin.from('shops').insert({
-    owner_id: userId, slug, short_code: shortCodeValue, name: shop_name, address, city, phone,
-    gstin: gstin || null, upi_id: upi_id || null, kyc_status: 'pending', status: 'paused',
-  }).select('id, slug').single();
-  if (shopErr || !shop) return jsonError(500, 'db', shopErr?.message ?? 'Could not create shop');
-
-  await admin.from('shop_staff').insert({ shop_id: shop.id, user_id: userId, role: 'owner' });
-
-  // Services: only the ones the owner picked (default: all five).
-  const ALL_SERVICES = ['print', 'photocopy', 'scan', 'bind', 'laminate'];
-  const chosen = d.services && d.services.length > 0 ? d.services : ALL_SERVICES;
-  await admin.from('shop_services').insert(
-    ALL_SERVICES.map((service, i) => ({ shop_id: shop.id, service, enabled: chosen.includes(service as never), display_order: i + 1 })),
-  );
-  await admin.from('rate_card').insert(
-    DEFAULT_RATES.map(([service, paper_size, color, sides, paper_gsm, option, unit, price_paise]) => ({
-      shop_id: shop.id, service, paper_size, color, sides, paper_gsm, option, unit, price_paise,
-    })),
-  );
-
-  // Structured onboarding details (best-effort: never block signup if the
-  // table is missing on an older deployment).
-  const onboardingRow = {
-    shop_id: shop.id,
-    business_type: d.business_type ?? 'other',
-    legal_business_name: d.legal_business_name || null,
-    year_established: d.year_established ?? null,
-    staff_count: d.staff_count ?? 1,
-    printer_count: d.printer_count ?? 1,
-    avg_daily_jobs: d.avg_daily_jobs ?? 0,
-    printer_details: d.printer_details ?? '',
-    pincode: d.pincode ?? '',
-    alternate_phone: d.alternate_phone || null,
-    registration_type: d.registration_type ?? 'unregistered',
-    registration_number: d.registration_number || null,
-    business_hours: d.business_hours ?? {},
-    referral_source: d.referral_source || null,
+  const shopId = randomUUID();
+  let photoPath: string | null = null;
+  const cleanup = async () => {
+    await removePhotoProof(admin, photoPath);
+    const { error } = await admin.auth.admin.deleteUser(userId);
+    if (error) console.error('Could not remove an incomplete signup:', error.message);
   };
-  await admin.from('shop_onboarding').upsert(onboardingRow, { onConflict: 'shop_id' });
-
-  // Starting inventory submitted during onboarding.
-  const inventory = (d.inventory ?? []).filter((i) => i.name.trim());
-  if (inventory.length > 0) {
-    await admin.from('inventory_items').insert(
-      inventory.map((i) => ({
-        shop_id: shop.id,
-        name: i.name.trim(),
-        category: i.category,
-        qty: i.qty,
-        unit: i.unit || 'sheets',
-        low_stock_threshold: i.low_stock_threshold,
-      })),
-    );
+  if (submission.photo) {
+    try { photoPath = await uploadPhotoProof(admin, shopId, submission.photo); }
+    catch (error) { await cleanup(); return jsonError(503, 'proof_upload', error instanceof Error ? error.message : 'Photo upload failed'); }
   }
 
-  return jsonOk({ ok: true, slug: shop.slug, message: 'Application received — we will verify and activate your shop within 24–48h' });
+  const rates = DEFAULT_RATES.map(([service, paper_size, color, sides, paper_gsm, option, unit, price_paise]) => ({
+    service, paper_size, color, sides, paper_gsm, option, unit, price_paise,
+  }));
+  const onboarding = {
+    business_type: d.business_type ?? 'other', legal_business_name: d.legal_business_name || null,
+    year_established: d.year_established ?? null, staff_count: d.staff_count ?? 1,
+    printer_count: d.printer_count ?? 1, avg_daily_jobs: d.avg_daily_jobs ?? 0,
+    printer_details: d.printer_details ?? '', pincode: d.pincode ?? '', alternate_phone: d.alternate_phone || null,
+    registration_type: d.registration_type ?? 'unregistered', registration_number: d.registration_number || null,
+    business_hours: d.business_hours ?? {}, referral_source: d.referral_source || null,
+  };
+
+  // Unique constraints are authoritative. Retry a randomly generated code if
+  // it collides; no owner can overwrite or share another shop's identity.
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const code = shortCode();
+    const { data: shop, error } = await admin.rpc('create_shop_application', {
+      p_shop: {
+        id: shopId, owner_id: userId, slug: `shop-${code.toLowerCase()}`, short_code: code,
+        name: shopName, owner_name: d.owner_name.trim(), address: d.address.trim(), city: d.city.trim(),
+        phone: d.phone.trim(), gstin, upi_id: d.upi_id || null,
+      },
+      p_onboarding: onboarding,
+      p_services: d.services ?? ['print', 'photocopy', 'scan', 'bind', 'laminate'],
+      p_rates: rates,
+      p_inventory: (d.inventory ?? []).map((item) => ({ ...item, name: item.name.trim() })),
+      p_photo_path: photoPath,
+    });
+    if (!error && shop) {
+      // A stale name check may have caused an unnecessary photo upload.
+      if (!shop.duplicate_name) await removePhotoProof(admin, photoPath);
+      return jsonOk({ ok: true, short_code: shop.short_code, customer_path: publicShopPath(shop.short_code), duplicate_name: shop.duplicate_name,
+        message: 'Application received — your shop will be reviewed before it goes live.' });
+    }
+    if (error?.code === '23505' && /shops_(slug|short_code)_key/.test(`${error.message} ${error.details ?? ''}`)) continue;
+    await cleanup();
+    if (error?.message.includes('DUPLICATE_NAME_PROOF_REQUIRED')) {
+      return jsonError(409, 'duplicate_name_requires_proof', 'This name is already in use. Add a shop photo or a valid-format GSTIN for review.');
+    }
+    console.error('Shop application failed:', error?.message);
+    return jsonError(500, 'signup', 'Could not finish the application. Please try again.');
+  }
+  await cleanup();
+  return jsonError(503, 'code_unavailable', 'Could not generate a shop code. Please try again.');
 }

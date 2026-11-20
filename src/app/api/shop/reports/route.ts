@@ -6,7 +6,7 @@ export async function GET(req: Request) {
   if (!staff || staff.shopIds.length === 0) return jsonError(403, 'forbidden', 'No shop');
   const url = new URL(req.url);
   const shopId = url.searchParams.get('shop_id') ?? staff.shopIds[0];
-  if (!staff.shopIds.includes(shopId) && !staff.isAdmin) return jsonError(403, 'forbidden', 'Not your shop');
+  if (!staff.shopIds.includes(shopId)) return jsonError(403, 'forbidden', 'Not your shop');
   const range = url.searchParams.get('range') ?? 'week';
   const days = range === 'day' ? 1 : range === 'month' ? 30 : 7;
   const since = new Date(); since.setDate(since.getDate() - (days - 1)); since.setHours(0, 0, 0, 0);

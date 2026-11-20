@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Loader2, CheckCircle2, XCircle, PenLine, ArrowLeft, Phone, Mail, MapPin, ExternalLink, Boxes, Printer, Clock, User, Building2, BadgeCheck, Ban, Play, Pause, Check, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { BUSINESS_TYPE_LABELS, REGISTRATION_LABELS, SERVICE_LABELS, INVENTORY_CATEGORY_LABELS, formatBusinessHours, type ChecklistItem } from '@/lib/onboarding';
+import { publicShopPath } from '@/lib/shop-identity';
 
 interface Detail {
   shop: {
@@ -19,6 +20,7 @@ interface Detail {
     pincode?: string; alternate_phone?: string | null; registration_type?: string; registration_number?: string | null;
     business_hours?: Record<string, unknown>; referral_source?: string | null;
     review_note?: string; reviewed_at?: string | null; submitted_at?: string;
+    duplicate_name?: boolean; name_proof_type?: string | null; name_proof_gstin?: string | null; name_proof_photo_path?: string | null;
   } | null;
   services: Array<{ service: string; enabled: boolean }>;
   inventory: Array<{ id: string; name: string; category: string; qty: number; unit: string; low_stock_threshold: number }>;
@@ -44,6 +46,7 @@ export default function AdminShopDetailPage({ params }: { params: Promise<{ id: 
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [proofReviewed, setProofReviewed] = useState(false);
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/admin/shops/${id}`, { cache: 'no-store' });
@@ -60,7 +63,7 @@ export default function AdminShopDetailPage({ params }: { params: Promise<{ id: 
     try {
       const res = await fetch(`/api/admin/shops/${id}/kyc`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, note: note.trim() || undefined }),
+        body: JSON.stringify({ action, note: note.trim() || undefined, proof_reviewed: proofReviewed }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) { setToast(body?.error?.message ?? 'Action failed'); return; }
@@ -91,11 +94,11 @@ export default function AdminShopDetailPage({ params }: { params: Promise<{ id: 
             </div>
             <div className="text-xs text-neutral-500 mt-1 flex flex-wrap gap-x-3 gap-y-1">
               <span className="inline-flex items-center gap-1"><MapPin size={11} />{shop.address}, {shop.city}</span>
-              <span>Slug: <span className="font-mono">{shop.slug}</span> · Code: <span className="font-mono">{shop.short_code}</span></span>
+              <span>Shop code: <span className="font-mono font-bold">{shop.short_code}</span></span>
               <span>Applied {new Date(shop.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
             </div>
             <div className="mt-2 flex flex-wrap gap-2">
-              <a href={`/s/${shop.slug}`} target="_blank" rel="noreferrer" className="btn btn-ghost h-8 px-3 text-xs"><ExternalLink size={12} />Customer page</a>
+              <a href={publicShopPath(shop.short_code)} target="_blank" rel="noreferrer" className="btn btn-ghost h-8 px-3 text-xs"><ExternalLink size={12} />Customer page</a>
               <a href={`tel:${shop.phone}`} className="btn btn-ghost h-8 px-3 text-xs"><Phone size={12} />Call shop</a>
               {shop.owner?.email && <a href={`mailto:${shop.owner.email}`} className="btn btn-ghost h-8 px-3 text-xs"><Mail size={12} />Email owner</a>}
             </div>
@@ -112,6 +115,15 @@ export default function AdminShopDetailPage({ params }: { params: Promise<{ id: 
 
       <div className="grid lg:grid-cols-3 gap-4 mt-4">
         <div className="lg:col-span-2 space-y-4">
+          {ob?.duplicate_name && (
+            <section className="rounded-2xl border border-amber-300 bg-amber-50 p-5">
+              <h2 className="text-sm font-extrabold text-amber-950 flex items-center gap-2"><AlertTriangle size={16} />Duplicate-name proof needs review</h2>
+              <p className="mt-1 text-sm text-amber-900">Another shop already uses this name. Check the submitted evidence and confirm the shops are distinct before approving. A GSTIN&apos;s format alone does not verify its ownership.</p>
+              {ob.name_proof_gstin && <p className="mt-3 text-sm text-amber-950">Submitted GSTIN: <strong className="font-mono">{ob.name_proof_gstin}</strong></p>}
+              {ob.name_proof_photo_path && <a className="btn btn-dark h-9 px-4 mt-3 text-xs" href={`/api/admin/shops/${id}/name-proof`} target="_blank" rel="noreferrer"><ExternalLink size={13} />View private shop photo</a>}
+              {!ob.name_proof_photo_path && !ob.name_proof_gstin && <p className="mt-2 text-sm font-bold text-red-700">No proof is available. Request changes before approving.</p>}
+            </section>
+          )}
           {/* Checklist */}
           <section className="card p-5">
             <h2 className="text-sm font-extrabold flex items-center gap-2"><BadgeCheck size={15} className="text-indigo-600" />What&apos;s needed — onboarding checklist</h2>
@@ -217,9 +229,15 @@ export default function AdminShopDetailPage({ params }: { params: Promise<{ id: 
             <textarea className="input min-h-24 text-sm" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Please add your UPI ID and printer models, then resubmit." />
             {ob?.reviewed_at && <p className="text-[11px] text-neutral-400 mt-1">Last reviewed {new Date(ob.reviewed_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}</p>}
 
+            {ob?.duplicate_name && shop.kyc_status !== 'approved' && (
+              <label className="mt-4 flex items-start gap-2 text-xs text-amber-900">
+                <input type="checkbox" className="mt-0.5 accent-indigo-600" checked={proofReviewed} onChange={(event) => setProofReviewed(event.target.checked)} />
+                I reviewed the duplicate-name proof and confirmed these are distinct shops.
+              </label>
+            )}
             <div className="grid gap-2 mt-4">
               {shop.kyc_status !== 'approved' && (
-                <button disabled={busy != null} onClick={() => act('approve')} className="btn btn-primary h-11 text-sm">
+                <button disabled={busy != null || (!!ob?.duplicate_name && !proofReviewed)} onClick={() => act('approve')} className="btn btn-primary h-11 text-sm">
                   {busy === 'approve' ? <Loader2 size={15} className="animate-spin" /> : <><CheckCircle2 size={15} />Approve &amp; activate shop</>}
                 </button>
               )}

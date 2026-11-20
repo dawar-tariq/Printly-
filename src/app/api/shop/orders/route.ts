@@ -8,7 +8,7 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const lane = url.searchParams.get('lane') ?? 'board';
   const shopId = url.searchParams.get('shop_id') ?? staff.shopIds[0];
-  if (!staff.shopIds.includes(shopId) && !staff.isAdmin) return jsonError(403, 'forbidden', 'Not your shop');
+  if (!staff.shopIds.includes(shopId)) return jsonError(403, 'forbidden', 'Not your shop');
 
   let query = staff.admin
     .from('orders')

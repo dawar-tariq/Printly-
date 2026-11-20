@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Loader2, CheckCircle2, Settings } from 'lucide-react';
+import { AdminPassword } from '@/components/AdminPassword';
 
 export default function AdminSettingsPage() {
   const [loaded, setLoaded] = useState(false);
@@ -68,6 +69,7 @@ export default function AdminSettingsPage() {
         </label>
         <button onClick={save} disabled={saving} className="btn btn-dark h-12 px-8">{saving ? <Loader2 size={17} className="animate-spin" /> : saved ? <><CheckCircle2 size={17} />Saved</> : 'Save settings'}</button>
       </div>
+      <AdminPassword />
     </div>
   );
 }

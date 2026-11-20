@@ -1,10 +1,11 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Logo } from '@/components/Logo';
 import { Loader2, CheckCircle2, Store, ArrowLeft, ArrowRight, Plus, Trash2, ShieldCheck, Clock, Boxes, Printer, Building2, Check, CircleAlert } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { isGstinFormat, normalizeShopName } from '@/lib/shop-identity';
 
 const STEPS = [
   { key: 'shop', label: 'Shop & owner', icon: Store, hint: 'Who you are and how to reach you' },
@@ -65,7 +66,28 @@ export default function ShopSignupPage() {
   ]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState<string | null>(null);
+  const [done, setDone] = useState<{ message: string; code: string; path: string } | null>(null);
+  const [photo, setPhoto] = useState<File | null>(null);
+  const [nameCheck, setNameCheck] = useState<{ name: string; status: 'idle' | 'checking' | 'available' | 'duplicate' | 'error' }>({ name: '', status: 'idle' });
+  const [nameRetry, setNameRetry] = useState(0);
+  const normalizedName = normalizeShopName(form.shop_name);
+
+  useEffect(() => {
+    if (normalizedName.length < 2) { setNameCheck({ name: normalizedName, status: 'idle' }); return; }
+    const controller = new AbortController();
+    setNameCheck({ name: normalizedName, status: 'checking' });
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/shop/name-check?name=${encodeURIComponent(form.shop_name.trim())}`, { signal: controller.signal, cache: 'no-store' });
+        if (!res.ok) throw new Error('Name check failed');
+        const result = await res.json();
+        setNameCheck({ name: normalizedName, status: result.duplicate ? 'duplicate' : 'available' });
+      } catch {
+        if (!controller.signal.aborted) setNameCheck({ name: normalizedName, status: 'error' });
+      }
+    }, 350);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [normalizedName, nameRetry]); // normalized names are the same key used by the server
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setForm({ ...form, [k]: e.target.value });
 
@@ -73,13 +95,15 @@ export default function ShopSignupPage() {
     const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim());
     const phoneOk = form.phone.replace(/\D/g, '').length >= 8;
     switch (step) {
-      case 0: return form.shop_name.trim().length >= 2 && form.owner_name.trim().length >= 2 && emailOk && form.password.length >= 8 && phoneOk && form.address.trim().length >= 3 && form.city.trim().length >= 2;
+      case 0: return normalizedName.length >= 2 && nameCheck.name === normalizedName &&
+        (nameCheck.status === 'available' || (nameCheck.status === 'duplicate' && (!!photo || isGstinFormat(form.gstin)))) &&
+        form.owner_name.trim().length >= 2 && emailOk && form.password.length >= 8 && phoneOk && form.address.trim().length >= 3 && form.city.trim().length >= 2;
       case 1: return true; // business details are optional but encouraged
       case 2: return services.length >= 1;
       case 3: return inventory.every((i) => !i.name.trim() || Number(i.qty || 0) >= 0);
       default: return true;
     }
-  }, [step, form, services, inventory]);
+  }, [step, form, services, inventory, nameCheck, normalizedName, photo]);
 
   const toggleService = (v: string) => setServices((s) => (s.includes(v) ? s.filter((x) => x !== v) : [...s, v]));
   const setInv = (idx: number, k: keyof InvRow, v: string) => setInventory((rows) => rows.map((r, i) => (i === idx ? { ...r, [k]: v } : r)));
@@ -123,12 +147,23 @@ export default function ShopSignupPage() {
             low_stock_threshold: Number(i.low_stock_threshold || 0),
           })),
       };
-      const res = await fetch('/api/shop/signup', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
-      });
+      const body = new FormData();
+      body.append('payload', JSON.stringify(payload));
+      // Proof is only requested/submitted for an existing name.
+      if (photo && nameCheck.status === 'duplicate') body.append('proof', photo);
+      const res = await fetch('/api/shop/signup', { method: 'POST', body });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) { setError(data?.error?.message ?? 'Signup failed'); return; }
-      setDone(data.message ?? 'Application received');
+      if (!res.ok) {
+        if (data?.error?.code === 'duplicate_name_requires_proof') {
+          setNameCheck({ name: normalizedName, status: 'duplicate' });
+          setStep(0);
+        }
+        setError(data?.error?.message ?? 'Signup failed');
+        return;
+      }
+      setDone({ message: data.message ?? 'Application received', code: data.short_code, path: data.customer_path });
+    } catch {
+      setError('Could not submit your application. Please check your connection and try again.');
     } finally { setBusy(false); }
   };
 
@@ -138,8 +173,13 @@ export default function ShopSignupPage() {
         <div className="card max-w-md p-8 text-center">
           <CheckCircle2 size={48} className="mx-auto text-green-600" />
           <h1 className="mt-4 text-2xl font-extrabold">Application received!</h1>
-          <p className="mt-2 text-sm text-neutral-600">{done}</p>
-          <p className="mt-3 text-xs text-neutral-500">Sign in with your email to track verification. You can add more inventory and edit your rate card anytime from Settings.</p>
+          <p className="mt-2 text-sm text-neutral-600">{done.message}</p>
+          <div className="mt-4 rounded-2xl border border-orange-200 bg-orange-50 p-4">
+            <p className="text-xs font-semibold text-orange-900">Your unique shop code</p>
+            <p className="mt-1 font-mono text-xl font-extrabold tracking-wider text-orange-900">{done.code}</p>
+            <p className="mt-1 text-xs text-orange-800">Customer link: {done.path}</p>
+          </div>
+          <p className="mt-3 text-xs text-neutral-500">Sign in with your email to track verification. Your customer link works after approval.</p>
           <Link href="/login" className="btn btn-dark h-12 px-6 mt-6 inline-flex">Go to sign in</Link>
         </div>
       </div>
@@ -183,7 +223,27 @@ export default function ShopSignupPage() {
         <div className="card mt-4 p-5 sm:p-6">
           {step === 0 && (
             <div className="grid sm:grid-cols-2 gap-4">
-              <div className="sm:col-span-2"><label className="label">Shop name *</label><input className="input" value={form.shop_name} onChange={set('shop_name')} placeholder="e.g. Bright Prints, Lal Chowk" /></div>
+              <div className="sm:col-span-2">
+                <label className="label" htmlFor="shop-name">Shop name *</label>
+                <input id="shop-name" className="input" value={form.shop_name} onChange={set('shop_name')} placeholder="e.g. Bright Prints" maxLength={80} />
+                {nameCheck.name === normalizedName && nameCheck.status === 'checking' && <p className="mt-1 text-xs text-neutral-500" role="status">Checking this name…</p>}
+                {nameCheck.name === normalizedName && nameCheck.status === 'available' && <p className="mt-1 text-xs text-green-700" role="status">This name is available. No name proof is required.</p>}
+                {nameCheck.name === normalizedName && nameCheck.status === 'error' && <p className="mt-1 text-xs text-red-700">Could not check this name. <button type="button" onClick={() => setNameRetry((n) => n + 1)} className="underline font-bold">Try again</button></p>}
+              </div>
+              {nameCheck.name === normalizedName && nameCheck.status === 'duplicate' && (
+                <div className="sm:col-span-2 rounded-2xl border border-amber-300 bg-amber-50 p-4" role="status">
+                  <p className="font-bold text-sm text-amber-950">Another shop already uses this name</p>
+                  <p className="mt-1 text-xs text-amber-900">You can still apply. Provide either a shop photo here or a GSTIN below. Our team will review it before approval; the format alone does not verify ownership.</p>
+                  <label htmlFor="signup-photo" className="label mt-3">Shop photo (JPEG, PNG or WebP, up to 3 MB)</label>
+                  <input id="signup-photo" className="input text-sm" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => {
+                    const file = event.target.files?.[0] ?? null;
+                    if (file && (file.size > 3 * 1024 * 1024 || !['image/jpeg', 'image/png', 'image/webp'].includes(file.type))) {
+                      setPhoto(null); event.target.value = ''; setError('Choose a JPEG, PNG or WebP photo under 3 MB.');
+                    } else { setPhoto(file); setError(null); }
+                  }} />
+                  <p className="mt-1 text-xs text-amber-900">Only the review team can see your photo. No photo is needed if you provide a GSTIN in the correct format.</p>
+                </div>
+              )}
               <div className="sm:col-span-2"><label className="label">Your name *</label><input className="input" value={form.owner_name} onChange={set('owner_name')} placeholder="Owner / manager name" autoComplete="name" /></div>
               <div><label className="label">Email *</label><input className="input" type="email" value={form.email} onChange={set('email')} placeholder="shop@example.com" autoComplete="email" /></div>
               <div><label className="label">Password * (min 8 chars)</label><input className="input" type="password" value={form.password} onChange={set('password')} autoComplete="new-password" placeholder="••••••••" /></div>

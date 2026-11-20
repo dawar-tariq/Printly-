@@ -71,8 +71,8 @@ export const businessHoursInput = z.object({
 }).optional();
 
 export const shopSignupInput = z.object({
-  shop_name: z.string().min(2).max(80),
-  owner_name: z.string().min(2).max(80),
+  shop_name: z.string().trim().min(2).max(80),
+  owner_name: z.string().trim().min(2).max(80),
   email: z.string().email().max(120),
   password: z.string().min(8).max(100),
   phone: z.string().min(8).max(16),
@@ -100,7 +100,7 @@ export const shopSignupInput = z.object({
 export type ShopSignupInput = z.infer<typeof shopSignupInput>;
 
 export const settingsInput = z.object({
-  name: z.string().min(2).max(80).optional(),
+  name: z.string().trim().min(2).max(80).optional(),
   address: z.string().max(200).optional(),
   city: z.string().max(80).optional(),
   phone: z.string().max(16).optional(),

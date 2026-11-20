@@ -7,6 +7,7 @@ import { Logo } from '@/components/Logo';
 import { createBrowserSupabase } from '@/lib/supabase-client';
 import { LayoutDashboard, Settings, Boxes, BarChart3, LogOut, Printer, ExternalLink, Hourglass, PenLine, Ban } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { publicShopPath } from '@/lib/shop-identity';
 
 const TABS = [
   { href: '/shop', label: 'Orders', icon: LayoutDashboard, exact: true },
@@ -15,7 +16,7 @@ const TABS = [
   { href: '/shop/settings', label: 'Settings & QR', icon: Settings },
 ];
 
-export function ShopShell({ shop, children }: { shop: { id: string; name: string; slug: string; kyc_status: string; status: string }; children: React.ReactNode }) {
+export function ShopShell({ shop, reviewNote, children }: { shop: { id: string; name: string; slug: string; short_code: string; kyc_status: string; status: string }; reviewNote: string; children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [signingOut, setSigningOut] = useState(false);
@@ -34,7 +35,7 @@ export function ShopShell({ shop, children }: { shop: { id: string; name: string
           <Link href="/" className="flex items-center gap-2 font-extrabold shrink-0"><span className="w-7 h-7 rounded-lg bg-orange-600 grid place-items-center"><Printer size={15} /></span><span className="hidden xs:inline">Printly</span></Link>
           <div className="min-w-0 flex-1">
             <div className="text-sm font-bold truncate leading-tight">{shop.name}</div>
-            <div className="text-[10px] text-neutral-400 leading-tight">{shop.kyc_status === 'approved' ? 'Verified shop' : 'Verification pending'} · <a className="hover:underline inline-flex items-center gap-0.5" href={`/s/${shop.slug}`} target="_blank">customer page <ExternalLink size={9} /></a></div>
+            <div className="text-[10px] text-neutral-400 leading-tight">{shop.kyc_status === 'approved' ? 'Verified shop' : 'Verification pending'} · {shop.short_code} · <a className="hover:underline inline-flex items-center gap-0.5" href={publicShopPath(shop.short_code)} target="_blank" rel="noreferrer">customer page <ExternalLink size={9} /></a></div>
           </div>
           <button onClick={signOut} disabled={signingOut} className="p-2 rounded-lg hover:bg-neutral-800 text-neutral-300" aria-label="Sign out"><LogOut size={18} /></button>
         </div>
@@ -59,13 +60,13 @@ export function ShopShell({ shop, children }: { shop: { id: string; name: string
         {shop.kyc_status === 'changes_requested' && (
           <div className="mb-4 rounded-2xl border border-sky-300 bg-sky-50 px-4 py-3 text-sm text-sky-900 flex items-start gap-2.5">
             <PenLine size={16} className="mt-0.5 shrink-0" />
-            <div><b>We need a little more info.</b> Please check Settings / Inventory and update the details our team asked for, then contact support to re-submit.</div>
+            <div><b>We need a little more info.</b> {reviewNote ? <span>Reviewer&apos;s note: {reviewNote}</span> : 'Please check Settings and update the details requested by our team.'} <Link href="/shop/settings" className="font-bold underline">Open Settings</Link></div>
           </div>
         )}
         {shop.kyc_status === 'rejected' && (
           <div className="mb-4 rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900 flex items-start gap-2.5">
             <Ban size={16} className="mt-0.5 shrink-0" />
-            <div><b>Application not approved.</b> Please contact Printly support to understand what&apos;s needed before re-applying.</div>
+            <div><b>Application not approved.</b> {reviewNote ? <span>Reviewer&apos;s note: {reviewNote}</span> : 'Please contact Printly support to understand what is needed.'}</div>
           </div>
         )}
         {children}

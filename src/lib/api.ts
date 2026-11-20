@@ -19,27 +19,23 @@ export async function getSessionProfile() {
   return { user, profile, supabase };
 }
 
-/** Shop ids the current user can operate. Empty when not staff/admin. */
+/** Shop access is membership-based; admin review lives in the separate admin console. */
 export async function getStaffContext() {
   const session = await getSessionProfile();
   if (!session) return null;
   const { user, profile } = session;
   const admin = createAdminSupabase();
   const isAdmin = profile?.role === 'admin';
-  let shopIds: string[] = [];
-  if (isAdmin) {
-    const { data } = await admin.from('shops').select('id').limit(200);
-    shopIds = (data ?? []).map((s) => s.id);
-  } else {
-    const { data } = await admin.from('shop_staff').select('shop_id').eq('user_id', user.id);
-    shopIds = (data ?? []).map((s) => s.shop_id);
-  }
+  const { data, error } = isAdmin
+    ? { data: [], error: null }
+    : await admin.from('shop_staff').select('shop_id').eq('user_id', user.id);
+  // Fail closed if memberships cannot be loaded.
+  const shopIds = error ? [] : (data ?? []).map((s) => s.shop_id);
   return { user, profile, isAdmin, shopIds, admin };
 }
 
 export async function assertStaffOfShop(shopId: string) {
   const staff = await getStaffContext();
-  if (!staff) return null;
-  if (staff.isAdmin || staff.shopIds.includes(shopId)) return staff;
-  return null;
+  if (!staff || staff.isAdmin) return null;
+  return staff.shopIds.includes(shopId) ? staff : null;
 }

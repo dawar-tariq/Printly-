@@ -4,6 +4,8 @@ import { createServerSupabase } from '@/lib/supabase';
 import { Logo } from '@/components/Logo';
 import { Star, MapPin, Clock, Printer, FileText, ScanLine, BookOpen, Layers, Copy, ArrowRight, ShieldCheck } from 'lucide-react';
 import { formatPaise } from '@/lib/format';
+import { findPublicShop } from '@/lib/public-shop';
+import { publicShopPath } from '@/lib/shop-identity';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,11 +19,7 @@ const SERVICE_LABEL: Record<string, string> = {
 export default async function ShopLandingPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const supabase = await createServerSupabase();
-  const { data: shop, error } = await supabase
-    .from('shops')
-    .select('id, slug, name, address, city, phone, eta_minutes, rating_avg, rating_count, status, upi_id')
-    .eq('slug', slug)
-    .maybeSingle();
+  const { data: shop, error } = await findPublicShop(supabase, slug);
 
   if (error) {
     return (
@@ -60,6 +58,7 @@ export default async function ShopLandingPage({ params }: { params: Promise<{ sl
           <div className="flex items-start justify-between gap-3">
             <div>
               <h1 className="text-2xl font-extrabold tracking-tight">{shop.name}</h1>
+              <p className="mt-1 text-xs font-semibold text-neutral-500">Shop code <span className="font-mono">{shop.short_code}</span></p>
               <p className="mt-1 text-sm text-neutral-500 flex items-center gap-1.5"><MapPin size={14} />{shop.address}{shop.city ? `, ${shop.city}` : ''}</p>
               <p className="mt-1 text-sm text-neutral-500 flex items-center gap-1.5"><Clock size={14} />Avg. ready in ~{shop.eta_minutes} min</p>
             </div>
@@ -99,7 +98,7 @@ export default async function ShopLandingPage({ params }: { params: Promise<{ sl
 
         {/* CTA */}
         {active && (
-          <Link href={`/s/${shop.slug}/order`} className="btn btn-primary w-full h-14 text-lg mt-6 shadow-lg shadow-orange-600/20">
+          <Link href={`${publicShopPath(shop.short_code)}/order`} className="btn btn-primary w-full h-14 text-lg mt-6 shadow-lg shadow-orange-600/20">
             Start your order <ArrowRight size={20} />
           </Link>
         )}

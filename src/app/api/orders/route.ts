@@ -1,12 +1,14 @@
 import { createAdminSupabase } from '@/lib/supabase';
 import { jsonOk, jsonError } from '@/lib/api';
 import { createOrderInput } from '@/lib/contracts';
+import { findPublicShop } from '@/lib/public-shop';
 
 export async function POST(req: Request) {
   const parsed = createOrderInput.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) return jsonError(422, 'validation', 'Invalid input');
   const admin = createAdminSupabase();
-  const { data: shop } = await admin.from('shops').select('id, status').eq('slug', parsed.data.shop_slug).maybeSingle();
+  const { data: shop, error: shopError } = await findPublicShop(admin, parsed.data.shop_slug);
+  if (shopError) return jsonError(500, 'db', 'Could not look up this shop');
   if (!shop) return jsonError(404, 'shop_not_found', 'Shop not found');
   if (shop.status !== 'active') return jsonError(403, 'shop_unavailable', 'This shop is not accepting orders right now');
 

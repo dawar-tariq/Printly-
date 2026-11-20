@@ -10,6 +10,7 @@ export const dynamic = 'force-dynamic';
 export default async function ShopLayout({ children }: { children: React.ReactNode }) {
   const staff = await getStaffContext();
   if (!staff) redirect('/login?next=/shop');
+  if (staff.isAdmin) redirect('/admin');
 
   if (staff.shopIds.length === 0) {
     return (
@@ -26,8 +27,10 @@ export default async function ShopLayout({ children }: { children: React.ReactNo
   }
 
   const admin = createAdminSupabase();
-  const { data: shop } = await admin
-    .from('shops').select('id, name, slug, kyc_status, status').eq('id', staff.shopIds[0]).single();
-
-  return <ShopShell shop={shop!}>{children}</ShopShell>;
+  const [{ data: shop }, { data: onboarding }] = await Promise.all([
+    admin.from('shops').select('id, name, slug, short_code, kyc_status, status').eq('id', staff.shopIds[0]).single(),
+    admin.from('shop_onboarding').select('review_note').eq('shop_id', staff.shopIds[0]).maybeSingle(),
+  ]);
+  if (!shop) redirect('/login?next=/shop');
+  return <ShopShell shop={shop} reviewNote={onboarding?.review_note ?? ''}>{children}</ShopShell>;
 }

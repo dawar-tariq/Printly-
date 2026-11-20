@@ -3,6 +3,10 @@ import { NextResponse, type NextRequest } from 'next/server';
 
 export async function middleware(req: NextRequest) {
   let res = NextResponse.next({ request: req });
+  const path = req.nextUrl.pathname.replace(/\/+$/, '') || '/';
+  // These routes are deliberately outside the authenticated layouts.
+  if (path === '/shop/signup' || path === '/admin/login') return res;
+
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -18,13 +22,14 @@ export async function middleware(req: NextRequest) {
     },
   );
   const { data: { user } } = await supabase.auth.getUser();
-  const path = req.nextUrl.pathname;
-  const isProtected = path.startsWith('/shop') || path.startsWith('/admin');
-  if (isProtected && path !== '/shop/signup' && !user) {
+  if (!user) {
     const url = req.nextUrl.clone();
-    url.pathname = '/login';
-    url.searchParams.set('next', path);
-    return NextResponse.redirect(url);
+    url.pathname = path === '/admin' || path.startsWith('/admin/') ? '/admin/login' : '/login';
+    url.search = '';
+    url.searchParams.set('next', `${path}${req.nextUrl.search}`);
+    const redirect = NextResponse.redirect(url);
+    res.cookies.getAll().forEach((cookie) => redirect.cookies.set(cookie));
+    return redirect;
   }
   return res;
 }

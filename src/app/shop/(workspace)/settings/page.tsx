@@ -5,6 +5,8 @@ import {
   Loader2, Save, Plus, Trash2, QrCode, Download, CheckCircle2, Store, Wallet, Zap, Info,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { publicShopPath } from '@/lib/shop-identity';
+import { useRouter } from 'next/navigation';
 
 interface RateRow {
   service: string; paper_size: string | null; color: string | null; sides: string | null;
@@ -15,16 +17,22 @@ type RateKey = `${string}`;
 const rowKey = (r: RateRow): RateKey => `${r.service}|${r.paper_size}|${r.color}|${r.sides}|${r.paper_gsm}|${r.option}|${r.unit}`;
 
 export default function ShopSettingsPage() {
+  const router = useRouter();
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [claim, setClaim] = useState<{ required: boolean; status: string; isOwner: boolean; note: string } | null>(null);
+  const [claimGstin, setClaimGstin] = useState('');
+  const [claimPhoto, setClaimPhoto] = useState<File | null>(null);
 
   // profile
   const [profile, setProfile] = useState({ name: '', address: '', city: '', phone: '', gstin: '', upi_id: '', eta_minutes: 20, rush_surcharge_bps: 1000 });
   const [services, setServices] = useState<Record<string, boolean>>({ print: true, photocopy: true, scan: true, bind: true, laminate: true });
   const [shortCode, setShortCode] = useState('');
-  const [slug, setSlug] = useState('');
+  const [duplicateName, setDuplicateName] = useState(false);
+  const [proofPhoto, setProofPhoto] = useState<File | null>(null);
 
   // rate card
   const [rows, setRows] = useState<RateRow[]>([]);
@@ -33,12 +41,14 @@ export default function ShopSettingsPage() {
   const load = useCallback(async () => {
     const [meRes, cardRes] = await Promise.all([fetch('/api/shop/me'), fetch('/api/shop/rate-card')]);
     if (meRes.ok) {
-      const { shop, services: svc } = await meRes.json();
+      const { shop, services: svc, onboarding, is_owner } = await meRes.json();
+      setClaim({ required: !!onboarding?.duplicate_name, status: shop.kyc_status, isOwner: !!is_owner, note: onboarding?.review_note ?? '' });
+      setClaimGstin(onboarding?.name_proof_gstin ?? shop.gstin ?? '');
       setProfile({
         name: shop.name, address: shop.address, city: shop.city, phone: shop.phone,
         gstin: shop.gstin ?? '', upi_id: shop.upi_id ?? '', eta_minutes: shop.eta_minutes, rush_surcharge_bps: shop.rush_surcharge_bps,
       });
-      setSlug(shop.slug); setShortCode(shop.short_code);
+      setShortCode(shop.short_code);
       const map: Record<string, boolean> = {};
       for (const s of svc) map[s.service] = s.enabled;
       setServices(map);
@@ -49,20 +59,49 @@ export default function ShopSettingsPage() {
   useEffect(() => { load(); }, [load]);
 
   const saveProfile = async () => {
-    setSaving(true); setBanner(null);
+    setSaving(true); setBanner(null); setNotice(null);
     try {
-      const res = await fetch('/api/shop/settings', {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...profile,
-          gstin: profile.gstin || null, upi_id: profile.upi_id || null,
-          eta_minutes: Number(profile.eta_minutes) || 20, rush_surcharge_bps: Number(profile.rush_surcharge_bps) || 0,
-          services: Object.entries(services).map(([service, enabled]) => ({ service, enabled })),
-        }),
-      });
-      if (res.ok) { setSavedAt(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })); }
-      else { const d = await res.json().catch(() => ({})); setBanner(d?.error?.message ?? 'Save failed'); }
-    } finally { setSaving(false); }
+      const body = new FormData();
+      body.append('payload', JSON.stringify({
+        ...profile,
+        gstin: profile.gstin || null, upi_id: profile.upi_id || null,
+        eta_minutes: Number(profile.eta_minutes) || 20, rush_surcharge_bps: Number(profile.rush_surcharge_bps) || 0,
+        services: Object.entries(services).map(([service, enabled]) => ({ service, enabled })),
+      }));
+      if (duplicateName && proofPhoto) body.append('proof', proofPhoto);
+      const res = await fetch('/api/shop/settings', { method: 'PUT', body });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setDuplicateName(false); setProofPhoto(null);
+        setSavedAt(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }));
+        if (d.duplicate_name) {
+          setNotice('Name submitted for review. Your shop is paused until the proof is reviewed.');
+          await load();
+        }
+        router.refresh();
+      } else {
+        if (d?.error?.code === 'duplicate_name_requires_proof') setDuplicateName(true);
+        setBanner(d?.error?.message ?? 'Save failed');
+      }
+    } catch { setBanner('Could not save your details. Please try again.'); }
+    finally { setSaving(false); }
+  };
+
+  const resubmitProof = async () => {
+    setSaving(true); setBanner(null); setNotice(null);
+    try {
+      const body = new FormData();
+      body.append('payload', JSON.stringify({ gstin: claimGstin.trim() || undefined }));
+      if (claimPhoto) body.append('proof', claimPhoto);
+      const res = await fetch('/api/shop/name-proof', { method: 'POST', body });
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok) { setBanner(result?.error?.message ?? 'Could not submit proof.'); return; }
+      setClaimPhoto(null);
+      setNotice('Your proof was submitted for review. Your shop will stay paused until approved.');
+      await load();
+      router.refresh();
+    } catch { setBanner('Could not submit proof. Please try again.'); }
+    finally { setSaving(false); }
   };
 
   const saveRateCard = async () => {
@@ -112,7 +151,8 @@ export default function ShopSettingsPage() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-5 pb-16">
-      {banner && <div className="rounded-xl bg-red-50 border border-red-200 text-red-800 text-sm px-4 py-2">{banner}</div>}
+      {banner && <div role="alert" className="rounded-xl bg-red-50 border border-red-200 text-red-800 text-sm px-4 py-2">{banner}</div>}
+      {notice && <div role="status" className="rounded-xl bg-green-50 border border-green-200 text-green-800 text-sm px-4 py-2">{notice}</div>}
       {savedAt && <div className="rounded-xl bg-green-50 border border-green-200 text-green-800 text-sm px-4 py-2 flex items-center gap-2"><CheckCircle2 size={15} />Saved at {savedAt}</div>}
 
       {/* QR block */}
@@ -124,16 +164,51 @@ export default function ShopSettingsPage() {
         <div className="text-center sm:text-left">
           <h1 className="text-xl font-extrabold flex items-center gap-2 justify-center sm:justify-start"><QrCode size={20} />Your shop QR</h1>
           <p className="text-sm text-neutral-600 mt-1">Print it, stick it on the counter or window. Customers scan → upload → pay → collect. No app, no account.</p>
-          <div className="mt-2 text-[11px] font-mono text-neutral-500">/s/{slug} · short code <b>{shortCode}</b></div>
+          <div className="mt-2 text-xs text-neutral-600">Shop code: <b className="font-mono">{shortCode}</b></div>
+          <a href={publicShopPath(shortCode)} className="mt-1 block text-xs font-mono text-orange-700 hover:underline" target="_blank" rel="noreferrer">{publicShopPath(shortCode)}</a>
+          <p className="mt-1 text-[11px] text-neutral-500">This permanent code keeps your link separate, even if another shop has the same name.</p>
           <a href="/api/shop/qr?download=1" className="btn btn-dark h-10 px-4 mt-3 inline-flex text-sm"><Download size={15} />Download PNG</a>
         </div>
       </section>
+
+      {claim?.required && claim.status !== 'approved' && (
+        <section className="rounded-2xl border border-amber-300 bg-amber-50 p-5">
+          <h2 className="font-extrabold text-amber-950">Duplicate-name proof</h2>
+          <p className="mt-1 text-sm text-amber-900">Your shop name matches another shop. Provide a shop photo or GSTIN for the review team. Your shop remains paused until approved.</p>
+          {claim.note && <p className="mt-2 text-sm font-semibold text-amber-950">Reviewer&apos;s note: {claim.note}</p>}
+          {claim.isOwner ? <>
+            <label htmlFor="proof-gstin" className="label mt-3">GSTIN (or upload a photo)</label>
+            <input id="proof-gstin" className="input" value={claimGstin} onChange={(e) => setClaimGstin(e.target.value)} placeholder="01ABCDE1234F1Z5" />
+            <label htmlFor="proof-resubmit" className="label mt-3">Shop photo (JPEG, PNG or WebP, up to 3 MB)</label>
+            <input id="proof-resubmit" className="input text-sm" type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => {
+              const file = event.target.files?.[0] ?? null;
+              if (file && (file.size > 3 * 1024 * 1024 || !['image/jpeg', 'image/png', 'image/webp'].includes(file.type))) {
+                event.target.value = ''; setClaimPhoto(null); setBanner('Choose a JPEG, PNG or WebP photo under 3 MB.');
+              } else setClaimPhoto(file);
+            }} />
+            <button type="button" onClick={resubmitProof} disabled={saving} className="btn btn-dark h-10 px-4 mt-3 text-sm">Submit proof for review</button>
+          </> : <p className="mt-2 text-sm text-amber-900">Ask the shop owner to submit or update the evidence.</p>}
+        </section>
+      )}
 
       {/* Profile */}
       <section className="card p-5">
         <h2 className="text-sm font-extrabold uppercase tracking-widest text-neutral-500 flex items-center gap-1.5"><Store size={14} />Shop profile & UPI</h2>
         <div className="grid sm:grid-cols-2 gap-3 mt-3">
-          <div className="sm:col-span-2"><label className="label">Shop name</label><input className="input" value={profile.name} onChange={(e) => setProfile({ ...profile, name: e.target.value })} /></div>
+          <div className="sm:col-span-2"><label className="label">Shop name</label><input className="input" value={profile.name} onChange={(e) => { setProfile({ ...profile, name: e.target.value }); setDuplicateName(false); setProofPhoto(null); }} /></div>
+          {duplicateName && (
+            <div className="sm:col-span-2 rounded-2xl border border-amber-300 bg-amber-50 p-4">
+              <p className="text-sm font-bold text-amber-950">That name is already in use</p>
+              <p className="mt-1 text-xs text-amber-900">Provide either a shop photo or a GSTIN below. A duplicate-name change will be reviewed before your shop goes live again.</p>
+              <label htmlFor="settings-proof-photo" className="label mt-3">Shop photo (JPEG, PNG or WebP, up to 3 MB)</label>
+              <input id="settings-proof-photo" type="file" accept="image/jpeg,image/png,image/webp" className="input text-sm" onChange={(event) => {
+                const file = event.target.files?.[0] ?? null;
+                if (file && (file.size > 3 * 1024 * 1024 || !['image/jpeg', 'image/png', 'image/webp'].includes(file.type))) {
+                  event.target.value = ''; setProofPhoto(null); setBanner('Choose a JPEG, PNG or WebP photo under 3 MB.');
+                } else { setProofPhoto(file); }
+              }} />
+            </div>
+          )}
           <div className="sm:col-span-2"><label className="label">Address</label><input className="input" value={profile.address} onChange={(e) => setProfile({ ...profile, address: e.target.value })} /></div>
           <div><label className="label">City</label><input className="input" value={profile.city} onChange={(e) => setProfile({ ...profile, city: e.target.value })} /></div>
           <div><label className="label">Phone</label><input className="input" value={profile.phone} onChange={(e) => setProfile({ ...profile, phone: e.target.value })} /></div>

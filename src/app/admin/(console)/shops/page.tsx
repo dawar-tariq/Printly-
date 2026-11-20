@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Loader2, CheckCircle2, XCircle, PenLine, Store, ExternalLink, Phone, Search, Boxes, Printer, Clock, ChevronRight, Hourglass, BadgeCheck, Ban, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { BUSINESS_TYPE_LABELS, SERVICE_LABELS } from '@/lib/onboarding';
+import { publicShopPath } from '@/lib/shop-identity';
 
 interface Onboarding {
   business_type?: string | null;
@@ -12,9 +13,10 @@ interface Onboarding {
   staff_count?: number | null;
   pincode?: string | null;
   submitted_at?: string | null;
+  duplicate_name?: boolean;
 }
 interface ShopRow {
-  id: string; name: string; slug: string; city: string; phone: string; gstin: string | null; upi_id: string | null;
+  id: string; name: string; slug: string; short_code: string; city: string; phone: string; gstin: string | null; upi_id: string | null;
   kyc_status: string; status: string; commission_bps: number; created_at: string;
   owner?: { email: string; full_name: string | null } | null;
   onboarding?: Onboarding | null;
@@ -134,7 +136,8 @@ export default function AdminShopsPage() {
                       <Link href={`/admin/shops/${s.id}`} className="font-extrabold hover:text-indigo-700 hover:underline">{s.name}</Link>
                       <span className={kycChip(s.kyc_status)}>{s.kyc_status.replace('_', ' ')}</span>
                       <span className={cn('chip capitalize', s.status === 'active' ? 'bg-green-50 text-green-700' : s.status === 'suspended' ? 'bg-red-50 text-red-700' : 'bg-neutral-100 text-neutral-600')}>{s.status}</span>
-                      <a className="text-[10px] text-indigo-700 hover:underline inline-flex items-center gap-0.5" href={`/s/${s.slug}`} target="_blank" rel="noreferrer">customer page <ExternalLink size={9} /></a>
+                      {ob?.duplicate_name && <span className="chip bg-amber-100 text-amber-900">Duplicate name · proof review</span>}
+                      <a className="text-[10px] text-indigo-700 hover:underline inline-flex items-center gap-0.5" href={publicShopPath(s.short_code)} target="_blank" rel="noreferrer">customer page <ExternalLink size={9} /></a>
                     </div>
                     <div className="text-xs text-neutral-500 mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5">
                       <span>{s.city}</span>·<span>Applied {new Date(s.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
@@ -161,7 +164,7 @@ export default function AdminShopsPage() {
                     <Link href={`/admin/shops/${s.id}`} className="btn btn-dark h-9 px-3 text-xs">Review details <ChevronRight size={13} /></Link>
                     {s.kyc_status !== 'approved' && (
                       <>
-                        <button disabled={busyId === s.id} onClick={() => act(s.id, 'approve')} className="btn btn-primary h-9 px-3 text-xs">{busyId === s.id ? <Loader2 size={13} className="animate-spin" /> : <><CheckCircle2 size={13} />Approve</>}</button>
+                        {!ob?.duplicate_name && <button disabled={busyId === s.id} onClick={() => act(s.id, 'approve')} className="btn btn-primary h-9 px-3 text-xs">{busyId === s.id ? <Loader2 size={13} className="animate-spin" /> : <><CheckCircle2 size={13} />Approve</>}</button>}
                         <div className="flex gap-1.5">
                           <button disabled={busyId === s.id} onClick={() => act(s.id, 'request_changes')} className="btn btn-ghost h-9 px-3 text-xs"><PenLine size={13} />Changes</button>
                           <button disabled={busyId === s.id} onClick={() => act(s.id, 'reject')} className="btn btn-ghost h-9 px-3 text-xs text-red-700"><XCircle size={13} />Reject</button>

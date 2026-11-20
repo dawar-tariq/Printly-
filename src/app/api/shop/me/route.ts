@@ -10,6 +10,9 @@ export async function GET() {
     .select('id, owner_id, slug, short_code, name, address, city, phone, gstin, upi_id, kyc_status, status, commission_bps, rush_surcharge_bps, eta_minutes, rating_avg, rating_count, created_at')
     .eq('id', staff.shopIds[0]).single();
   if (error || !shop) return jsonError(500, 'db', error?.message ?? 'Shop not found');
-  const { data: services } = await admin.from('shop_services').select('service, enabled, display_order').eq('shop_id', shop.id).order('display_order');
-  return jsonOk({ shop, services: services ?? [], isAdmin: staff.isAdmin });
+  const [{ data: services }, { data: onboarding }] = await Promise.all([
+    admin.from('shop_services').select('service, enabled, display_order').eq('shop_id', shop.id).order('display_order'),
+    admin.from('shop_onboarding').select('duplicate_name, name_proof_type, name_proof_gstin, review_note').eq('shop_id', shop.id).maybeSingle(),
+  ]);
+  return jsonOk({ shop, services: services ?? [], onboarding: onboarding ?? null, is_owner: shop.owner_id === staff.user.id });
 }

@@ -7,7 +7,7 @@ async function shopIdFor(req: Request) {
   if (!staff || staff.shopIds.length === 0) return null;
   const url = new URL(req.url);
   const shopId = url.searchParams.get('shop_id') ?? staff.shopIds[0];
-  return staff.shopIds.includes(shopId) || staff.isAdmin ? shopId : null;
+  return staff.shopIds.includes(shopId) ? shopId : null;
 }
 
 export async function GET(req: Request) {

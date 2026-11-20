@@ -1,6 +1,7 @@
 import QRCode from 'qrcode';
 import { getStaffContext, jsonError } from '@/lib/api';
 import { createAdminSupabase } from '@/lib/supabase';
+import { publicShopPath } from '@/lib/shop-identity';
 
 export async function GET(req: Request) {
   const staff = await getStaffContext();
@@ -10,7 +11,7 @@ export async function GET(req: Request) {
   if (!shop) return jsonError(404, 'not_found', 'Shop not found');
 
   const base = process.env.NEXT_PUBLIC_SITE_URL ?? new URL(req.url).origin;
-  const url = `${base}/s/${shop.slug}`;
+  const url = `${base.replace(/\/$/, '')}${publicShopPath(shop.short_code)}`;
   const png = await QRCode.toBuffer(url, {
     type: 'png', width: 640, margin: 2,
     color: { dark: '#1d1a16', light: '#ffffff' },
@@ -21,7 +22,7 @@ export async function GET(req: Request) {
     headers: {
       'Content-Type': 'image/png',
       'Cache-Control': 'no-store',
-      ...(download ? { 'Content-Disposition': `attachment; filename="printly-qr-${shop.slug}.png"` } : {}),
+      ...(download ? { 'Content-Disposition': `attachment; filename="printly-qr-${shop.short_code}.png"` } : {}),
     },
   });
 }
