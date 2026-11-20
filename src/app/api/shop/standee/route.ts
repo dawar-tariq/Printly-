@@ -73,7 +73,7 @@ export async function GET(req: Request) {
       status: shop.status,
       kyc_status: shop.kyc_status,
     };
-    const revision = createHash('sha256').update(JSON.stringify({ version: 1, shopId, info, theme })).digest('hex');
+    const revision = createHash('sha256').update(JSON.stringify({ version: 2, shopId, info, theme })).digest('hex');
     // Downloads and print must match the visible preview. If shop details change,
     // require regeneration instead of silently producing a different standee.
     if (format !== 'preview' && params.get('revision') !== revision) {

@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
-import { Printer, Wrench } from 'lucide-react';
+import { Wrench } from 'lucide-react';
+import { BrandArtwork } from '@/components/BrandArtwork';
 import {
   isAdminPage, MAINTENANCE_CHECK_INTERVAL_MS, MAINTENANCE_COPY,
   MAINTENANCE_PAYMENT_NOTE, MAINTENANCE_STATUS_PATH, type MaintenanceNotice,
@@ -79,8 +80,8 @@ export function MaintenanceGuard({ children }: { children: React.ReactNode }) {
       {visible && copy && (
         <div className="fixed inset-0 z-[9999] overflow-y-auto bg-[#fbfaf8] px-5 py-10 text-center text-stone-900" role="alertdialog" aria-modal="true" aria-labelledby="maintenance-title" aria-describedby="maintenance-message">
           <div className="mx-auto flex min-h-full max-w-[580px] flex-col justify-center">
-            <div className="flex items-center justify-center gap-2 text-[19px] font-extrabold tracking-tight">
-              <span className="grid h-[34px] w-[34px] place-items-center rounded-[11px] bg-orange-600 text-white"><Printer size={19} aria-hidden="true" /></span>Printly
+            <div className="flex justify-center" role="img" aria-label="Printly">
+              <BrandArtwork className="h-[34px] w-auto" />
             </div>
             <div className="mt-8 rounded-[28px] border border-[#e9e5df] bg-white px-5 py-10 shadow-[0_20px_60px_rgba(65,38,16,0.07)] sm:px-7">
               <div className="mx-auto mb-6 grid h-[66px] w-[66px] place-items-center rounded-[22px] bg-orange-50 text-orange-700"><Wrench size={30} aria-hidden="true" /></div>

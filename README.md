@@ -13,6 +13,12 @@ Printly is a Next.js and Supabase application for customer print orders, shop op
 
 Use a planned maintenance window and a verified database backup. Stop new checkouts, apply `0010` transactionally, deploy the matching application, and verify customer checkout and shop payment confirmation before reopening. Do not leave the old code running against the new schema or deploy the new code against the old schema. Customers with pre-upgrade drafts must restart them; a customer who already sent a UPI payment should **not** pay again. If their old browser session cannot report the payment, the shop can find the order using its tracking link, record the customer's report, then independently verify and confirm the transfer.
 
+## Printly brand and QR artwork
+
+The selected Printly logo is available in `public/brand/printly-logo-kit.zip`, including scalable SVGs and transparent PNGs for light and dark backgrounds. The website, browser icon, maintenance notice, order slip and QR artwork use the same mark. Newly generated shop QR codes and standees place a small white-backed mark in the code, use high error correction, and retain a four-module quiet zone. If a UPI payment QR would be too dense for a central logo, the mark is shown alongside the unobstructed code instead; the underlying payment link is unchanged.
+
+Existing printed QR signs do not change automatically. Generate and print new QR codes or standees to use the new artwork; old codes keep their existing shop links. Always test the new print with the phones and printer in use.
+
 ## Shop QR standee
 
 Open **Shop → Settings & QR → Create A4 standee**. The workspace uses the signed-in account's linked shop and its owner's saved profile; it does not create another shop or accept a shop ID from the browser. Generate again after editing saved details. If details change between preview and export, the export asks for a fresh preview. Shops that are not active and approved can still prepare the standee, but customers cannot place orders until the shop is active.

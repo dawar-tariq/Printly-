@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PNG } from 'pngjs';
 import jsQR from 'jsqr';
@@ -72,6 +73,14 @@ describe('authenticated standee API', () => {
     expect(ownPdf.headers.get('Content-Disposition')).toContain('CD5678.pdf');
     expect(ownPdf.headers.get('Content-Type')).toBe('application/pdf');
   }, 30_000);
+
+  it('requires a fresh preview when artwork changes between releases', async () => {
+    const preview = await (await GET(request('?format=preview'))).json();
+    const oldRevision = createHash('sha256').update(JSON.stringify({ version: 1, shopId: 'shop-a', info: preview.info, theme: 'orange' })).digest('hex');
+    const stale = await GET(request(`?format=pdf&revision=${oldRevision}`));
+    expect(stale.status).toBe(409);
+    expect((await stale.json()).error.code).toBe('standee_changed');
+  });
 
   it('requires regeneration when saved shop or owner details change', async () => {
     const first = await (await GET(request('?format=preview'))).json();

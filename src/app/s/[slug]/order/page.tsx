@@ -9,7 +9,10 @@ import {
   ChevronLeft, ShieldCheck, Smartphone, Banknote, Link2, FolderInput, Trash2, Zap, Wallet, Eye, RefreshCw,
 } from 'lucide-react';
 import { Logo } from '@/components/Logo';
+import { BrandedQr } from '@/components/BrandedQr';
+import { BrandMark } from '@/components/BrandArtwork';
 import { DocumentEditor } from '@/components/DocumentEditor';
+import { paymentQrPlan } from '@/lib/payment-qr';
 import { fileMime, isPreviewable, isWord, MAX_DOCUMENT_BYTES, MAX_DOCUMENT_PAGES } from '@/lib/document-shared';
 import { createBrowserSupabase } from '@/lib/supabase-client';
 import { cn } from '@/lib/utils';
@@ -90,6 +93,8 @@ function OrderWizardForShop({ slug }: { slug: string }) {
   // upi screen
   const [upi, setUpi] = useState<{ link: string; pa: string; pn: string; am: string; tn: string; shop_name: string; total_paise: number } | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [qrBrandInside, setQrBrandInside] = useState(true);
+  const [qrFailed, setQrFailed] = useState(false);
   const [utr, setUtr] = useState('');
 
   const fileInput = useRef<HTMLInputElement>(null);
@@ -364,8 +369,17 @@ function OrderWizardForShop({ slug }: { slug: string }) {
       }
       if (data.mode !== 'upi' || typeof data.link !== 'string') throw new Error('Invalid checkout response');
       setUpi(data);
+      setQrDataUrl(null);
+      setQrFailed(false);
       setStep('upi');
-      try { setQrDataUrl(await QRCode.toDataURL(data.link, { width: 560, margin: 1, errorCorrectionLevel: 'M' })); } catch { setQrDataUrl(null); }
+      try {
+        const plan = paymentQrPlan(data.link);
+        setQrBrandInside(plan.brandInside);
+        setQrDataUrl(await QRCode.toDataURL(data.link, plan.options));
+      } catch {
+        setQrDataUrl(null);
+        setQrFailed(true);
+      }
     } catch {
       setBanner('Could not complete checkout. Retry with the same details; if you already paid, contact the shop before paying again.');
     } finally {
@@ -393,11 +407,12 @@ function OrderWizardForShop({ slug }: { slug: string }) {
 
   return (
     <div className="min-h-screen bg-[radial-gradient(1200px_600px_at_50%_-10%,#ffedd5,transparent)]">
-      <header className="max-w-lg mx-auto px-4 h-14 flex items-center justify-between no-print">
-        {step === 'service' ? <Logo /> : (
-          <button disabled={busy} aria-label="Go back" onClick={() => { const prev: Record<Step, Step | null> = { service: null, files: 'service', options: 'files', checkout: 'options', upi: null }; const p = prev[step]; if (p) setStep(p); }} className="p-2 -ml-2 text-neutral-500 disabled:opacity-40"><ChevronLeft size={22} /></button>
-        )}
-        <span className="text-xs font-semibold text-neutral-500 max-w-[60%] truncate">{shopName}</span>
+      <header className="max-w-lg mx-auto px-4 h-14 flex items-center justify-between gap-3 no-print">
+        <div className="flex min-w-0 items-center gap-1">
+          {step !== 'service' && <button disabled={busy} aria-label="Go back" onClick={() => { const prev: Record<Step, Step | null> = { service: null, files: 'service', options: 'files', checkout: 'options', upi: null }; const p = prev[step]; if (p) setStep(p); }} className="p-2 -ml-2 text-neutral-500 disabled:opacity-40"><ChevronLeft size={22} /></button>}
+          <Logo />
+        </div>
+        <span className="min-w-0 text-xs font-semibold text-neutral-500 max-w-[60%] truncate">{shopName}</span>
       </header>
 
       {/* progress dots */}
@@ -698,9 +713,11 @@ function OrderWizardForShop({ slug }: { slug: string }) {
 
               <div className="bg-white px-6 py-6 text-center border-x border-neutral-100">
                 {qrDataUrl
-                  ? <img src={qrDataUrl} alt="UPI QR" className="w-56 h-56 mx-auto rounded-2xl border border-neutral-200" />
-                  : <div className="w-56 h-56 mx-auto skeleton" />}
-                <div className="mt-3 text-xs text-neutral-500">Scan with any UPI app</div>
+                  ? <BrandedQr src={qrDataUrl} alt="UPI QR" brandInside={qrBrandInside} />
+                  : qrFailed
+                    ? <div className="mx-auto grid min-h-28 max-w-56 place-items-center rounded-xl bg-neutral-50 p-4 text-xs text-neutral-600" role="status">QR unavailable. Use the button below to open your UPI app.</div>
+                    : <div className="w-56 h-56 mx-auto skeleton" />}
+                <div className="mt-3 flex items-center justify-center gap-1.5 text-xs text-neutral-500">{qrDataUrl && !qrBrandInside && <BrandMark className="h-4 w-4" />}Scan with any UPI app</div>
                 <div className="mt-1 flex items-center justify-center gap-4 text-[10px] font-bold text-neutral-400">
                   <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-blue-600 inline-block" />GPay</span>
                   <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-purple-600 inline-block" />PhonePe</span>

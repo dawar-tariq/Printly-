@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { readMaintenanceState } from './maintenance-server';
+import { maintenancePageResponse, readMaintenanceState } from './maintenance-server';
+import { PRINTLY_MARK_PATH, PRINTLY_WORDMARK_PATH } from './brand';
 
 beforeEach(() => {
   vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://supabase.example.test');
@@ -9,6 +10,18 @@ afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
   vi.useRealTimers();
+});
+
+describe('maintenance notice branding', () => {
+  it('renders the selected logo inline even when external assets are unavailable', async () => {
+    const response = maintenancePageResponse('on');
+    const html = await response.text();
+    expect(response.status).toBe(503);
+    expect(html).toContain('role="img" aria-label="Printly"');
+    expect(html).toContain(PRINTLY_MARK_PATH);
+    expect(html).toContain(PRINTLY_WORDMARK_PATH);
+    expect(html).not.toContain('<img');
+  });
 });
 
 describe('maintenance setting lookup', () => {

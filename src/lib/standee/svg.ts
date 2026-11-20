@@ -1,5 +1,7 @@
 import 'server-only';
 import QRCode from 'qrcode';
+import { printlyLogoGroup } from '@/lib/brand';
+import { qrBrandBadgeSvg } from '@/lib/qr-brand';
 import { STANDEE_THEMES, type StandeeInfo, type StandeeTheme } from './shared';
 import { cleanStandeeName, namePaths, shapeName, StandeeTextError, textWidth, type Weight } from './fonts';
 
@@ -69,7 +71,7 @@ function qrPath(url: string) {
   return path;
 }
 
-const icon = (kind: 'scan' | 'service' | 'upload' | 'card' | 'store' | 'shield' | 'printer', x: number, y: number, size: number, color: string, stroke = 1.7) => {
+const icon = (kind: 'scan' | 'service' | 'upload' | 'card' | 'store' | 'shield', x: number, y: number, size: number, color: string, stroke = 1.7) => {
   const d: Record<typeof kind, string> = {
     scan: '<path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M4 12h16M8 8h2M14 8h2M8 16h2M14 16h2"/>',
     service: '<path d="m12 3 9 5-9 5-9-5 9-5ZM3 12l9 5 9-5M3 16l9 5 9-5"/>',
@@ -77,7 +79,6 @@ const icon = (kind: 'scan' | 'service' | 'upload' | 'card' | 'store' | 'shield' 
     card: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M7 15h4"/>',
     store: '<path d="M4 10v10h16V10M3 10l2-6h14l2 6M3 10a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0M9 20v-6h6v6"/>',
     shield: '<path d="M12 3 20 6v5c0 5-3.5 8.1-8 10-4.5-1.9-8-5-8-10V6l8-3ZM8.5 12l2.3 2.3 4.7-4.8"/>',
-    printer: '<path d="M7 8V3h10v5M7 17H5a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M7 13h10v8H7zM17.5 10.5h.01M9 16h6"/>',
   };
   return `<g transform="translate(${n(x)} ${n(y)}) scale(${n(size / 24)})" fill="none" stroke="${color}" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round">${d[kind]}</g>`;
 };
@@ -94,7 +95,8 @@ export function standeeSvg(info: StandeeInfo, theme: StandeeTheme): string {
   const ownerY = shop.lines.length === 1 ? 70.1 : 70.2;
   const ownerText = owner.lines.map((line, i) => namePaths(line, 53, ownerY + i * 4, owner.size, 'regular', gray)).join('');
   const qr = qrPath(info.order_url);
-  const logoX = (210 - (9.4 + 1.8 + textWidth('Printly', 'bold', 8.8))) / 2;
+  const logoHeight = 10;
+  const logoX = (210 - logoHeight * 2456 / 688) / 2;
   const bannerText = 'Fast • Secure • Hassle-Free';
   const bannerX = (210 - (5.5 + 3 + textWidth(bannerText, 'bold', 3.2))) / 2;
 
@@ -116,9 +118,7 @@ export function standeeSvg(info: StandeeInfo, theme: StandeeTheme): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="210mm" height="297mm" viewBox="0 0 210 297">
     <rect width="210" height="297" fill="#ffffff"/>
     <rect x="5.5" y="5.5" width="199" height="286" rx="5" fill="${colors.cream}" stroke="${colors.border}" stroke-width="0.6"/>
-    <rect x="${n(logoX)}" y="13.3" width="9.4" height="9.4" rx="2.5" fill="${colors.accent}"/>
-    ${icon('printer', logoX + 1.3, 14.6, 6.8, '#ffffff', 2)}
-    ${text('Printly', logoX + 11.2, 21.3, 8.8, 'bold', ink)}
+    ${printlyLogoGroup(logoX, 13.2, logoHeight)}
     <text x="105" y="28.7" font-family="Noto Sans" font-size="3.4" text-anchor="middle" fill="${gray}" xml:space="preserve">Print <tspan fill="${colors.accent}">•</tspan> Upload <tspan fill="${colors.accent}">•</tspan> Pay <tspan fill="${colors.accent}">•</tspan> Collect</text>
     <text x="105" y="44.5" font-family="Noto Sans" font-size="10.2" font-weight="700" text-anchor="middle" fill="${ink}"><tspan>Scan to </tspan><tspan fill="${colors.accent}">Print</tspan></text>
     <rect x="21" y="51.5" width="168" height="27" rx="6.5" fill="${colors.peach}"/>
@@ -129,6 +129,7 @@ export function standeeSvg(info: StandeeInfo, theme: StandeeTheme): string {
     <path d="M41 99v-5a4 4 0 0 1 4-4h5 M160 90h5a4 4 0 0 1 4 4v5 M41 209v5a4 4 0 0 0 4 4h5 M160 218h5a4 4 0 0 0 4-4v-5" fill="none" stroke="${colors.accent}" stroke-width="2.5" stroke-linecap="round"/>
     <rect x="${QR_BOX.x}" y="${QR_BOX.y}" width="${QR_BOX.size}" height="${QR_BOX.size}" fill="#ffffff"/>
     <path d="${qr}" fill="#000000" shape-rendering="crispEdges"/>
+    ${qrBrandBadgeSvg(QR_BOX.x, QR_BOX.y, QR_BOX.size)}
     <rect x="70" y="227" width="70" height="10" rx="5" fill="${colors.accent}"/>
     ${text('SCAN ME', 105, 234.15, 4.6, 'bold', '#ffffff', 'middle')}
     <path d="M22 244h30 M158 244h30" fill="none" stroke="${colors.border}" stroke-width="0.5"/>

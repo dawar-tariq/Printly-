@@ -8,6 +8,7 @@ import {
   Package, IndianRupee, Zap, CheckCircle2, StickyNote, ListChecks, History, Eye,
 } from 'lucide-react';
 import { PrintFileDialog } from '@/components/PrintFileDialog';
+import { BrandArtwork } from '@/components/BrandArtwork';
 import { isPreviewable, isWord } from '@/lib/document-shared';
 import { formatPaiseExact, formatDateTime, timeAgo } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -97,7 +98,7 @@ export default function OrderDetailPage() {
           </button>}
         </div>
       </div>
-      <div className="hidden print:block"><h1 className="text-lg font-extrabold">Order {o.token ?? `#${o.id.slice(0, 8).toUpperCase()}`}</h1><p className="text-xs">{formatDateTime(o.created_at)} · {o.shops.name}</p></div>
+      <div className="hidden print:block"><div role="img" aria-label="Printly"><BrandArtwork className="mb-3 h-8 w-auto" /></div><h1 className="text-lg font-extrabold">Order {o.token ?? `#${o.id.slice(0, 8).toUpperCase()}`}</h1><p className="text-xs">{formatDateTime(o.created_at)} · {o.shops.name}</p></div>
 
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mt-3">
         {/* left: files + items */}

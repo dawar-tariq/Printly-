@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { PNG } from 'pngjs';
 import jsQR from 'jsqr';
 import QRCode from 'qrcode';
+import sharp from 'sharp';
 import { PDFDocument } from 'pdf-lib';
 import { createCanvas, DOMMatrix, ImageData, Path2D } from '@napi-rs/canvas';
 import { standeeSvg, QR_BOX } from './svg';
+import { PRINTLY_MARK_PATH, PRINTLY_WORDMARK_PATH } from '@/lib/brand';
+import { qrBrandBadgeBox } from '@/lib/qr-brand';
 import { A4_HEIGHT_PT, A4_WIDTH_PT, PNG_HEIGHT, PNG_WIDTH, renderStandeePdf, renderStandeePng } from './render';
 import type { StandeeInfo } from './shared';
 
@@ -55,16 +58,20 @@ describe('A4 standee artwork and exports', () => {
       expect([png.width, png.height]).toEqual([840, 1188]);
       expect(decode(png.data, png.width, png.height)).toBe(info.order_url);
       expect(decode(png.data, png.width, png.height, true)).toBe(info.order_url);
-      // Sample every module and the complete quiet zone: pure black on pure white,
-      // with no logo, frame, or other artwork over the QR or its safety margin.
+      // Outside the small, central brand badge, every module and the entire
+      // four-module quiet zone must remain pure black on white.
       const qr = QRCode.create(info.order_url, { errorCorrectionLevel: 'H' }).modules;
       const quiet = QR_BOX.quietModules;
       const unit = QR_BOX.size / (qr.size + 2 * quiet);
+      const badge = qrBrandBadgeBox(QR_BOX.x, QR_BOX.y, QR_BOX.size);
       let mismatches = 0;
       for (let row = -quiet; row < qr.size + quiet; row++) {
         for (let col = -quiet; col < qr.size + quiet; col++) {
-          const x = Math.floor((QR_BOX.x + (col + quiet + 0.5) * unit) * 4);
-          const y = Math.floor((QR_BOX.y + (row + quiet + 0.5) * unit) * 4);
+          const xMm = QR_BOX.x + (col + quiet + 0.5) * unit;
+          const yMm = QR_BOX.y + (row + quiet + 0.5) * unit;
+          if (xMm >= badge.x - 0.3 && xMm <= badge.x + badge.size + 0.3 && yMm >= badge.y - 0.3 && yMm <= badge.y + badge.size + 0.3) continue;
+          const x = Math.floor(xMm * 4);
+          const y = Math.floor(yMm * 4);
           const expected = row >= 0 && col >= 0 && row < qr.size && col < qr.size && qr.get(row, col) ? 0 : 255;
           const index = (y * png.width + x) * 4;
           if (png.data[index] !== expected || png.data[index + 1] !== expected || png.data[index + 2] !== expected || png.data[index + 3] !== 255) mismatches++;
@@ -73,7 +80,20 @@ describe('A4 standee artwork and exports', () => {
       expect(mismatches).toBe(0);
       expect(QR_BOX.quietModules).toBeGreaterThanOrEqual(4);
       expect(svg).toContain(`width="${QR_BOX.size}" height="${QR_BOX.size}" fill="#ffffff"`);
+      expect(svg).toContain('data-brand-qr="true"');
+      expect(svg.split(PRINTLY_MARK_PATH)).toHaveLength(3); // header and QR
+      expect(svg).toContain(PRINTLY_WORDMARK_PATH);
     }
+  });
+
+  it('keeps a long shop URL scannable in a reduced-size preview', async () => {
+    const orderUrl = `https://${'a'.repeat(50)}.${'b'.repeat(50)}.example/s/p-ab1234/order`;
+    expect(orderUrl.length).toBeLessThanOrEqual(180);
+    const svg = standeeSvg({ ...shopA, order_url: orderUrl }, 'orange');
+    const preview = await renderStandeePng(svg);
+    const small = PNG.sync.read(await sharp(preview).resize(500, 707).png().toBuffer());
+    expect(decode(small.data, small.width, small.height)).toBe(orderUrl);
+    expect(decode(small.data, small.width, small.height, true)).toBe(orderUrl);
   });
 
   it('exports an A4, 300-dpi PNG with a scannable grayscale QR', async () => {

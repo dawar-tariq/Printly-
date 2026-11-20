@@ -1,4 +1,6 @@
 import QRCode from 'qrcode';
+import sharp from 'sharp';
+import { qrBrandBadgeSvg } from '@/lib/qr-brand';
 import { getStaffContext, jsonError } from '@/lib/api';
 import { createAdminSupabase } from '@/lib/supabase';
 import { publicShopPath } from '@/lib/shop-identity';
@@ -12,11 +14,16 @@ export async function GET(req: Request) {
 
   const base = process.env.NEXT_PUBLIC_SITE_URL ?? new URL(req.url).origin;
   const url = `${base.replace(/\/$/, '')}${publicShopPath(shop.short_code)}`;
-  const png = await QRCode.toBuffer(url, {
-    type: 'png', width: 640, margin: 2,
-    color: { dark: '#1d1a16', light: '#ffffff' },
+  const size = 640;
+  const code = await QRCode.toBuffer(url, {
+    type: 'png', width: size, margin: 4,
+    color: { dark: '#000000', light: '#ffffff' },
     errorCorrectionLevel: 'H',
   });
+  // Keep the link untouched: only a small, white-backed brand mark is placed
+  // over the centre, with high error correction and the full quiet zone.
+  const badge = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${qrBrandBadgeSvg(0, 0, size)}</svg>`;
+  const png = await sharp(code).composite([{ input: Buffer.from(badge) }]).png().toBuffer();
   const download = new URL(req.url).searchParams.get('download') === '1';
   return new Response(new Uint8Array(png), {
     headers: {

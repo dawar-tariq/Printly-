@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Logo } from '@/components/Logo';
+import { BrandMark } from '@/components/BrandArtwork';
 import { QrCode, UploadCloud, Banknote, CheckCircle2, Store, ShieldCheck, Zap, FileText, ArrowRight, Star } from 'lucide-react';
 
 export default function HomePage() {
@@ -48,8 +49,11 @@ export default function HomePage() {
               <span className="chip bg-green-100 text-green-800">Open now</span>
             </div>
             <div className="mt-4 flex items-center gap-4">
-              <div className="w-28 h-28 rounded-xl border-2 border-dashed border-orange-300 grid place-items-center bg-orange-50">
-                <QrCode size={72} strokeWidth={1.4} className="text-orange-700" />
+              <div className="w-28 h-28 rounded-xl border-2 border-dashed border-orange-300 grid place-items-center bg-orange-50" aria-hidden="true">
+                <div className="relative">
+                  <QrCode size={72} strokeWidth={1.4} className="text-orange-700" />
+                  <span className="absolute inset-0 m-auto grid h-5 w-5 place-items-center rounded bg-orange-50"><BrandMark className="h-4 w-4" /></span>
+                </div>
               </div>
               <div className="text-sm text-neutral-600">
                 <div className="font-bold text-neutral-900 mb-1">Scan to order</div>

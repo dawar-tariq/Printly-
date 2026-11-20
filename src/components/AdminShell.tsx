@@ -22,7 +22,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-neutral-100">
       <header className="sticky top-0 z-30 bg-indigo-950 text-white">
         <div className="max-w-6xl mx-auto px-3 sm:px-4 h-14 flex items-center gap-3">
-          <Logo href="/admin" />
+          <Logo href="/admin" inverse />
           <span className="chip bg-indigo-800 text-indigo-100">Admin console</span>
           <button onClick={async () => { await createBrowserSupabase().auth.signOut(); router.push('/admin/login'); router.refresh(); }} className="ml-auto p-2 rounded-lg hover:bg-indigo-900 text-indigo-200" aria-label="Sign out"><LogOut size={18} /></button>
         </div>

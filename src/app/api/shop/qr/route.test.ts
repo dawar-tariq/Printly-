@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { PNG } from 'pngjs';
+import jsQR from 'jsqr';
+import sharp from 'sharp';
 
-const mocks = vi.hoisted(() => ({
-  staff: vi.fn(), shop: vi.fn(), toBuffer: vi.fn(),
-}));
+const mocks = vi.hoisted(() => ({ staff: vi.fn(), shop: vi.fn() }));
 vi.mock('@/lib/api', () => ({
   getStaffContext: mocks.staff,
   jsonError: (status: number, code: string, message: string) => Response.json({ error: { code, message } }, { status }),
@@ -10,30 +11,49 @@ vi.mock('@/lib/api', () => ({
 vi.mock('@/lib/supabase', () => ({
   createAdminSupabase: () => ({ from: () => ({ select: () => ({ eq: () => ({ single: mocks.shop }) }) }) }),
 }));
-vi.mock('qrcode', () => ({ default: { toBuffer: mocks.toBuffer } }));
 import { GET } from './route';
+
+function decode(bytes: Buffer) {
+  const png = PNG.sync.read(bytes);
+  return jsQR(new Uint8ClampedArray(png.data), png.width, png.height)?.data;
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.staff.mockResolvedValue({ shopIds: ['shop-1'] });
   mocks.shop.mockResolvedValue({ data: { slug: 'old-name-link', short_code: 'AB234567', name: 'Bright Prints' } });
-  mocks.toBuffer.mockResolvedValue(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
 });
 afterEach(() => vi.unstubAllEnvs());
 
-describe('shop QR code', () => {
-  it('encodes the unique code link instead of the name-based slug', async () => {
+describe('branded shop QR code', () => {
+  it('encodes the unique shop link, includes the brand, and stays decodable at preview size', async () => {
     vi.stubEnv('NEXT_PUBLIC_SITE_URL', 'https://printly.example/');
     const response = await GET(new Request('https://printly.example/api/shop/qr?download=1'));
     expect(response.status).toBe(200);
-    expect(mocks.toBuffer).toHaveBeenCalledWith('https://printly.example/s/p-ab234567', expect.any(Object));
     expect(response.headers.get('Content-Type')).toBe('image/png');
+    expect(response.headers.get('Cache-Control')).toContain('no-store');
     expect(response.headers.get('Content-Disposition')).toContain('printly-qr-AB234567.png');
+    const bytes = Buffer.from(await response.arrayBuffer());
+    const png = PNG.sync.read(bytes);
+    expect([png.width, png.height]).toEqual([640, 640]);
+    expect(decode(bytes)).toBe('https://printly.example/s/p-ab234567');
+    expect(decode(await sharp(bytes).resize(160, 160).png().toBuffer())).toBe('https://printly.example/s/p-ab234567');
+    expect(decode(await sharp(bytes).greyscale().png().toBuffer())).toBe('https://printly.example/s/p-ab234567');
+    // The badge is not merely adjacent to the code: the selected orange mark is in its centre.
+    let orange = 0;
+    for (let y = 280; y < 360; y++) for (let x = 280; x < 360; x++) {
+      const index = (y * png.width + x) * 4;
+      if (png.data[index] > 180 && png.data[index + 1] < 120 && png.data[index + 2] < 80) orange++;
+    }
+    expect(orange).toBeGreaterThan(300);
+    // The four-module quiet zone starts pure white even on the download.
+    expect(Array.from(png.data.slice(0, 4))).toEqual([255, 255, 255, 255]);
   });
+
   it('denies a user with no linked shop', async () => {
     mocks.staff.mockResolvedValue({ shopIds: [] });
     const response = await GET(new Request('https://printly.example/api/shop/qr'));
     expect(response.status).toBe(403);
-    expect(mocks.toBuffer).not.toHaveBeenCalled();
+    expect(mocks.shop).not.toHaveBeenCalled();
   });
 });

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { Logo } from '@/components/Logo';
 import { createBrowserSupabase } from '@/lib/supabase-client';
-import { LayoutDashboard, Settings, Boxes, BarChart3, LogOut, Printer, ExternalLink, Hourglass, PenLine, Ban } from 'lucide-react';
+import { LayoutDashboard, Settings, Boxes, BarChart3, LogOut, ExternalLink, Hourglass, PenLine, Ban } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { publicShopPath } from '@/lib/shop-identity';
 
@@ -32,7 +32,7 @@ export function ShopShell({ shop, reviewNote, children }: { shop: { id: string; 
     <div className="min-h-screen bg-neutral-100">
       <header className="no-print sticky top-0 z-30 bg-neutral-950 text-white">
         <div className="max-w-6xl mx-auto px-3 sm:px-4 h-14 flex items-center gap-3">
-          <Link href="/" className="flex items-center gap-2 font-extrabold shrink-0"><span className="w-7 h-7 rounded-lg bg-orange-600 grid place-items-center"><Printer size={15} /></span><span className="hidden xs:inline">Printly</span></Link>
+          <Logo inverse compactOnMobile />
           <div className="min-w-0 flex-1">
             <div className="text-sm font-bold truncate leading-tight">{shop.name}</div>
             <div className="text-[10px] text-neutral-400 leading-tight">{shop.kyc_status === 'approved' ? 'Verified shop' : 'Verification pending'} · {shop.short_code} · <a className="hover:underline inline-flex items-center gap-0.5" href={publicShopPath(shop.short_code)} target="_blank" rel="noreferrer">customer page <ExternalLink size={9} /></a></div>

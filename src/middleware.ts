@@ -75,6 +75,6 @@ export async function middleware(req: NextRequest) {
   return res;
 }
 
-// Gate public pages and APIs too, while leaving Next's assets available for
-// the administrator console. Public order/tracking pages still need no login.
-export const config = { matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'] };
+// Gate public pages and APIs while leaving non-sensitive brand assets and Next's
+// static files available, including on the self-contained maintenance notice.
+export const config = { matcher: ['/((?!_next/static|_next/image|favicon\\.ico|icon\\.svg|apple-touch-icon\\.png|brand/).*)'] };

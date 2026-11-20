@@ -32,6 +32,7 @@ describe('maintenance notice for already-open pages', () => {
     fireEvent.change(input, { target: { value: 'Keep my draft' } });
     await act(async () => { await vi.advanceTimersByTimeAsync(MAINTENANCE_CHECK_INTERVAL_MS); });
     expect(screen.getByRole('alertdialog')).toBeTruthy();
+    expect(screen.getByRole('img', { name: 'Printly' })).toBeTruthy();
     expect(screen.getByText('We’re making things better')).toBeTruthy();
     expect(screen.getByText(/don’t pay again/i)).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Administrator sign in' }).getAttribute('href')).toBe('/admin/login');
