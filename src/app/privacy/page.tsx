@@ -1,8 +1,9 @@
 import type { Metadata } from 'next';
+import { publicCanonical } from '@/lib/public-pages';
 import Link from 'next/link';
 import { PolicyPage, type PolicySection } from '@/components/marketing/PolicyPage';
 
-export const metadata: Metadata = { title: 'Privacy policy | Printly', description: 'How Printly handles account information, orders, uploaded files and privacy requests.' };
+export const metadata: Metadata = { alternates: publicCanonical('/privacy'), title: 'Privacy policy | Printly', description: 'How Printly handles account information, orders, uploaded files and privacy requests.' };
 
 const sections: PolicySection[] = [
   { id: 'overview', title: '1. What this covers', content: <><p>This notice describes how information is handled when you visit Printly, place an order through a participating shop, or apply to use Printly as a shop. Printly provides the platform; the print shop you choose is responsible for fulfilling your order and for how its staff handle information they receive.</p><p>Only upload material you are authorised to share and that is needed for the order. Our <Link href="/security">security page</Link> has practical steps for protecting your information.</p></> },

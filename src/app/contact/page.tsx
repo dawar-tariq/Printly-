@@ -1,9 +1,10 @@
 import type { Metadata } from 'next';
+import { publicCanonical } from '@/lib/public-pages';
 import Link from 'next/link';
 import { ArrowRight, FileQuestion, LockKeyhole, Store } from 'lucide-react';
 import { PublicShell } from '@/components/marketing/PublicShell';
 
-export const metadata: Metadata = { title: 'Contact & help | Printly', description: 'Find the right place to get help with a Printly order, shop account or privacy question.' };
+export const metadata: Metadata = { alternates: publicCanonical('/contact'), title: 'Contact & help | Printly', description: 'Find the right place to get help with a Printly order, shop account or privacy question.' };
 
 export default function ContactPage() {
   return <PublicShell><main id="main-content">

@@ -1,8 +1,9 @@
 import type { Metadata } from 'next';
+import { publicCanonical } from '@/lib/public-pages';
 import Link from 'next/link';
 import { PolicyPage, type PolicySection } from '@/components/marketing/PolicyPage';
 
-export const metadata: Metadata = { title: 'Cookie notice | Printly', description: 'How Printly uses essential cookies and browser storage.' };
+export const metadata: Metadata = { alternates: publicCanonical('/cookies'), title: 'Cookie notice | Printly', description: 'How Printly uses essential cookies and browser storage.' };
 
 const sections: PolicySection[] = [
   { id: 'what', title: 'What are cookies?', content: <><p>Cookies are small pieces of information stored by your browser. A website can also use browser storage for information that helps a page work during a visit.</p></> },

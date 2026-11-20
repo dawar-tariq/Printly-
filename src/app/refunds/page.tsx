@@ -1,8 +1,9 @@
 import type { Metadata } from 'next';
+import { publicCanonical } from '@/lib/public-pages';
 import Link from 'next/link';
 import { PolicyPage, type PolicySection } from '@/components/marketing/PolicyPage';
 
-export const metadata: Metadata = { title: 'Refunds & cancellations | Printly', description: 'What to do about order cancellations, payment issues and subscription requests.' };
+export const metadata: Metadata = { alternates: publicCanonical('/refunds'), title: 'Refunds & cancellations | Printly', description: 'What to do about order cancellations, payment issues and subscription requests.' };
 
 const sections: PolicySection[] = [
   { id: 'orders', title: 'Customer orders', content: <><p>Your print order is fulfilled by the shop you choose, and customer order payments are made directly to that shop. Contact the shop as soon as possible about a change, cancellation, print-quality issue or refund. Its contact details are shown on its shop page.</p><p>Cancelling an order in the service does not automatically send money back. Any refund or adjustment must be handled separately with the shop and, where relevant, your payment provider. Save your order tracking link and payment reference when asking for help.</p></> },

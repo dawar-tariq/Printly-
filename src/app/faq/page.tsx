@@ -1,11 +1,12 @@
 import type { Metadata } from 'next';
+import { publicCanonical } from '@/lib/public-pages';
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 import { FaqList } from '@/components/marketing/FaqList';
 import { PublicShell } from '@/components/marketing/PublicShell';
 import { faqGroups } from '@/lib/marketing-faq';
 
-export const metadata: Metadata = { title: 'Frequently asked questions | Printly', description: 'Answers about ordering, payments, subscriptions, file privacy and using Printly as a shop or customer.' };
+export const metadata: Metadata = { alternates: publicCanonical('/faq'), title: 'Frequently asked questions | Printly', description: 'Answers about ordering, payments, subscriptions, file privacy and using Printly as a shop or customer.' };
 
 export default function FaqPage() {
   return <PublicShell><main id="main-content">

@@ -1,8 +1,9 @@
 import type { Metadata } from 'next';
+import { publicCanonical } from '@/lib/public-pages';
 import Link from 'next/link';
 import { PolicyPage, type PolicySection } from '@/components/marketing/PolicyPage';
 
-export const metadata: Metadata = { title: 'Copyright | Printly', description: 'Information about Printly branding, service materials and the content you provide.' };
+export const metadata: Metadata = { alternates: publicCanonical('/copyright'), title: 'Copyright | Printly', description: 'Information about Printly branding, service materials and the content you provide.' };
 
 const sections: PolicySection[] = [
   { id: 'printly', title: 'Printly materials', content: <><p>Unless otherwise noted, the Printly name, branding, website design and service materials are protected by copyright and other applicable intellectual-property laws. All rights are reserved, subject to any licences that apply to particular third-party components.</p><p>You may use the service and its materials as needed for their intended purpose. Please do not copy, sell or present Printly’s branding or materials as your own without permission.</p></> },

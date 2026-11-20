@@ -1,3 +1,5 @@
+import type { Metadata } from 'next';
+import { publicCanonical } from '@/lib/public-pages';
 import Link from 'next/link';
 import {
   ArrowDown, ArrowRight, ArrowUpRight, BadgeCheck, Banknote, Check, CheckCircle2,
@@ -8,6 +10,8 @@ import { BrandMark } from '@/components/BrandArtwork';
 import { FaqList } from '@/components/marketing/FaqList';
 import { PublicShell } from '@/components/marketing/PublicShell';
 import { landingFaqs } from '@/lib/marketing-faq';
+
+export const metadata: Metadata = { alternates: publicCanonical('/') };
 
 const steps = [
   { number: '01', icon: ScanLine, title: 'Find your shop', body: 'Scan a participating shop’s QR code or open its link. There’s nothing to download.' },

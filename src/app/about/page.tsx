@@ -1,9 +1,10 @@
 import type { Metadata } from 'next';
+import { publicCanonical } from '@/lib/public-pages';
 import Link from 'next/link';
 import { ArrowRight, ArrowUpRight, HeartHandshake, Lightbulb, Store } from 'lucide-react';
 import { PublicShell } from '@/components/marketing/PublicShell';
 
-export const metadata: Metadata = { title: 'About us | Printly', description: 'Meet Printly: a simpler way for local print shops and their customers to get things done.' };
+export const metadata: Metadata = { alternates: publicCanonical('/about'), title: 'About us | Printly', description: 'Meet Printly: a simpler way for local print shops and their customers to get things done.' };
 
 export default function AboutPage() {
   return <PublicShell><main id="main-content">

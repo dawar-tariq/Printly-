@@ -1,8 +1,9 @@
 import type { Metadata } from 'next';
+import { publicCanonical } from '@/lib/public-pages';
 import Link from 'next/link';
 import { PolicyPage, type PolicySection } from '@/components/marketing/PolicyPage';
 
-export const metadata: Metadata = { title: 'Security | Printly', description: 'Practical information about Printly security, private file storage and protecting your account and orders.' };
+export const metadata: Metadata = { alternates: publicCanonical('/security'), title: 'Security | Printly', description: 'Practical information about Printly security, private file storage and protecting your account and orders.' };
 
 const sections: PolicySection[] = [
   { id: 'approach', title: 'Our approach', content: <><p>Printly is designed to limit access to the information needed for an order or shop account. Security is an ongoing process, not a guarantee that risk can be eliminated.</p></> },

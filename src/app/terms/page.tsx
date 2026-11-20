@@ -1,8 +1,9 @@
 import type { Metadata } from 'next';
+import { publicCanonical } from '@/lib/public-pages';
 import Link from 'next/link';
 import { PolicyPage, type PolicySection } from '@/components/marketing/PolicyPage';
 
-export const metadata: Metadata = { title: 'Terms & conditions | Printly', description: 'Terms for using Printly, placing customer orders and managing a shop subscription.' };
+export const metadata: Metadata = { alternates: publicCanonical('/terms'), title: 'Terms & conditions | Printly', description: 'Terms for using Printly, placing customer orders and managing a shop subscription.' };
 
 const sections: PolicySection[] = [
   { id: 'service', title: '1. The service', content: <><p>Printly provides tools that help customers place print orders with participating shops and help those shops manage their work. The shop—not Printly—prepares and fulfils the order. Shop services, availability, prices and estimated times may differ.</p><p>By using Printly, you agree to use the service lawfully and to provide accurate information. If you use the service for a business, you should have authority to act for that business.</p></> },

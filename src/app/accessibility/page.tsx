@@ -1,8 +1,9 @@
 import type { Metadata } from 'next';
+import { publicCanonical } from '@/lib/public-pages';
 import Link from 'next/link';
 import { PolicyPage, type PolicySection } from '@/components/marketing/PolicyPage';
 
-export const metadata: Metadata = { title: 'Accessibility | Printly', description: 'Our approach to making Printly easier to use across devices and abilities.' };
+export const metadata: Metadata = { alternates: publicCanonical('/accessibility'), title: 'Accessibility | Printly', description: 'Our approach to making Printly easier to use across devices and abilities.' };
 
 const sections: PolicySection[] = [
   { id: 'approach', title: 'Our approach', content: <><p>Printly aims to be usable by as many people as possible, across different devices and abilities. We use readable text, labelled controls and keyboard-accessible navigation where practical, and continue to improve the experience.</p><p>Different browsers, assistive technologies, printers and file formats can behave differently. We have not represented the service as independently certified to a particular accessibility standard.</p></> },

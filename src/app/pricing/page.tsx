@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { publicCanonical } from '@/lib/public-pages';
 import Link from 'next/link';
 import { ArrowRight, ArrowUpRight, Check, CreditCard, ShieldCheck, Store } from 'lucide-react';
 import { PublicShell } from '@/components/marketing/PublicShell';
@@ -8,7 +9,7 @@ import { formatPaiseExact } from '@/lib/format';
 import { getPublicPricing } from '@/lib/public-pricing';
 
 export const dynamic = 'force-dynamic';
-export const metadata: Metadata = { title: 'Pricing | Printly', description: 'Explore Printly’s all-features subscription for print shops, with monthly, six-month and yearly terms.' };
+export const metadata: Metadata = { alternates: publicCanonical('/pricing'), title: 'Pricing | Printly', description: 'Explore Printly’s all-features subscription for print shops, with monthly, six-month and yearly terms.' };
 
 const included = ['Your own shop page & QR code', 'Customer ordering and tracking', 'Order queue and status updates', 'Direct UPI and cash payment options', 'Custom services and rate card', 'Reports and inventory tools'];
 
