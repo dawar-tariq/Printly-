@@ -7,7 +7,7 @@ const state = vi.hoisted(() => ({
   lookupFails: false, discardOk: true, discardInUse: false,
   discardCalls: [] as Array<{ order: string; file: string; path: string }>,
 }));
-vi.mock('@/lib/rate-limit', () => ({ enforcePublicRateLimit: async () => null }));
+vi.mock('@/lib/rate-limit', () => ({ enforcePublicRateLimit: async () => null, enforceDraftRateLimit: async () => null }));
 vi.mock('@/lib/upload-files', () => ({
   ALLOWED_FILE_MIMES: new Set(['application/pdf']), MAX_FILE_BYTES: 25 * 1024 * 1024, MAX_ORDER_FILES: 10,
   FileValidationError: class FileValidationError extends Error {},

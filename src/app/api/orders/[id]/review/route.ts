@@ -23,10 +23,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     console.error('Could not save an order review:', error.message);
     return jsonError(503, 'db', 'Could not submit your rating. Please try again.');
   }
-  const { data: agg } = await admin.from('reviews').select('rating').eq('shop_id', order.shop_id);
-  if (agg && agg.length) {
-    const avg = agg.reduce((a, r) => a + r.rating, 0) / agg.length;
-    await admin.from('shops').update({ rating_avg: Math.round(avg * 10) / 10, rating_count: agg.length }).eq('id', order.shop_id);
-  }
+  // The database updates the aggregate transactionally from all reviews.
+  // Do not fetch a capped PostgREST page and overwrite it with a stale total.
   return jsonOk({ ok: true });
 }

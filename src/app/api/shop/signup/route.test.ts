@@ -6,9 +6,11 @@ const mocks = vi.hoisted(() => {
   const deleteUser = vi.fn();
   const upload = vi.fn();
   const remove = vi.fn();
+  const readShop = vi.fn();
   const limit = vi.fn();
-  return { rpc, createUser, deleteUser, upload, remove, limit, admin: {
+  return { rpc, createUser, deleteUser, upload, remove, readShop, limit, admin: {
     rpc, auth: { admin: { createUser, deleteUser } }, storage: { from: () => ({ upload, remove }) },
+    from: () => ({ select: () => ({ eq: () => ({ maybeSingle: readShop }) }) }),
   } };
 });
 vi.mock('server-only', () => ({}));
@@ -20,7 +22,7 @@ vi.mock('@/lib/api', () => ({
 }));
 import { POST } from './route';
 
-const base = { shop_name: 'Bright Prints', owner_name: 'Asha Khan', email: 'asha@example.com', password: 'password123', phone: '9906000000', address: 'Shop 4', city: 'Srinagar' };
+const base = { shop_name: 'Bright Prints', owner_name: 'Asha Khan', email: 'asha@example.com', password: 'new-password-123', phone: '9906000000', address: 'Shop 4', city: 'Srinagar' };
 function request(body: unknown) {
   return new Request('http://localhost/api/shop/signup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 }
@@ -32,6 +34,7 @@ beforeEach(() => {
   mocks.deleteUser.mockResolvedValue({ error: null });
   mocks.upload.mockResolvedValue({ error: null });
   mocks.remove.mockResolvedValue({ error: null });
+  mocks.readShop.mockResolvedValue({ data: null, error: null });
   mocks.rpc.mockImplementation(async (name: string, args: { p_shop?: { short_code: string } }) => {
     if (name === 'shop_name_exists') return { data: false, error: null };
     return { data: { short_code: args.p_shop!.short_code, duplicate_name: false }, error: null };
@@ -110,5 +113,31 @@ describe('shop signup', () => {
     expect(response.status).toBe(200);
     expect(mocks.rpc).toHaveBeenCalledTimes(3);
     expect(mocks.deleteUser).not.toHaveBeenCalled();
+  });
+
+  it('recovers an already committed application after a lost RPC response', async () => {
+    mocks.rpc.mockResolvedValueOnce({ data: false, error: null }).mockImplementationOnce(async (_name, args) => {
+      mocks.readShop.mockResolvedValueOnce({ data: { owner_id: args.p_shop.owner_id, short_code: args.p_shop.short_code }, error: null });
+      return { data: null, error: { code: 'PGRST003', message: 'connection lost' } };
+    });
+    const response = await POST(request(base));
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.customer_path).toBe(`/s/p-${body.short_code.toLowerCase()}`);
+    expect(mocks.deleteUser).not.toHaveBeenCalled();
+    expect(mocks.remove).not.toHaveBeenCalled();
+  });
+
+  it('does not delete the account or submitted photo when a lost response cannot be resolved', async () => {
+    mocks.rpc.mockResolvedValueOnce({ data: true, error: null }).mockRejectedValueOnce(new Error('network lost'));
+    mocks.readShop.mockResolvedValueOnce({ data: null, error: { message: 'lookup unavailable' } });
+    const form = new FormData();
+    form.append('payload', JSON.stringify(base));
+    form.append('proof', new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])], 'shop.png', { type: 'image/png' }));
+    const response = await POST(new Request('http://localhost/api/shop/signup', { method: 'POST', body: form }));
+    expect(response.status).toBe(503);
+    expect((await response.json()).error).toMatchObject({ code: 'signup_unconfirmed', message: expect.stringMatching(/signing in before submitting again/i) });
+    expect(mocks.deleteUser).not.toHaveBeenCalled();
+    expect(mocks.remove).not.toHaveBeenCalled();
   });
 });

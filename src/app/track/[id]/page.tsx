@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -42,29 +42,47 @@ export default function TrackPage() {
   const [disputeDone, setDisputeDone] = useState(false);
   const [disputeBusy, setDisputeBusy] = useState(false);
   const [disputeError, setDisputeError] = useState<string | null>(null);
+  const refreshSequence = useRef(0);
 
   const load = useCallback(async () => {
+    const sequence = ++refreshSequence.current;
     try {
       const res = await fetch(`/api/orders/${id}/track`, { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
+        if (!data?.track || typeof data.track !== 'object' || typeof data.track.order_id !== 'string' ||
+            data.track.order_id.toLowerCase() !== id.toLowerCase() || typeof data.track.status !== 'string') {
+          throw new Error('Invalid tracking response');
+        }
+        if (sequence !== refreshSequence.current) return;
         setTrack(data.track); setTrackError(false);
-      } else if (res.status === 404) {
+      } else if (sequence !== refreshSequence.current) return;
+      else if (res.status === 404) {
         setTrack(null); setTrackError(false);
       } else {
-        setTrack((previous) => previous && typeof previous === 'object' ? previous : 'unavailable');
-        setTrackError(true);
+        throw new Error('Tracking refresh failed');
       }
     } catch {
+      if (sequence !== refreshSequence.current) return;
       setTrack((previous) => previous && typeof previous === 'object' ? previous : 'unavailable');
       setTrackError(true);
     }
   }, [id]);
 
   useEffect(() => {
-    load();
-    const t = setInterval(load, 4000);
-    return () => clearInterval(t);
+    // A client-side navigation to a different tracking link must not show the
+    // previous order while the new one is loading.
+    setTrack('loading'); setTrackError(false);
+    setRating(0); setComment(''); setReviewed(false); setReviewError(null);
+    setReportUtr(''); setReportMessage(null);
+    setDisputeOpen(false); setDisputeType('other'); setDisputeText(''); setDisputeDone(false); setDisputeError(null);
+    // Do not keep polling in background tabs. Refresh immediately when the
+    // customer returns, and otherwise use a modest interval while visible.
+    const refreshIfVisible = () => { if (document.visibilityState !== 'hidden') void load(); };
+    refreshIfVisible();
+    const timer = window.setInterval(refreshIfVisible, 15_000);
+    document.addEventListener('visibilitychange', refreshIfVisible);
+    return () => { refreshSequence.current++; window.clearInterval(timer); document.removeEventListener('visibilitychange', refreshIfVisible); };
   }, [load]);
 
   const submitReview = async () => {

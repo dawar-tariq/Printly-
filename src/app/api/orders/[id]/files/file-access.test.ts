@@ -10,6 +10,7 @@ const state = vi.hoisted(() => ({
   objects: new Map<string, Uint8Array>(),
   signed: [] as string[], removed: [] as string[], staffShop: '', failStorageRemoval: false,
   failSignedUpload: false, failSignedDownload: false,
+  uploadLimit: vi.fn(), processingLimit: vi.fn(), issued: [] as string[],
 }));
 
 type Table = 'orders' | 'order_files' | 'order_items' | 'order_file_tombstones';
@@ -81,9 +82,12 @@ const admin = () => ({
       if (options && state.failSignedDownload) return { data: null, error: { status: 500, message: 'sensitive storage diagnostic' } };
       state.signed.push(path); return { data: { signedUrl: `https://storage.example/${encodeURIComponent(path)}` }, error: null };
     },
-    createSignedUploadUrl: async (_path: string) => state.failSignedUpload
-      ? { data: null, error: { status: 500, message: 'sensitive storage diagnostic' } }
-      : { data: { token: 'upload-token' }, error: null },
+    createSignedUploadUrl: async (path: string) => {
+      state.issued.push(path);
+      return state.failSignedUpload
+        ? { data: null, error: { status: 500, message: 'sensitive storage diagnostic' } }
+        : { data: { token: 'upload-token' }, error: null };
+    },
     download: async (path: string) => state.objects.has(path) ? { data: new Blob([new Uint8Array(state.objects.get(path)!)]), error: null } : { data: null, error: { message: 'missing' } },
     remove: async (paths: string[]) => {
       if (state.failStorageRemoval) return { error: { message: 'temporary storage failure' } };
@@ -92,6 +96,7 @@ const admin = () => ({
   }) },
 });
 vi.mock('@/lib/supabase', () => ({ createAdminSupabase: () => admin(), createServerSupabase: vi.fn() }));
+vi.mock('@/lib/rate-limit', () => ({ enforceUploadIssueLimit: state.uploadLimit, enforcePublicRateLimit: state.processingLimit }));
 vi.mock('@/lib/api', async (original) => ({ ...(await original<typeof import('@/lib/api')>()), assertStaffOfShop: async (shopId: string) => shopId === state.staffShop ? { shopIds: [shopId] } : null }));
 
 import { GET as customerPreview, DELETE as deleteFile } from './[fileId]/route';
@@ -124,7 +129,8 @@ beforeEach(async () => {
   state.items = [{ id: 'item1', order_id: order1, file_id: file1 }, { id: 'item2', order_id: order2, file_id: file2 }];
   const pdf = await PDFDocument.create(); pdf.addPage(); const bytes = await pdf.save();
   state.objects = new Map([[path1, bytes], [path2, bytes]]); state.signed = []; state.removed = []; state.staffShop = shop1; state.tombstones = []; state.failStorageRemoval = false;
-  state.failSignedUpload = false; state.failSignedDownload = false;
+  state.failSignedUpload = false; state.failSignedDownload = false; state.issued = [];
+  state.uploadLimit.mockReset().mockResolvedValue(null); state.processingLimit.mockReset().mockResolvedValue(null);
 });
 
 describe('draft and shop file isolation', () => {
@@ -149,6 +155,15 @@ describe('draft and shop file isolation', () => {
     expect(download.status).toBe(503);
     expect(JSON.stringify(await upload.json())).not.toContain('sensitive storage diagnostic');
     expect(JSON.stringify(await download.json())).not.toContain('sensitive storage diagnostic');
+  });
+  it('refuses both original and edit upload links when the draft issuance limit is reached', async () => {
+    state.uploadLimit.mockResolvedValue(new Response('limited', { status: 429 }));
+    const original = await beginUpload(request('POST', order1, { name: 'file.pdf', mime: 'application/pdf', size: 100 }), { params: Promise.resolve({ id: order1 }) });
+    const edit = await beginEdit(request('POST', order1, { size: 100 }), params(order1, file1));
+    expect(original.status).toBe(429);
+    expect(edit.status).toBe(429);
+    expect(state.issued).toEqual([]);
+    expect(state.uploadLimit).toHaveBeenCalledTimes(2);
   });
   it('removes the object, row and linked items only for that draft', async () => {
     expect((await deleteFile(request('DELETE', order2), params(order1, file1))).status).toBe(403);

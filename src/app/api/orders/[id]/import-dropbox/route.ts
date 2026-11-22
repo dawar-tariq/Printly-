@@ -1,7 +1,7 @@
 import { readJsonBody } from '@/lib/request-body';
 import { randomUUID } from 'node:crypto';
 import { createAdminSupabase } from '@/lib/supabase';
-import { enforcePublicRateLimit } from '@/lib/rate-limit';
+import { enforceDraftRateLimit, enforcePublicRateLimit } from '@/lib/rate-limit';
 import { jsonOk, jsonError } from '@/lib/api';
 import { dropboxImportInput } from '@/lib/contracts';
 import { requestHasDraftAccess } from '@/lib/draft-access';
@@ -73,6 +73,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (order.status !== 'draft' || order.payment_method) return jsonError(409, 'order_locked', 'Files cannot be changed after checkout starts.');
   const { count, error: countError } = await admin.from('order_files').select('id', { count: 'exact', head: true }).eq('order_id', id);
   if (countError) return jsonError(500, 'db', 'Could not check the number of files.');
+  const draftLimited = await enforceDraftRateLimit(id, 'draft_dropbox_import');
+  if (draftLimited) return draftLimited;
   let fileCount = count ?? 0;
   const results: Array<{ link: string; ok: boolean; file_id?: string; page_count?: number | null; name?: string; mime?: string; size?: number; error?: string }> = [];
   for (const link of parsed.data.links) {

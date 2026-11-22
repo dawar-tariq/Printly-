@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from 'crypto';
 import { jsonOk, jsonError } from '@/lib/api';
 import { enforcePublicRateLimit } from '@/lib/rate-limit';
+import { isDefiniteDatabaseRejection } from '@/lib/database-error';
 import { createAdminSupabase } from '@/lib/supabase';
 import { shopSignupInput } from '@/lib/contracts';
 import { isGstinFormat, normalizeGstin, publicShopPath } from '@/lib/shop-identity';
@@ -63,8 +64,28 @@ export async function POST(req: Request) {
   let photoPath: string | null = null;
   const cleanup = async () => {
     await removePhotoProof(admin, photoPath);
-    const { error } = await admin.auth.admin.deleteUser(userId);
-    if (error) console.error('Could not remove an incomplete signup:', error.message);
+    try {
+      const { error } = await admin.auth.admin.deleteUser(userId);
+      if (error) console.error('Could not remove an incomplete signup:', error.message);
+    } catch { console.error('Could not remove an incomplete signup: authentication unavailable'); }
+  };
+  const received = (code: string, duplicateName?: boolean) => jsonOk({
+    ok: true, short_code: code, customer_path: publicShopPath(code),
+    ...(duplicateName === undefined ? {} : { duplicate_name: duplicateName }),
+    message: 'Application received — your shop will be reviewed before it goes live.',
+  });
+  const unconfirmedApplication = async () => {
+    // The RPC may have committed even when its response was lost. A positive
+    // lookup lets us recover the real code; a missing/failed lookup does NOT
+    // prove rollback while the original request may still be in flight.
+    try {
+      const { data, error } = await admin.from('shops').select('owner_id,short_code').eq('id', shopId).maybeSingle();
+      if (!error && data?.owner_id === userId && typeof data.short_code === 'string' && /^[A-HJ-NP-Z2-9]{8}$/.test(data.short_code)) {
+        return received(data.short_code);
+      }
+    } catch { /* Leave the account and any proof intact for operator review. */ }
+    console.error('Shop application outcome is unconfirmed; operator review may be needed:', shopId);
+    return jsonError(503, 'signup_unconfirmed', 'We could not confirm your application. Try signing in before submitting again, or contact an administrator.');
   };
   if (submission.photo) {
     try { photoPath = await uploadPhotoProof(admin, shopId, submission.photo); }
@@ -87,30 +108,35 @@ export async function POST(req: Request) {
   // it collides; no owner can overwrite or share another shop's identity.
   for (let attempt = 0; attempt < 6; attempt++) {
     const code = shortCode();
-    const { data: shop, error } = await admin.rpc('create_shop_application', {
-      p_shop: {
-        id: shopId, owner_id: userId, slug: `shop-${code.toLowerCase()}`, short_code: code,
-        name: shopName, owner_name: d.owner_name.trim(), address: d.address.trim(), city: d.city.trim(),
-        phone: d.phone.trim(), gstin, upi_id: d.upi_id || null,
-      },
-      p_onboarding: onboarding,
-      p_services: d.services ?? ['print', 'photocopy', 'scan', 'bind', 'laminate'],
-      p_rates: rates,
-      p_inventory: (d.inventory ?? []).map((item) => ({ ...item, name: item.name.trim() })),
-      p_photo_path: photoPath,
-    });
+    let result;
+    try {
+      result = await admin.rpc('create_shop_application', {
+        p_shop: {
+          id: shopId, owner_id: userId, slug: `shop-${code.toLowerCase()}`, short_code: code,
+          name: shopName, owner_name: d.owner_name.trim(), address: d.address.trim(), city: d.city.trim(),
+          phone: d.phone.trim(), gstin, upi_id: d.upi_id || null,
+        },
+        p_onboarding: onboarding,
+        p_services: d.services ?? ['print', 'photocopy', 'scan', 'bind', 'laminate'],
+        p_rates: rates,
+        p_inventory: (d.inventory ?? []).map((item) => ({ ...item, name: item.name.trim() })),
+        p_photo_path: photoPath,
+      });
+    } catch { return unconfirmedApplication(); }
+    const { data: shop, error } = result;
     if (!error && shop) {
+      if (typeof shop.short_code !== 'string' || !/^[A-HJ-NP-Z2-9]{8}$/.test(shop.short_code) || typeof shop.duplicate_name !== 'boolean') return unconfirmedApplication();
       // A stale name check may have caused an unnecessary photo upload.
       if (!shop.duplicate_name) await removePhotoProof(admin, photoPath);
-      return jsonOk({ ok: true, short_code: shop.short_code, customer_path: publicShopPath(shop.short_code), duplicate_name: shop.duplicate_name,
-        message: 'Application received — your shop will be reviewed before it goes live.' });
+      return received(shop.short_code, shop.duplicate_name);
     }
     if (error?.code === '23505' && /shops_(slug|short_code)_key/.test(`${error.message} ${error.details ?? ''}`)) continue;
+    if (!isDefiniteDatabaseRejection(error)) return unconfirmedApplication();
     await cleanup();
     if (error?.message.includes('DUPLICATE_NAME_PROOF_REQUIRED')) {
       return jsonError(409, 'duplicate_name_requires_proof', 'This name is already in use. Add a shop photo or a valid-format GSTIN for review.');
     }
-    console.error('Shop application failed:', error?.message);
+    console.error('Shop application failed:', error?.code);
     return jsonError(500, 'signup', 'Could not finish the application. Please try again.');
   }
   await cleanup();

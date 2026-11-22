@@ -22,6 +22,7 @@ export async function POST(req: Request) {
     description: parsed.data.description,
   }).select('id').single();
   if (error) {
+    if (error.code === '23505') return jsonError(409, 'report_already_open', 'A report for this order is already open. Please contact the shop about it.');
     console.error('Could not save an order dispute:', error.message);
     return jsonError(503, 'db', 'Could not submit your report. Please try again.');
   }

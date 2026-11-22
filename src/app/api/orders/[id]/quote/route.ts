@@ -2,12 +2,15 @@ import { jsonOk, jsonError } from '@/lib/api';
 import { computeQuote, PricingError } from '@/lib/pricing';
 import { loadOrderWithRates } from '@/lib/order-quote';
 import { requestHasDraftAccess } from '@/lib/draft-access';
+import { enforcePublicRateLimit } from '@/lib/rate-limit';
 import { quoteToken } from '@/lib/quote-token';
 import { shopHasSubscription } from '@/lib/subscription-server';
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!requestHasDraftAccess(req, id)) return jsonError(403, 'draft_session', 'Your order session expired. Please start a new order.');
+  const limited = await enforcePublicRateLimit(req, 'draft_changes');
+  if (limited) return limited;
   let loaded;
   try { loaded = await loadOrderWithRates(id); }
   catch { return jsonError(503, 'db', 'Could not calculate the total. Please retry.'); }

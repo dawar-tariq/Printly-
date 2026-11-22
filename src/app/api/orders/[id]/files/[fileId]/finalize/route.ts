@@ -2,6 +2,7 @@ import { readJsonBody } from '@/lib/request-body';
 import { createAdminSupabase } from '@/lib/supabase';
 import { jsonOk, jsonError } from '@/lib/api';
 import { requestHasDraftAccess } from '@/lib/draft-access';
+import { enforcePublicRateLimit } from '@/lib/rate-limit';
 import { inspectUploadedFile, FileValidationError, MAX_ORDER_FILES } from '@/lib/upload-files';
 import { discardFileObject, draftMutationError } from '@/lib/draft-mutation';
 
@@ -29,6 +30,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (countError) return jsonError(500, 'db', 'Could not check the number of files.');
   if ((count ?? 0) >= MAX_ORDER_FILES) return jsonError(422, 'too_many', `Maximum ${MAX_ORDER_FILES} files per order`);
 
+  const limited = await enforcePublicRateLimit(req, 'file_processing');
+  if (limited) return limited;
   const { data: blob, error } = await admin.storage.from('order-files').download(path);
   if (error || !blob) return jsonError(500, 'storage', 'Could not read the uploaded file. Please retry.');
   let info: { size: number; pages: number | null };

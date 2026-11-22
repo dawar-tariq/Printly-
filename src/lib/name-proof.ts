@@ -34,15 +34,22 @@ export async function readPhotoProof(entry: FormDataEntryValue | null): Promise<
 
 export async function uploadPhotoProof(admin: SupabaseClient, shopId: string, photo: PhotoProof): Promise<string> {
   const path = `${shopId}/${randomUUID()}.${photo.extension}`;
-  const { error } = await admin.storage.from(PROOF_BUCKET).upload(path, photo.bytes, { contentType: photo.mime, upsert: false });
-  if (error) throw new Error('Could not upload your shop photo. Please try again.');
-  return path;
+  try {
+    const { error } = await admin.storage.from(PROOF_BUCKET).upload(path, photo.bytes, { contentType: photo.mime, upsert: false });
+    if (!error) return path;
+  } catch { /* The upload may have succeeded even if its response was lost. */ }
+  // No database write has referenced this newly generated path yet. Remove it
+  // best-effort; an in-flight upload can still require later orphan cleanup.
+  await removePhotoProof(admin, path);
+  throw new Error('Could not upload your shop photo. Please try again.');
 }
 
 export async function removePhotoProof(admin: SupabaseClient, path: string | null | undefined) {
   if (!path) return;
-  const { error } = await admin.storage.from(PROOF_BUCKET).remove([path]);
-  if (error) console.error('Unable to remove an unused name-proof photo:', error.message);
+  try {
+    const { error } = await admin.storage.from(PROOF_BUCKET).remove([path]);
+    if (error) console.error('Unable to remove an unused name-proof photo:', error.message);
+  } catch { console.error('Unable to remove an unused name-proof photo: storage unavailable'); }
 }
 
 /** Supports existing JSON clients and multipart forms with an optional photo. */

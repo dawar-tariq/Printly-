@@ -4,7 +4,9 @@ import { isIP } from 'node:net';
 import { NextResponse } from 'next/server';
 import { createAdminSupabase } from '@/lib/supabase';
 
-export type PublicRateBucket = 'signup' | 'name_check' | 'order_start' | 'dropbox_import' | 'order_feedback';
+export type PublicRateBucket = 'signup' | 'name_check' | 'order_start' | 'dropbox_import' | 'order_feedback'
+  | 'login_attempt' | 'upload_issue' | 'file_processing' | 'draft_changes' | 'checkout' | 'tracking';
+type DraftRateBucket = 'draft_upload_issue' | 'draft_dropbox_import';
 
 function canonicalIp(address: string): string | null {
   const value = address.trim();
@@ -39,12 +41,37 @@ export async function enforcePublicRateLimit(req: Request, bucket: PublicRateBuc
   const secret = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!ip || !secret) return unavailable();
   const clientHash = createHmac('sha256', secret).update(`printly-public-rate-v1:${ip}`).digest('hex');
+  return consume(bucket, clientHash);
+}
+
+/**
+ * Bound signed-upload and import attempts for the whole draft, even if the
+ * client changes IP or never finalizes any file. Call only after verifying the
+ * order-scoped draft cookie. The database never sees the order ID itself.
+ */
+export async function enforceDraftRateLimit(orderId: string, bucket: DraftRateBucket): Promise<Response | null> {
+  const secret = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!secret || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(orderId)) return unavailable();
+  const subjectHash = createHmac('sha256', secret).update(`printly-draft-rate-v1:${orderId.toLowerCase()}`).digest('hex');
+  return consume(bucket, subjectHash);
+}
+
+export async function enforceUploadIssueLimit(req: Request, orderId: string): Promise<Response | null> {
+  return await enforcePublicRateLimit(req, 'upload_issue') ?? await enforceDraftRateLimit(orderId, 'draft_upload_issue');
+}
+
+async function consume(bucket: PublicRateBucket | DraftRateBucket, clientHash: string): Promise<Response | null> {
   try {
     const { data, error } = await createAdminSupabase().rpc('consume_public_rate_limit', { p_bucket: bucket, p_client_hash: clientHash });
     if (error || !data || typeof data.allowed !== 'boolean') return unavailable();
     if (data.allowed) return null;
-    const retry = Number.isFinite(data.retry_after) ? Math.max(1, Math.min(3600, Math.ceil(data.retry_after))) : 60;
-    return NextResponse.json({ error: { code: 'rate_limited', message: 'Too many requests. Please wait and try again.' } }, {
+    const retry = Number.isFinite(data.retry_after) ? Math.max(1, Math.min(86400, Math.ceil(data.retry_after))) : 60;
+    const message = bucket === 'draft_upload_issue'
+      ? 'This order has reached its upload-attempt limit. Please start a new order.'
+      : bucket === 'draft_dropbox_import'
+        ? 'This order has reached its import-attempt limit. Please start a new order.'
+        : 'Too many requests. Please wait and try again.';
+    return NextResponse.json({ error: { code: 'rate_limited', message } }, {
       status: 429, headers: { 'Retry-After': String(retry), 'Cache-Control': 'no-store' },
     });
   } catch { return unavailable(); }

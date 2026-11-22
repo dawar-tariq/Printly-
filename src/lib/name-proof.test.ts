@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 vi.mock('server-only', () => ({}));
-import { detectProofImage, proofSubmissionError, readPhotoProof, readProofSubmission } from './name-proof';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { detectProofImage, proofSubmissionError, readPhotoProof, readProofSubmission, uploadPhotoProof } from './name-proof';
 
 describe('private proof photo validation', () => {
   it('accepts supported signatures and rejects spoofed files', async () => {
@@ -21,6 +22,13 @@ describe('private proof photo validation', () => {
     catch (error) { validationError = error; }
     expect(proofSubmissionError(validationError)).toMatch(/valid JPEG/);
     expect(proofSubmissionError(new Error('sensitive parser diagnostic'))).toBe('Invalid form data.');
+  });
+  it('attempts to remove an unreferenced photo if its upload response is lost', async () => {
+    const remove = vi.fn().mockResolvedValue({ error: null });
+    const admin = { storage: { from: () => ({ upload: vi.fn().mockRejectedValue(new Error('network lost')), remove }) } } as unknown as SupabaseClient;
+    await expect(uploadPhotoProof(admin, 'shop-id', { bytes: Buffer.from([1]), mime: 'image/png', extension: 'png' })).rejects.toThrow('Could not upload');
+    expect(remove).toHaveBeenCalledOnce();
+    expect(remove.mock.calls[0][0][0]).toMatch(/^shop-id\/.+\.png$/);
   });
   it('caps the complete multipart body even when no length is declared', async () => {
     const form = new FormData();

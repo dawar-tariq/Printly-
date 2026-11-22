@@ -16,8 +16,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.signIn.mockResolvedValue({ data: { user: { id: 'admin-id' } }, error: null });
   mocks.signOut.mockResolvedValue({ error: null });
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ ok: true })));
 });
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 function submit() {
   fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'admin@example.com' } });
@@ -41,12 +42,26 @@ describe('separate shop and admin sign-in', () => {
     submit();
     await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith('/admin'));
   });
+  it('stops the normal sign-in flow when the application gate returns 429', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ error: {} }, { status: 429, headers: { 'Retry-After': '75' } })));
+    render(<PortalLogin portal="shop" />);
+    submit();
+    expect((await screen.findByRole('alert')).textContent).toMatch(/too many sign-in attempts.*2 minutes/i);
+    expect(mocks.signIn).not.toHaveBeenCalled();
+  });
+  it('uses the maintenance-safe admin gate and handles provider rate limits', async () => {
+    mocks.signIn.mockResolvedValue({ data: { user: null }, error: { status: 429 } });
+    render(<PortalLogin portal="admin" />);
+    submit();
+    expect((await screen.findByRole('alert')).textContent).toMatch(/too many sign-in attempts/i);
+    expect(fetch).toHaveBeenCalledWith('/api/admin/login-attempt', expect.objectContaining({ method: 'POST' }));
+  });
   it('refuses shop accounts in the admin portal', async () => {
     mocks.profile.mockResolvedValue({ data: { role: 'shop_staff' }, error: null });
     render(<PortalLogin portal="admin" />);
     submit();
     await screen.findByText('This account does not have administrator access.');
-    expect(mocks.signOut).toHaveBeenCalled();
+    expect(mocks.signOut).toHaveBeenCalledWith({ scope: 'local' });
     expect(mocks.replace).not.toHaveBeenCalled();
   });
 });

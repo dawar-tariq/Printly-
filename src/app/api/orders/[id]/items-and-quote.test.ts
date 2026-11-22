@@ -23,6 +23,7 @@ vi.mock('@/lib/supabase', () => ({ createAdminSupabase: () => ({
   },
 }), createServerSupabase: vi.fn() }));
 vi.mock('@/lib/subscription-server', () => ({ shopHasSubscription: async () => true }));
+vi.mock('@/lib/rate-limit', () => ({ enforcePublicRateLimit: async () => null }));
 vi.mock('@/lib/order-quote', () => ({ loadOrderWithRates: async () => ({
   order: { rush: false, status: 'draft', payment_method: null, draft_version: 1, shops: { rush_surcharge_bps: 1500 } },
   items: [{ service: 'print', paper_size: 'A4', color: 'bw', sides: 'single', paper_gsm: 80, option: null, copies: 2, pages: 2 }],

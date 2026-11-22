@@ -1,6 +1,7 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 const state = vi.hoisted(() => ({ rpc: vi.fn() }));
 vi.mock('@/lib/supabase', () => ({ createAdminSupabase: () => ({ rpc: state.rpc }) }));
+vi.mock('@/lib/rate-limit', () => ({ enforcePublicRateLimit: async () => null }));
 import { GET } from './route';
 
 beforeEach(() => state.rpc.mockReset());

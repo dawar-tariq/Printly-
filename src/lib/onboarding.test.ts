@@ -6,7 +6,7 @@ const base = {
   shop_name: 'Bright Prints',
   owner_name: 'Asha Khan',
   email: 'asha@example.com',
-  password: 'password123',
+  password: 'new-password-123',
   phone: '9906000000',
   address: 'Shop 4, Lal Chowk',
   city: 'Srinagar',

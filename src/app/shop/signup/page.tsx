@@ -6,6 +6,7 @@ import { Logo } from '@/components/Logo';
 import { Loader2, CheckCircle2, Store, ArrowLeft, ArrowRight, Plus, Trash2, ShieldCheck, Clock, Boxes, Printer, Building2, Check, CircleAlert } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { isGstinFormat, normalizeShopName } from '@/lib/shop-identity';
+import { passwordPolicyError } from '@/lib/password-policy';
 
 const STEPS = [
   { key: 'shop', label: 'Shop & owner', icon: Store, hint: 'Who you are and how to reach you' },
@@ -97,7 +98,7 @@ export default function ShopSignupPage() {
     switch (step) {
       case 0: return normalizedName.length >= 2 && nameCheck.name === normalizedName &&
         (nameCheck.status === 'available' || (nameCheck.status === 'duplicate' && (!!photo || isGstinFormat(form.gstin)))) &&
-        form.owner_name.trim().length >= 2 && emailOk && form.password.length >= 8 && phoneOk && form.address.trim().length >= 3 && form.city.trim().length >= 2;
+        form.owner_name.trim().length >= 2 && emailOk && !passwordPolicyError(form.password) && phoneOk && form.address.trim().length >= 3 && form.city.trim().length >= 2;
       case 1: return true; // business details are optional but encouraged
       case 2: return services.length >= 1;
       case 3: return inventory.every((i) => !i.name.trim() || Number(i.qty || 0) >= 0);
@@ -158,12 +159,18 @@ export default function ShopSignupPage() {
           setNameCheck({ name: normalizedName, status: 'duplicate' });
           setStep(0);
         }
-        setError(data?.error?.message ?? 'Signup failed');
+        setError(data?.error?.message ?? (res.status >= 500
+          ? 'We could not confirm your application. Try signing in before submitting again, or contact an administrator.'
+          : 'Signup failed. Please check your details.'));
+        return;
+      }
+      if (typeof data.short_code !== 'string' || typeof data.customer_path !== 'string') {
+        setError('We could not confirm your application. Try signing in before submitting again, or contact an administrator.');
         return;
       }
       setDone({ message: data.message ?? 'Application received', code: data.short_code, path: data.customer_path });
     } catch {
-      setError('Could not submit your application. Please check your connection and try again.');
+      setError('We could not confirm your application. Try signing in before submitting again, or contact an administrator.');
     } finally { setBusy(false); }
   };
 
@@ -248,7 +255,7 @@ export default function ShopSignupPage() {
               )}
               <div className="sm:col-span-2"><label className="label">Your name *</label><input className="input" value={form.owner_name} onChange={set('owner_name')} placeholder="Owner / manager name" autoComplete="name" /></div>
               <div><label className="label">Email *</label><input className="input" type="email" value={form.email} onChange={set('email')} placeholder="shop@example.com" autoComplete="email" /></div>
-              <div><label className="label">Password * (min 8 chars)</label><input className="input" type="password" value={form.password} onChange={set('password')} autoComplete="new-password" placeholder="••••••••" /></div>
+              <div><label htmlFor="signup-password" className="label">Password * (at least 12 characters)</label><input id="signup-password" className="input" type="password" maxLength={72} value={form.password} onChange={set('password')} autoComplete="new-password" placeholder="••••••••••••" aria-describedby="signup-password-hint" /><p id="signup-password-hint" className="mt-1 text-xs text-neutral-500">Use a unique password; maximum 72 UTF-8 bytes. {form.password && passwordPolicyError(form.password)}</p></div>
               <div><label className="label">Phone *</label><input className="input" value={form.phone} onChange={set('phone')} placeholder="99060 00000" inputMode="tel" autoComplete="tel" /></div>
               <div><label className="label">Alternate phone</label><input className="input" value={form.alternate_phone} onChange={set('alternate_phone')} placeholder="Optional" inputMode="tel" /></div>
               <div className="sm:col-span-2"><label className="label">Shop address *</label><input className="input" value={form.address} onChange={set('address')} placeholder="Shop number, street, landmark" /></div>
@@ -346,7 +353,7 @@ export default function ShopSignupPage() {
           )}
 
           {error && <p className="mt-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2 flex items-center gap-2"><CircleAlert size={15} />{error}</p>}
-          {!stepValid && step === 0 && <p className="mt-4 text-[11px] text-neutral-500">Fill shop name, your name, a valid email, password (8+ chars), phone, address and city to continue.</p>}
+          {!stepValid && step === 0 && <p className="mt-4 text-[11px] text-neutral-500">Fill shop name, your name, a valid email, password (12+ characters), phone, address and city to continue.</p>}
 
           <div className="flex items-center gap-3 mt-6">
             {step > 0 && <button onClick={() => setStep(step - 1)} className="btn btn-ghost h-12 px-5 text-sm"><ArrowLeft size={16} />Back</button>}
@@ -358,11 +365,11 @@ export default function ShopSignupPage() {
               </button>
             )}
           </div>
-          <p className="text-center text-[11px] text-neutral-400 mt-3">We verify shops within 24–48h. Already applied? <Link href="/login" className="font-bold text-orange-700 hover:underline">Sign in</Link></p>
+          <p className="text-center text-[11px] text-neutral-400 mt-3">Applications are reviewed by an administrator. Already applied? <Link href="/login" className="font-bold text-orange-700 hover:underline">Sign in</Link></p>
         </div>
 
         <div className="mt-4 flex items-center justify-center gap-2 text-[11px] text-neutral-400">
-          <StepIcon size={12} /> Step {step + 1} of {STEPS.length} · Your details go straight to our review team — no spam, ever.
+          <StepIcon size={12} /> Step {step + 1} of {STEPS.length} · Your details go to our review team.
         </div>
       </main>
     </div>

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const state = vi.hoisted(() => ({ rpc: vi.fn() }));
 vi.mock('server-only', () => ({}));
 vi.mock('@/lib/supabase', () => ({ createAdminSupabase: () => ({ rpc: state.rpc }) }));
-import { enforcePublicRateLimit } from './rate-limit';
+import { enforceDraftRateLimit, enforcePublicRateLimit, enforceUploadIssueLimit } from './rate-limit';
 
 beforeEach(() => {
   vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'test-private-key');
@@ -23,6 +23,25 @@ describe('public abuse limiter', () => {
     expect(JSON.stringify(args)).not.toContain('192.0.2.18');
     await enforcePublicRateLimit(request('192.0.2.19'), 'order_start');
     expect(state.rpc.mock.calls[1][1].p_client_hash).not.toBe(args.p_client_hash);
+  });
+  it('bounds upload links by both IP and draft, without storing the draft ID', async () => {
+    const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    expect(await enforceUploadIssueLimit(request(), id)).toBeNull();
+    expect(state.rpc.mock.calls.map((call) => call[1].p_bucket)).toEqual(['upload_issue', 'draft_upload_issue']);
+    const draftHash = state.rpc.mock.calls[1][1].p_client_hash;
+    expect(draftHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify(state.rpc.mock.calls)).not.toContain(id);
+    expect(draftHash).not.toBe(state.rpc.mock.calls[0][1].p_client_hash);
+    await enforceDraftRateLimit(id.toUpperCase(), 'draft_upload_issue');
+    expect(state.rpc.mock.calls[2][1].p_client_hash).toBe(draftHash);
+    expect((await enforceDraftRateLimit('invalid', 'draft_upload_issue'))?.status).toBe(503);
+  });
+  it('returns the full retry window and a clear recovery action for exhausted drafts', async () => {
+    state.rpc.mockResolvedValue({ data: { allowed: false, retry_after: 80000 }, error: null });
+    const response = await enforceDraftRateLimit('11111111-1111-4111-8111-111111111111', 'draft_upload_issue');
+    expect(response?.status).toBe(429);
+    expect(response?.headers.get('retry-after')).toBe('80000');
+    expect((await response?.json()).error.message).toMatch(/start a new order/i);
   });
   it('returns a retryable 429 when the shared limit is reached', async () => {
     state.rpc.mockResolvedValue({ data: { allowed: false, retry_after: 45 }, error: null });

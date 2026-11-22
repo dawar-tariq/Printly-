@@ -4,6 +4,7 @@ import { createAdminSupabase } from '@/lib/supabase';
 import { jsonOk, jsonError } from '@/lib/api';
 import { signedUploadRequest } from '@/lib/contracts';
 import { requestHasDraftAccess } from '@/lib/draft-access';
+import { enforceUploadIssueLimit } from '@/lib/rate-limit';
 import { ALLOWED_FILE_MIMES, MAX_ORDER_FILES } from '@/lib/upload-files';
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -22,6 +23,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (countError) return jsonError(500, 'db', 'Could not check the number of files.');
   if ((count ?? 0) >= MAX_ORDER_FILES) return jsonError(422, 'too_many', `Maximum ${MAX_ORDER_FILES} files per order`);
 
+  // Count issued links, not just finalized files. Otherwise a draft could
+  // mint unlimited upload URLs and fill Storage without ever attaching them.
+  const limited = await enforceUploadIssueLimit(req, id);
+  if (limited) return limited;
   const fileId = randomUUID();
   const safeName = parsed.data.name.replace(/[^\w.\-() ]/g, '_').slice(-120) || 'file';
   const path = `${order.shop_id}/${id}/${fileId}-${safeName}`;

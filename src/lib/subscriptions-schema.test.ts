@@ -53,6 +53,11 @@ beforeAll(async () => {
   await db.exec(readFileSync('supabase/migrations/0011_subscriptions.sql', 'utf8'));
   await db.exec(readFileSync('supabase/migrations/0012_security_hardening.sql', 'utf8'));
   await db.exec(readFileSync('supabase/migrations/0013_public_abuse_limits.sql', 'utf8'));
+  await db.exec(readFileSync('supabase/migrations/0014_more_abuse_limits.sql', 'utf8'));
+  // A previous display total with no corresponding rows must be preserved for
+  // operators before migration 0015 recalculates it from the stored reviews.
+  await db.query('update public.shops set rating_avg=4.5, rating_count=3 where id=$1', [shop]);
+  await db.exec(readFileSync('supabase/migrations/0015_feedback_integrity.sql', 'utf8'));
 }, 30000);
 afterAll(async () => { await db?.close(); });
 
@@ -85,6 +90,7 @@ describe('subscription migration with the real preceding schema and policies', (
         await expect(db.query("insert into public.disputes(order_id, type, description, status) values ($1,'other','fake resolution','resolved_refund')", [closed])).rejects.toThrow(/permission denied/i);
         await expect(db.query("update public.platform_settings set value='false'::jsonb")).rejects.toThrow(/permission denied/i);
         await expect(db.query('select * from public.shop_counters')).rejects.toThrow(/permission denied/i);
+        await expect(db.query('select * from public.pre_0015_shop_ratings')).rejects.toThrow(/permission denied/i);
         await expect(db.query('select * from public.get_order_track($1)', [closed])).rejects.toThrow(/permission denied/i);
       } finally { await db.exec('reset role'); }
     }
@@ -92,6 +98,8 @@ describe('subscription migration with the real preceding schema and policies', (
     try {
       expect((await db.query('select order_id from public.get_order_track($1)', [closed])).rows).toEqual([{ order_id: closed }]);
       expect((await db.query('select order_id from public.reviews')).rows).toEqual([]);
+      expect((await db.query('select rating_avg::float as avg, rating_count as count from public.pre_0015_shop_ratings where shop_id=$1', [shop])).rows).toEqual([{ avg: 4.5, count: 3 }]);
+      expect((await db.query('select rating_avg::float as avg, rating_count as count from public.shops where id=$1', [shop])).rows).toEqual([{ avg: 0, count: 0 }]);
     } finally { await db.exec('reset role'); }
   });
   it('enforces distributed public limits atomically and denies clients direct access', async () => {
@@ -117,6 +125,27 @@ describe('subscription migration with the real preceding schema and policies', (
       expect((await db.query<{ result: { allowed: boolean } }>("select public.consume_public_rate_limit('signup',$1) as result", [key])).rows[0].result.allowed).toBe(true);
     } finally { await db.exec('reset role'); }
   });
+  it('shares the login and draft issuance limits, including concurrent attempts', async () => {
+    const loginKey = 'b'.repeat(64), draftKey = 'c'.repeat(64);
+    await db.exec('set role service_role');
+    try {
+      const login = await Promise.all(Array.from({ length: 15 }, () => db.query<{ result: { allowed: boolean } }>(
+        "select public.consume_public_rate_limit('login_attempt',$1) as result", [loginKey])));
+      expect(login.filter(({ rows }) => rows[0].result.allowed)).toHaveLength(12);
+      const uploads = await Promise.all(Array.from({ length: 40 }, () => db.query<{ result: { allowed: boolean; retry_after: number } }>(
+        "select public.consume_public_rate_limit('draft_upload_issue',$1) as result", [draftKey])));
+      expect(uploads.filter(({ rows }) => rows[0].result.allowed)).toHaveLength(30);
+      expect(uploads.find(({ rows }) => !rows[0].result.allowed)?.rows[0].result.retry_after).toBeGreaterThan(3600);
+    } finally { await db.exec('reset role'); }
+  });
+  it('allows only one open report per order, but permits a new report after resolution', async () => {
+    const insert = () => db.query("insert into public.disputes(order_id,type,description) values ($1,'other','A real issue')", [closed]);
+    await insert();
+    await expect(insert()).rejects.toThrow(/duplicate key/i);
+    await db.query("update public.disputes set status='resolved_reject' where order_id=$1", [closed]);
+    await insert();
+    expect((await db.query('select count(*)::int as n from public.disputes where order_id=$1', [closed])).rows).toEqual([{ n: 2 }]);
+  });
   it('keeps permanent access and zero-commission checkout compatible with the full schema', async () => {
     const admin = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     const draft = '44444444-4444-4444-8444-444444444444';
@@ -133,4 +162,23 @@ describe('subscription migration with the real preceding schema and policies', (
     expect((await db.query('select status, payment_status, commission_paise from public.orders where id=$1', [draft])).rows)
       .toEqual([{ status: 'queued', payment_status: 'cod_pending', commission_paise: 0 }]);
   });
+  it('calculates rating aggregates from more than a PostgREST page and rejects stale totals', async () => {
+    // Seed a large existing history efficiently, then exercise the real triggers.
+    await db.exec('alter table public.reviews disable trigger refresh_review_shop_rating');
+    try {
+      await db.query(`with inserted as (
+        insert into public.orders(shop_id,status,payment_method)
+        select $1, 'collected', 'cod' from generate_series(1,1001) returning id
+      ) insert into public.reviews(order_id,shop_id,rating)
+        select id,$1,5 from inserted`, [shop]);
+    } finally { await db.exec('alter table public.reviews enable trigger refresh_review_shop_rating'); }
+    await db.query('insert into public.reviews(order_id,shop_id,rating) values ($1,$2,1)', [closed, shop]);
+    const rating = () => db.query('select rating_count, rating_avg::float as rating_avg from public.shops where id=$1', [shop]);
+    expect((await rating()).rows).toEqual([{ rating_count: 1002, rating_avg: 5 }]);
+    // Older deployments attempted to overwrite the aggregate using a 1,000-row page.
+    await db.query('update public.shops set rating_count=1000,rating_avg=1 where id=$1', [shop]);
+    expect((await rating()).rows).toEqual([{ rating_count: 1002, rating_avg: 5 }]);
+    await db.query('delete from public.reviews where order_id=$1', [closed]);
+    expect((await rating()).rows).toEqual([{ rating_count: 1001, rating_avg: 5 }]);
+  }, 30000);
 });

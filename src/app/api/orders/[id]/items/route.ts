@@ -3,12 +3,15 @@ import { createAdminSupabase } from '@/lib/supabase';
 import { jsonOk, jsonError } from '@/lib/api';
 import { itemsReplaceInput } from '@/lib/contracts';
 import { requestHasDraftAccess } from '@/lib/draft-access';
+import { enforcePublicRateLimit } from '@/lib/rate-limit';
 import { WORD_MIMES } from '@/lib/upload-files';
 import { draftMutationError } from '@/lib/draft-mutation';
 
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!requestHasDraftAccess(req, id)) return jsonError(403, 'draft_session', 'Your order session expired. Please start a new order.');
+  const limited = await enforcePublicRateLimit(req, 'draft_changes');
+  if (limited) return limited;
   const parsed = itemsReplaceInput.safeParse(await readJsonBody(req));
   if (!parsed.success) return jsonError(422, 'validation', parsed.error.issues[0]?.message ?? 'Invalid items');
 

@@ -1,11 +1,14 @@
 import { createAdminSupabase } from '@/lib/supabase';
 import { jsonOk, jsonError } from '@/lib/api';
+import { enforcePublicRateLimit } from '@/lib/rate-limit';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!UUID.test(id)) return jsonError(404, 'not_found', 'Order not found');
+  const limited = await enforcePublicRateLimit(req, 'tracking');
+  if (limited) return limited;
   const admin = createAdminSupabase();
   const { data, error } = await admin.rpc('get_order_track', { p_order_id: id });
   if (error) {

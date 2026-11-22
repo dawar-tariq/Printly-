@@ -1,10 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { Logo } from '@/components/Logo';
-import { createBrowserSupabase } from '@/lib/supabase-client';
-import { LayoutDashboard, Store, ShieldAlert, CreditCard, Settings, LogOut } from 'lucide-react';
+import { SignOutButton } from '@/components/SignOutButton';
+import { LayoutDashboard, Store, ShieldAlert, CreditCard, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const TABS = [
@@ -17,14 +17,13 @@ const TABS = [
 
 export function AdminShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const router = useRouter();
   return (
     <div className="min-h-screen bg-neutral-100">
       <header className="sticky top-0 z-30 bg-indigo-950 text-white">
         <div className="max-w-6xl mx-auto px-3 sm:px-4 h-14 flex items-center gap-3">
           <Logo href="/admin" inverse />
           <span className="chip bg-indigo-800 text-indigo-100">Admin console</span>
-          <button onClick={async () => { await createBrowserSupabase().auth.signOut(); router.push('/admin/login'); router.refresh(); }} className="ml-auto p-2 rounded-lg hover:bg-indigo-900 text-indigo-200" aria-label="Sign out"><LogOut size={18} /></button>
+          <SignOutButton portal="admin" className="ml-auto" buttonClassName="text-indigo-200 hover:bg-indigo-900" />
         </div>
         <nav className="max-w-6xl mx-auto px-2 sm:px-3 flex items-center gap-1 overflow-x-auto pb-1.5">
           {TABS.map(({ href, label, icon: Icon, exact }) => {

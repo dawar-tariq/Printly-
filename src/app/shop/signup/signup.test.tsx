@@ -10,7 +10,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 function fillRequired() {
   fireEvent.change(screen.getByPlaceholderText('Owner / manager name'), { target: { value: 'Asha Khan' } });
   fireEvent.change(screen.getByPlaceholderText('shop@example.com'), { target: { value: 'asha@example.com' } });
-  fireEvent.change(document.querySelector('input[type=password]')!, { target: { value: 'password123' } });
+  fireEvent.change(document.querySelector('input[type=password]')!, { target: { value: 'new-password-123' } });
   fireEvent.change(screen.getByPlaceholderText('99060 00000'), { target: { value: '9906000000' } });
   fireEvent.change(screen.getByPlaceholderText('Shop number, street, landmark'), { target: { value: 'Shop 4 Lal Chowk' } });
   fireEvent.change(screen.getByPlaceholderText('Srinagar'), { target: { value: 'Srinagar' } });
@@ -35,6 +35,24 @@ describe('name proof in onboarding', () => {
     expect(screen.queryByLabelText(/GSTIN/)).toBeNull();
     expect(screen.queryByPlaceholderText('01ABCDE1234F1Z5')).toBeNull();
     expect((screen.getByRole('button', { name: /Continue/ }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it.each(['network loss', 'invalid success response'])('does not claim a failed application after %s', async (outcome) => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.startsWith('/api/shop/name-check')) return Response.json({ duplicate: false });
+      if (outcome === 'network loss') throw new Error('connection lost');
+      return Response.json({});
+    }));
+    render(<ShopSignupPage />);
+    fireEvent.change(screen.getByLabelText('Shop name *'), { target: { value: 'Bright Prints' } });
+    fillRequired();
+    await screen.findByText('This name is available. No name proof is required.');
+    fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Continue/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Submit application' }));
+    expect(await screen.findByText(/could not confirm your application.*signing in before submitting again/i)).toBeTruthy();
+    expect(screen.queryByText('Application received!')).toBeNull();
   });
 
   it('requires photo or GSTIN when the name matches an existing shop', async () => {

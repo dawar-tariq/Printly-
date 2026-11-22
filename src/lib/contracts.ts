@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { passwordPolicyError } from '@/lib/password-policy';
 
 export const PAPER_SIZES = ['A4', 'A3', 'A5', 'Legal'] as const;
 
@@ -74,7 +75,7 @@ export const shopSignupInput = z.object({
   shop_name: z.string().trim().min(2).max(80),
   owner_name: z.string().trim().min(2).max(80),
   email: z.string().email().max(120),
-  password: z.string().min(8).max(100),
+  password: z.string().max(72).refine((value) => passwordPolicyError(value) === null, 'Use at least 12 characters and at most 72 UTF-8 bytes.'),
   phone: z.string().min(8).max(16),
   address: z.string().min(3).max(200),
   city: z.string().min(2).max(80),

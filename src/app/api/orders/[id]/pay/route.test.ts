@@ -11,8 +11,10 @@ const state = vi.hoisted(() => ({
   rpcCalls: [] as Array<Record<string, unknown>>,
   rpcError: '' as string,
   subscribed: true as boolean | null,
+  limit: vi.fn(),
 }));
 vi.mock('@/lib/subscription-server', () => ({ shopHasSubscription: async () => state.subscribed }));
+vi.mock('@/lib/rate-limit', () => ({ enforcePublicRateLimit: state.limit }));
 
 function admin() {
   return {
@@ -58,6 +60,7 @@ beforeEach(() => {
   state.items = [{ id: itemId, service: 'print', paper_size: 'A4', color: 'bw', sides: 'single', paper_gsm: 80, option: null, copies: 2, pages: 2 }];
   state.card = [{ id: '55555555-5555-4555-8555-555555555555', service: 'print', paper_size: 'A4', color: 'bw', sides: 'single', paper_gsm: 80, option: null, unit: 'page', price_paise: 200 }];
   state.payment = null; state.rpcCalls = []; state.rpcError = ''; state.subscribed = true;
+  state.limit.mockReset().mockResolvedValue(null);
 });
 
 describe('checkout uses the quote the customer reviewed', () => {
@@ -90,6 +93,19 @@ describe('checkout uses the quote the customer reviewed', () => {
     expect(await retry.json()).toMatchObject({ mode: 'placed', total_paise: 944 });
     expect(state.rpcCalls).toHaveLength(1);
     expect((await pay({ quote_token: 'b'.repeat(64) })).status).toBe(409);
+  });
+  it('limits new checkouts without blocking recovery of a payment already started', async () => {
+    const quoted = token();
+    const first = await pay({ method: 'upi', quote_token: quoted });
+    expect(first.status).toBe(200);
+    state.limit.mockResolvedValue(new Response('limited', { status: 429 }));
+    const retry = await pay({ method: 'upi', quote_token: quoted });
+    expect(retry.status).toBe(200);
+    expect((await retry.json()).mode).toBe('upi');
+    expect(state.limit).toHaveBeenCalledTimes(1);
+    state.order.payment_method = null; state.order.status = 'draft';
+    expect((await pay({ method: 'upi', quote_token: quoted })).status).toBe(429);
+    expect(state.rpcCalls).toHaveLength(1);
   });
   it('reopens the original UPI recipient and amount on retry, not a later shop setting', async () => {
     const quoted = token();

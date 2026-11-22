@@ -6,6 +6,7 @@ import { computeQuote, PricingError } from '@/lib/pricing';
 import { buildUpiIntent } from '@/lib/upi';
 import { checkoutContact } from '@/lib/contracts';
 import { requestHasDraftAccess } from '@/lib/draft-access';
+import { enforcePublicRateLimit } from '@/lib/rate-limit';
 import { draftMutationError } from '@/lib/draft-mutation';
 import { quoteToken } from '@/lib/quote-token';
 import { shopHasSubscription } from '@/lib/subscription-server';
@@ -42,6 +43,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const intent = buildUpiIntent({ upiId: raw.checkout_upi_id, payeeName: raw.checkout_shop_name, amountPaise: order.total_paise, note: `Printly ${id.slice(0, 8)}` });
     return jsonOk({ mode: 'upi', ...intent, shop_name: raw.checkout_shop_name, total_paise: order.total_paise }, noStore);
   }
+  // Do not throttle recovery of an already-started payment above. This limit
+  // applies only when initiating a new checkout, not when an answer was lost.
+  const limited = await enforcePublicRateLimit(req, 'checkout');
+  if (limited) return limited;
   if (!items.length) return jsonError(422, 'empty_order', 'Add at least one item');
   if (!shop) return jsonError(503, 'db', 'Could not load shop pricing. Please retry.');
   const subscribed = await shopHasSubscription(admin, order.shop_id);

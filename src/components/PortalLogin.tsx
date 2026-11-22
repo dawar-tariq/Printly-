@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { createBrowserSupabase } from '@/lib/supabase-client';
 import { portalDestination, type Portal } from '@/lib/portal-auth';
+import { authAttemptError, checkLoginAttempt } from '@/lib/login-attempt';
 import { Logo } from '@/components/Logo';
 import { Loader2, Store, ShieldCheck } from 'lucide-react';
 
@@ -22,22 +23,24 @@ function LoginForm({ portal }: { portal: Portal }) {
     if (busy) return;
     setBusy(true);
     setError(null);
-    const supabase = createBrowserSupabase();
     try {
+      const supabase = createBrowserSupabase();
+      try { await checkLoginAttempt(portal); }
+      catch (err) { setError(err instanceof Error ? err.message : 'Sign-in protection is temporarily unavailable.'); return; }
       const { data, error: signInError } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
       if (signInError || !data.user) {
-        setError(signInError?.message ?? 'Could not sign in. Please try again.');
+        setError(authAttemptError(signInError));
         return;
       }
       const { data: profile, error: profileError } = await supabase.from('profiles').select('role').eq('id', data.user.id).maybeSingle();
       if (profileError || !profile) {
-        await supabase.auth.signOut();
-        setError('Your account could not be verified. Please try again or contact support.');
+        const { error: signOutError } = await supabase.auth.signOut({ scope: 'local' });
+        setError(signOutError ? 'Your account could not be verified and server sign-out could not be confirmed. Keep this device private and contact an administrator.' : 'Your account could not be verified. Please try again or contact support.');
         return;
       }
       if (isAdmin && profile.role !== 'admin') {
-        await supabase.auth.signOut();
-        setError('This account does not have administrator access.');
+        const { error: signOutError } = await supabase.auth.signOut({ scope: 'local' });
+        setError(signOutError ? 'This account is not an administrator and server sign-out could not be confirmed. Keep this device private and contact an administrator.' : 'This account does not have administrator access.');
         return;
       }
       // Admins who use an older shop-login link still reach their own console,

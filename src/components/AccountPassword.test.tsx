@@ -14,8 +14,9 @@ beforeEach(() => {
   mocks.getUser.mockResolvedValue({ data: { user: { email: 'shop@example.com' } }, error: null });
   mocks.signIn.mockResolvedValue({ error: null });
   mocks.updateUser.mockResolvedValue({ error: null });
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({ ok: true })));
 });
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 function fill(current: string, password: string, confirmation: string) {
   fireEvent.change(screen.getByLabelText('Current password'), { target: { value: current } });
@@ -35,7 +36,7 @@ describe('account password changes', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Change shop password' }));
     await screen.findByText('Password updated. Keep it private and store it safely.');
     expect(mocks.signIn).toHaveBeenCalledWith({ email: 'shop@example.com', password: 'old-password' });
-    expect(mocks.updateUser).toHaveBeenCalledWith({ password: 'new-password-123' });
+    expect(mocks.updateUser).toHaveBeenCalledWith({ password: 'new-password-123', current_password: 'old-password' });
     expect((screen.getByLabelText('Current password') as HTMLInputElement).value).toBe('');
   });
   it('does not change an admin password when confirmation differs', async () => {
@@ -47,8 +48,16 @@ describe('account password changes', () => {
     expect(mocks.signIn).not.toHaveBeenCalled();
     expect(mocks.updateUser).not.toHaveBeenCalled();
   });
+  it('does not claim a rate-limited verification was an incorrect password', async () => {
+    mocks.signIn.mockResolvedValue({ error: { status: 429 } });
+    render(<AccountPassword portal="shop" />);
+    fill('old-password', 'new-password-123', 'new-password-123');
+    fireEvent.click(screen.getByRole('button', { name: 'Change shop password' }));
+    expect((await screen.findByRole('status')).textContent).toMatch(/too many sign-in attempts/i);
+    expect(mocks.updateUser).not.toHaveBeenCalled();
+  });
   it('does not update the password when the current password is wrong', async () => {
-    mocks.signIn.mockResolvedValue({ error: new Error('Invalid login') });
+    mocks.signIn.mockResolvedValue({ error: { status: 400, message: 'Invalid login' } });
     render(<AccountPassword portal="shop" />);
     fill('wrong-password', 'new-password-123', 'new-password-123');
     fireEvent.click(screen.getByRole('button', { name: 'Change shop password' }));

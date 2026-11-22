@@ -1,11 +1,10 @@
 'use client';
 
-import { useState } from 'react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { Logo } from '@/components/Logo';
-import { createBrowserSupabase } from '@/lib/supabase-client';
-import { LayoutDashboard, Settings, Boxes, BarChart3, CreditCard, LogOut, ExternalLink, Hourglass, PenLine, Ban } from 'lucide-react';
+import { SignOutButton } from '@/components/SignOutButton';
+import { LayoutDashboard, Settings, Boxes, BarChart3, CreditCard, ExternalLink, Hourglass, PenLine, Ban } from 'lucide-react';
 import { SubscriptionNotice } from '@/components/SubscriptionNotice';
 import type { ShopSubscription } from '@/lib/subscription';
 import { cn } from '@/lib/utils';
@@ -21,15 +20,6 @@ const TABS = [
 
 export function ShopShell({ shop, reviewNote, subscription, warningDays, isOwner, children }: { shop: { id: string; name: string; slug: string; short_code: string; kyc_status: string; status: string }; reviewNote: string; subscription: ShopSubscription | null; warningDays: number; isOwner: boolean; children: React.ReactNode }) {
   const pathname = usePathname();
-  const router = useRouter();
-  const [signingOut, setSigningOut] = useState(false);
-
-  const signOut = async () => {
-    setSigningOut(true);
-    await createBrowserSupabase().auth.signOut();
-    router.push('/login');
-    router.refresh();
-  };
 
   return (
     <div className="min-h-screen bg-neutral-100">
@@ -40,7 +30,7 @@ export function ShopShell({ shop, reviewNote, subscription, warningDays, isOwner
             <div className="text-sm font-bold truncate leading-tight">{shop.name}</div>
             <div className="text-[10px] text-neutral-400 leading-tight">{shop.kyc_status === 'approved' ? 'Verified shop' : 'Verification pending'} · {shop.short_code} · <a className="hover:underline inline-flex items-center gap-0.5" href={publicShopPath(shop.short_code)} target="_blank" rel="noreferrer">customer page <ExternalLink size={9} /></a></div>
           </div>
-          <button onClick={signOut} disabled={signingOut} className="p-2 rounded-lg hover:bg-neutral-800 text-neutral-300" aria-label="Sign out"><LogOut size={18} /></button>
+          <SignOutButton portal="shop" />
         </div>
         <nav aria-label="Shop navigation" className="max-w-6xl w-full min-w-0 mx-auto px-2 sm:px-3 flex items-center gap-1 overflow-x-auto pb-1.5">
           {TABS.map(({ href, label, icon: Icon, exact }) => {

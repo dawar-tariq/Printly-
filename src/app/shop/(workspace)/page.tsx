@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -27,37 +27,48 @@ export default function ShopBoardPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [utrEdit, setUtrEdit] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const [hasSnapshot, setHasSnapshot] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const refreshSequence = useRef(0);
 
   const load = useCallback(async () => {
-    const [confirmRes, qRes, pRes, rRes, doneRes] = await Promise.all([
-      fetch('/api/shop/orders?lane=confirm', { cache: 'no-store' }),
-      fetch('/api/shop/orders?lane=queued', { cache: 'no-store' }),
-      fetch('/api/shop/orders?lane=printing', { cache: 'no-store' }),
-      fetch('/api/shop/orders?lane=ready', { cache: 'no-store' }),
-      fetch('/api/shop/orders?lane=completed', { cache: 'no-store' }),
-    ]);
-    const j = (r: Response) => (r.ok ? r.json() : Promise.resolve({ orders: [] }));
-    const [c, q, p, r, d] = await Promise.all([j(confirmRes), j(qRes), j(pRes), j(rRes), j(doneRes)]);
-    setConfirmQueue(c.orders ?? []);
-    setLanes({
-      queued: (q.orders ?? []).slice().reverse(),
-      printing: (p.orders ?? []).slice().reverse(),
-      ready: (r.orders ?? []).slice().reverse(),
-    });
-    setCompletedToday((d.orders ?? []).length);
-    setLoading(false);
+    const sequence = ++refreshSequence.current;
+    try {
+      const responses = await Promise.all([
+        fetch('/api/shop/orders?lane=confirm', { cache: 'no-store' }),
+        fetch('/api/shop/orders?lane=queued', { cache: 'no-store' }),
+        fetch('/api/shop/orders?lane=printing', { cache: 'no-store' }),
+        fetch('/api/shop/orders?lane=ready', { cache: 'no-store' }),
+        fetch('/api/shop/orders?lane=completed', { cache: 'no-store' }),
+      ]);
+      if (responses.some((response) => !response.ok)) throw new Error('Order refresh failed');
+      const [c, q, p, r, d] = await Promise.all(responses.map((response) => response.json()));
+      if ([c, q, p, r, d].some((result) => !Array.isArray(result?.orders))) throw new Error('Invalid order response');
+      if (sequence !== refreshSequence.current) return;
+      setConfirmQueue(c.orders);
+      setLanes({ queued: q.orders.slice().reverse(), printing: p.orders.slice().reverse(), ready: r.orders.slice().reverse() });
+      setCompletedToday(d.orders.length);
+      setHasSnapshot(true);
+      setLoadError(false);
+    } catch {
+      // Preserve the last complete snapshot. Never turn a failed request into
+      // an empty lane, which could hide orders or payment reports from staff.
+      if (sequence === refreshSequence.current) setLoadError(true);
+    } finally { if (sequence === refreshSequence.current) setLoading(false); }
   }, []);
 
   useEffect(() => {
-    load();
-    const t = setInterval(load, 8000);
-    // realtime: refresh on any order change visible to this shop
+    const refreshIfVisible = () => { if (document.visibilityState !== 'hidden') void load(); };
+    refreshIfVisible();
+    const timer = window.setInterval(refreshIfVisible, 15_000);
+    document.addEventListener('visibilitychange', refreshIfVisible);
+    // Realtime complements polling, but background tabs need not refresh.
     const supabase = createBrowserSupabase();
     const channel = supabase
       .channel('shop-orders')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, refreshIfVisible)
       .subscribe();
-    return () => { clearInterval(t); supabase.removeChannel(channel); };
+    return () => { refreshSequence.current++; window.clearInterval(timer); document.removeEventListener('visibilitychange', refreshIfVisible); supabase.removeChannel(channel); };
   }, [load]);
 
   const transition = async (id: string, to: string) => {
@@ -125,9 +136,11 @@ export default function ShopBoardPage() {
   );
 
   if (loading) return <div className="grid place-items-center py-20"><Loader2 className="animate-spin text-orange-600" size={30} /></div>;
+  if (!hasSnapshot && loadError) return <div role="alert" className="card p-5 text-sm text-red-800"><p>Orders are temporarily unavailable. Do not assume there are no orders or payment reports.</p><button type="button" onClick={() => void load()} className="btn btn-dark mt-3 h-10 px-4">Try again</button></div>;
 
   return (
     <div>
+      {loadError && <div role="status" className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">Could not refresh orders. The information below may be out of date. <button type="button" onClick={() => void load()} className="font-bold underline">Try again</button></div>}
       <details className="card mb-4 p-3">
         <summary className="cursor-pointer text-sm font-bold text-neutral-700">Find an order with its tracking link</summary>
         <form className="mt-3 flex flex-wrap gap-2" onSubmit={(event) => {

@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { createAdminSupabase } from '@/lib/supabase';
 import { jsonError, jsonOk } from '@/lib/api';
 import { requestHasDraftAccess } from '@/lib/draft-access';
+import { enforcePublicRateLimit, enforceUploadIssueLimit } from '@/lib/rate-limit';
 import { FileValidationError, IMAGE_MIMES, inspectUploadedFile, MAX_FILE_BYTES, PDF_MIME } from '@/lib/upload-files';
 import { cleanupFileObjects, discardFileObject, draftMutationError } from '@/lib/draft-mutation';
 
@@ -38,6 +39,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const parsed = z.object({ size: z.number().int().min(1).max(MAX_FILE_BYTES) }).safeParse(await readJsonBody(req));
   if (!parsed.success) return jsonError(422, 'validation', 'Edited file must be no larger than 25 MB.');
   const { admin, order, file } = ctx;
+  // Edits create new Storage objects too, so they share the draft's issuance
+  // allowance with original uploads and cannot be used to bypass it.
+  const limited = await enforceUploadIssueLimit(req, id);
+  if (limited) return limited;
   const ext = file.mime === PDF_MIME ? 'pdf' : file.mime === 'image/png' ? 'png' : 'jpg';
   const path = `${order.shop_id}/${id}/${fileId}-edit-${randomUUID()}.${ext}`;
   const { data, error } = await admin.storage.from('order-files').createSignedUploadUrl(path);
@@ -60,6 +65,8 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     return jsonOk({ ok: true, page_count: file.page_count, size: file.size_bytes, cleanup_warning: !cleaned }, { headers: { 'Cache-Control': 'private, no-store' } });
   }
   if (revisionOf(file.storage_path) !== revision) return jsonError(409, 'stale_edit', 'The file changed while you were editing. Close and reopen it.');
+  const limited = await enforcePublicRateLimit(req, 'file_processing');
+  if (limited) return limited;
   const { data: blob, error: downloadError } = await admin.storage.from('order-files').download(path);
   if (downloadError || !blob) return jsonError(500, 'storage', 'Could not read the edited file. Please retry.');
   let info: { size: number; pages: number | null };
