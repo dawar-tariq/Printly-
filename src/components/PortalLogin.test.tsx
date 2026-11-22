@@ -3,11 +3,11 @@ import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-const mocks = vi.hoisted(() => ({ replace: vi.fn(), refresh: vi.fn(), signIn: vi.fn(), signOut: vi.fn(), profile: vi.fn() }));
+const mocks = vi.hoisted(() => ({ replace: vi.fn(), refresh: vi.fn(), signIn: vi.fn(), signOut: vi.fn(), getSession: vi.fn(), revoke: vi.fn(), profile: vi.fn() }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ replace: mocks.replace, refresh: mocks.refresh }), useSearchParams: () => new URLSearchParams() }));
 vi.mock('next/link', () => ({ default: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => <a href={href} {...props}>{children}</a> }));
 vi.mock('@/lib/supabase-client', () => ({ createBrowserSupabase: () => ({
-  auth: { signInWithPassword: mocks.signIn, signOut: mocks.signOut },
+  auth: { signInWithPassword: mocks.signIn, signOut: mocks.signOut, getSession: mocks.getSession, admin: { signOut: mocks.revoke } },
   from: () => ({ select: () => ({ eq: () => ({ maybeSingle: mocks.profile }) }) }),
 }) }));
 import { PortalLogin } from './PortalLogin';
@@ -15,7 +15,10 @@ import { PortalLogin } from './PortalLogin';
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.signIn.mockResolvedValue({ data: { user: { id: 'admin-id' } }, error: null });
+  mocks.getSession.mockResolvedValue({ data: { session: { access_token: 'session-token' } }, error: null });
+  mocks.revoke.mockResolvedValue({ error: null });
   mocks.signOut.mockResolvedValue({ error: null });
+  mocks.profile.mockReset();
   vi.stubGlobal('fetch', vi.fn(async () => Response.json({ ok: true })));
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
@@ -61,6 +64,25 @@ describe('separate shop and admin sign-in', () => {
     render(<PortalLogin portal="admin" />);
     submit();
     await screen.findByText('This account does not have administrator access.');
+    expect(mocks.revoke).toHaveBeenCalledWith('session-token', 'local');
+    expect(mocks.signOut).toHaveBeenCalledWith({ scope: 'local' });
+    expect(mocks.replace).not.toHaveBeenCalled();
+  });
+  it('clears the newly created session if the profile lookup throws', async () => {
+    mocks.profile.mockRejectedValue(new Error('network failure'));
+    render(<PortalLogin portal="shop" />);
+    submit();
+    expect((await screen.findByRole('alert')).textContent).toMatch(/account could not be verified/i);
+    expect(mocks.revoke).toHaveBeenCalledWith('session-token', 'local');
+    expect(mocks.signOut).toHaveBeenCalledWith({ scope: 'local' });
+    expect(mocks.replace).not.toHaveBeenCalled();
+  });
+  it('warns when revocation fails even if the SDK cleanup appears successful', async () => {
+    mocks.profile.mockResolvedValue({ data: { role: 'shop_staff' }, error: null });
+    mocks.revoke.mockRejectedValue(new Error('network failure'));
+    render(<PortalLogin portal="admin" />);
+    submit();
+    expect((await screen.findByRole('alert')).textContent).toMatch(/sign-out could not be fully confirmed.*device private/i);
     expect(mocks.signOut).toHaveBeenCalledWith({ scope: 'local' });
     expect(mocks.replace).not.toHaveBeenCalled();
   });

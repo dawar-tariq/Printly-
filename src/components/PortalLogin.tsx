@@ -4,6 +4,7 @@ import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { createBrowserSupabase } from '@/lib/supabase-client';
+import { signOutCurrentSession } from '@/lib/sign-out';
 import { portalDestination, type Portal } from '@/lib/portal-auth';
 import { authAttemptError, checkLoginAttempt } from '@/lib/login-attempt';
 import { Logo } from '@/components/Logo';
@@ -32,15 +33,23 @@ function LoginForm({ portal }: { portal: Portal }) {
         setError(authAttemptError(signInError));
         return;
       }
-      const { data: profile, error: profileError } = await supabase.from('profiles').select('role').eq('id', data.user.id).maybeSingle();
-      if (profileError || !profile) {
-        const { error: signOutError } = await supabase.auth.signOut({ scope: 'local' });
-        setError(signOutError ? 'Your account could not be verified and server sign-out could not be confirmed. Keep this device private and contact an administrator.' : 'Your account could not be verified. Please try again or contact support.');
+      const rejectSession = async (reason: string) => {
+        const confirmed = await signOutCurrentSession(supabase);
+        setError(confirmed ? reason : `${reason} Sign-out could not be fully confirmed; your session may still be active. Keep this device private and contact an administrator.`);
+      };
+      let profile;
+      try {
+        const result = await supabase.from('profiles').select('role').eq('id', data.user.id).maybeSingle();
+        if (result.error || !result.data) throw new Error('Profile unavailable');
+        profile = result.data;
+      } catch {
+        // Authentication already succeeded; never leave that session silently
+        // active just because the role lookup threw instead of returning an error.
+        await rejectSession('Your account could not be verified. Please try again or contact support.');
         return;
       }
       if (isAdmin && profile.role !== 'admin') {
-        const { error: signOutError } = await supabase.auth.signOut({ scope: 'local' });
-        setError(signOutError ? 'This account is not an administrator and server sign-out could not be confirmed. Keep this device private and contact an administrator.' : 'This account does not have administrator access.');
+        await rejectSession('This account does not have administrator access.');
         return;
       }
       // Admins who use an older shop-login link still reach their own console,
