@@ -29,9 +29,15 @@ export interface SubscriptionPurchase {
   shop_id: string;
   term: SubscriptionTerm;
   amount_paise: number;
-  upi_id: string;
-  payee_name: string;
+  upi_id: string | null;
+  payee_name: string | null;
   status: PurchaseStatus;
+  /** Null on requests created before subscription-offer snapshots existed. */
+  base_amount_paise?: number | null;
+  monthly_reference_paise?: number | null;
+  discount_paise?: number;
+  promo_code?: string | null;
+  request_key?: string | null;
   utr: string | null;
   submitted_at: string | null;
   reviewed_at: string | null;

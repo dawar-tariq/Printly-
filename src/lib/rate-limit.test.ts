@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const state = vi.hoisted(() => ({ rpc: vi.fn() }));
 vi.mock('server-only', () => ({}));
 vi.mock('@/lib/supabase', () => ({ createAdminSupabase: () => ({ rpc: state.rpc }) }));
-import { enforceDraftRateLimit, enforcePublicRateLimit, enforceUploadIssueLimit } from './rate-limit';
+import { enforceDraftRateLimit, enforcePublicRateLimit, enforceSubscriptionPromoRateLimit, enforceUploadIssueLimit } from './rate-limit';
 
 beforeEach(() => {
   vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'test-private-key');
@@ -35,6 +35,18 @@ describe('public abuse limiter', () => {
     await enforceDraftRateLimit(id.toUpperCase(), 'draft_upload_issue');
     expect(state.rpc.mock.calls[2][1].p_client_hash).toBe(draftHash);
     expect((await enforceDraftRateLimit('invalid', 'draft_upload_issue'))?.status).toBe(503);
+  });
+  it('bounds promo guesses with a separate actor-and-shop hash without storing their IDs', async () => {
+    const shop = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const actor = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    expect(await enforceSubscriptionPromoRateLimit(shop, actor)).toBeNull();
+    expect(state.rpc.mock.calls[0][1].p_bucket).toBe('checkout');
+    expect(state.rpc.mock.calls[0][1].p_client_hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify(state.rpc.mock.calls)).not.toContain(shop);
+    expect(JSON.stringify(state.rpc.mock.calls)).not.toContain(actor);
+    await enforceSubscriptionPromoRateLimit(shop.toUpperCase(), actor.toUpperCase());
+    expect(state.rpc.mock.calls[1][1].p_client_hash).toBe(state.rpc.mock.calls[0][1].p_client_hash);
+    expect((await enforceSubscriptionPromoRateLimit('bad', actor))?.status).toBe(503);
   });
   it('returns the full retry window and a clear recovery action for exhausted drafts', async () => {
     state.rpc.mockResolvedValue({ data: { allowed: false, retry_after: 80000 }, error: null });

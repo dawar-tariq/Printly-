@@ -17,6 +17,7 @@ beforeEach(() => {
   writes = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     if (init?.method === 'POST' || init?.method === 'PUT') { writes.push({ url, body: JSON.parse(String(init.body)) }); return Response.json({ ok: true }); }
+    if (url.includes('/offers')) return Response.json({ promos: [], announcements: [], promos_has_more: false, announcements_has_more: false });
     return Response.json(fixture);
   }));
 });
@@ -55,8 +56,9 @@ describe('admin subscription management', () => {
   it('rejects stale edits and lets an admin deliberately reload the latest plan', async () => {
     let version = 3;
     vi.spyOn(window, 'confirm').mockReturnValue(true);
-    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === 'PUT') return Response.json({ error: { message: 'The plan was changed by another admin. Reload the saved values before making your changes again.' } }, { status: 409 });
+      if (url.includes('/offers')) return Response.json({ promos: [], announcements: [], promos_has_more: false, announcements_has_more: false });
       return Response.json({ ...fixture, plan: { ...fixture.plan, version, monthly_paise: version === 4 ? 25000 : null } });
     }));
     render(<AdminSubscriptionsPage />);

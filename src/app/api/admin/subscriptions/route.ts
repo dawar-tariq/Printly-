@@ -37,9 +37,9 @@ export async function GET(req: Request) {
   const [plan, shops, pending, history] = await Promise.all([
     admin.from('subscription_plan').select('monthly_paise, six_months_paise, yearly_paise, upi_id, payee_name, warning_days, version, updated_at').eq('id', true).maybeSingle(),
     shopsQuery,
-    admin.from('subscription_purchases').select('id, shop_id, term, amount_paise, upi_id, payee_name, status, utr, submitted_at, reviewed_at, review_note, period_start, period_end, created_at', { count: 'exact' })
+    admin.from('subscription_purchases').select('id, shop_id, term, amount_paise, upi_id, payee_name, status, utr, submitted_at, reviewed_at, review_note, period_start, period_end, created_at, base_amount_paise, monthly_reference_paise, discount_paise, promo_code', { count: 'exact' })
       .eq('status', 'submitted').order('submitted_at', { ascending: true }).range((pendingPage - 1) * PAGE_SIZE, pendingPage * PAGE_SIZE - 1),
-    admin.from('subscription_purchases').select('id, shop_id, term, amount_paise, upi_id, payee_name, status, utr, submitted_at, reviewed_at, review_note, period_start, period_end, created_at')
+    admin.from('subscription_purchases').select('id, shop_id, term, amount_paise, upi_id, payee_name, status, utr, submitted_at, reviewed_at, review_note, period_start, period_end, created_at, base_amount_paise, monthly_reference_paise, discount_paise, promo_code')
       .in('status', ['approved', 'rejected']).order('reviewed_at', { ascending: false }).limit(20),
   ]);
   if (plan.error || shops.error || pending.error || history.error || !plan.data) return jsonError(503, 'db', 'Could not load subscriptions. Please retry.');

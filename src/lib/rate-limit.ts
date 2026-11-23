@@ -60,6 +60,20 @@ export async function enforceUploadIssueLimit(req: Request, orderId: string): Pr
   return await enforcePublicRateLimit(req, 'upload_issue') ?? await enforceDraftRateLimit(orderId, 'draft_upload_issue');
 }
 
+/**
+ * Bound promo-code guesses per signed-in actor and shop, independent of IP.
+ * Reuse the existing checkout window (30 / 15 minutes), with a separate HMAC
+ * namespace so promo attempts cannot consume a customer's checkout quota.
+ * This is an additional abuse control, not an authorization check.
+ */
+export async function enforceSubscriptionPromoRateLimit(shopId: string, actorId: string): Promise<Response | null> {
+  const secret = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (!secret || !uuid.test(shopId) || !uuid.test(actorId)) return unavailable();
+  const subjectHash = createHmac('sha256', secret).update(`printly-subscription-offer-v1:${shopId.toLowerCase()}:${actorId.toLowerCase()}`).digest('hex');
+  return consume('checkout', subjectHash);
+}
+
 async function consume(bucket: PublicRateBucket | DraftRateBucket, clientHash: string): Promise<Response | null> {
   try {
     const { data, error } = await createAdminSupabase().rpc('consume_public_rate_limit', { p_bucket: bucket, p_client_hash: clientHash });

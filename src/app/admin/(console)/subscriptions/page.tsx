@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { AlertTriangle, CheckCircle2, CreditCard, Loader2, RefreshCw, Search, ShieldCheck } from 'lucide-react';
+import { PromotionManager } from '@/components/subscription/PromotionManager';
 import { formatPaiseExact } from '@/lib/format';
 import { paiseToInput, rupeesToPaise, subscriptionDate, subscriptionState, termLabel, type ShopSubscription, type SubscriptionPlan, type SubscriptionPurchase } from '@/lib/subscription';
 
@@ -102,8 +103,11 @@ export default function AdminSubscriptionsPage() {
       </form>
     </section>
 
+    <PromotionManager plan={data.plan} />
+
     <section className="rounded-2xl border-2 border-amber-300 bg-amber-50 p-5"><h2 className="flex items-center gap-2 text-lg font-extrabold text-amber-950"><AlertTriangle size={19} />Verify payments ({data.pagination.pendingCount})</h2><p className="mt-1 text-xs leading-relaxed text-amber-900">A submitted reference is a claim, not proof of payment. Check the actual bank/UPI receipt, amount, reference and recipient independently before approving. No automatic billing or verification occurs.</p>
       <div className="mt-3 space-y-3">{data.pending.map((p) => <article key={p.id} className="rounded-xl border border-amber-200 bg-white p-4"><div className="flex flex-wrap justify-between gap-3"><div><h3 className="font-extrabold">{p.shop?.name ?? 'Shop'} <span className="font-mono text-xs text-neutral-500">{p.shop?.short_code}</span></h3><p className="mt-1 text-sm">{termLabel(p.term)} · <strong>{formatPaiseExact(p.amount_paise)}</strong></p><p className="mt-1 text-xs text-neutral-500">Submitted {subscriptionDate(p.submitted_at)} · request {p.id.slice(0, 8).toUpperCase()}</p></div><div className="text-sm"><p>Reference: <strong className="break-all font-mono">{p.utr}</strong></p><p className="mt-1 break-all text-xs text-neutral-600">Recipient: {p.payee_name} · {p.upi_id}</p></div></div>
+        {p.promo_code && <p className="mt-3 rounded-lg bg-indigo-50 p-2 text-xs text-indigo-900">Code {p.promo_code} · base {formatPaiseExact(p.base_amount_paise ?? p.amount_paise)} · promo savings {formatPaiseExact(p.discount_paise ?? 0)} · verify the final amount of {formatPaiseExact(p.amount_paise)}.</p>}
         {p.subscription?.is_permanent && <p className="mt-3 rounded-lg bg-sky-50 p-2 text-xs text-sky-900">This shop already has permanent access. A verified approval adds a timed period underneath it; resolve any payment issue with the owner as appropriate.</p>}
         <label className="mt-3 flex items-start gap-2 text-xs font-semibold text-neutral-700"><input type="checkbox" className="mt-0.5" checked={!!verified[p.id]} onChange={(event) => setVerified({ ...verified, [p.id]: event.target.checked })} />I independently checked this exact transfer in the receiving account.</label>
         <label className="mt-3 block text-xs font-semibold text-neutral-700">Review note (required for rejection)<input className="input mt-1 w-full text-sm" maxLength={500} value={notes[p.id] ?? ''} onChange={(event) => setNotes({ ...notes, [p.id]: event.target.value })} placeholder="Reason for rejecting, or optional approval note" /></label>
@@ -121,6 +125,6 @@ export default function AdminSubscriptionsPage() {
       <Pager page={data.pagination.page} pages={data.pagination.pages} setPage={setPage} />
     </section>
 
-    <section className="card p-5"><h2 className="text-lg font-extrabold">Recent decisions</h2><p className="mt-1 text-xs text-neutral-500">The latest 20 approved or rejected subscription payment reports.</p><div className="mt-3 divide-y divide-neutral-100">{data.history.map((p) => <div key={p.id} className="flex flex-wrap justify-between gap-2 py-3 text-sm"><div><strong>{p.shop?.name ?? 'Shop'} · {termLabel(p.term)} · {formatPaiseExact(p.amount_paise)}</strong><p className="mt-1 text-xs text-neutral-500">{p.status === 'approved' ? 'Approved' : 'Rejected'} {subscriptionDate(p.reviewed_at)} · {p.utr}</p>{p.review_note && <p className="mt-1 text-xs text-neutral-600">{p.review_note}</p>}</div>{p.status === 'approved' && <p className="text-xs text-green-700">{subscriptionDate(p.period_start)} → {subscriptionDate(p.period_end)}</p>}</div>)}{!data.history.length && <p className="py-4 text-sm text-neutral-500">No decisions yet.</p>}</div></section>
+    <section className="card p-5"><h2 className="text-lg font-extrabold">Recent decisions & activations</h2><p className="mt-1 text-xs text-neutral-500">The latest 20 approved or rejected reports and automatic free activations.</p><div className="mt-3 divide-y divide-neutral-100">{data.history.map((p) => <div key={p.id} className="flex flex-wrap justify-between gap-2 py-3 text-sm"><div><strong>{p.shop?.name ?? 'Shop'} · {termLabel(p.term)} · {formatPaiseExact(p.amount_paise)}</strong><p className="mt-1 text-xs text-neutral-500">{p.status === 'approved' && p.amount_paise === 0 ? 'Automatically activated with promo' : p.status === 'approved' ? 'Approved' : 'Rejected'} {subscriptionDate(p.reviewed_at)}{p.utr ? ` · ${p.utr}` : ''}{p.promo_code ? ` · Code ${p.promo_code}` : ''}</p>{p.review_note && <p className="mt-1 text-xs text-neutral-600">{p.review_note}</p>}</div>{p.status === 'approved' && <p className="text-xs text-green-700">{subscriptionDate(p.period_start)} → {subscriptionDate(p.period_end)}</p>}</div>)}{!data.history.length && <p className="py-4 text-sm text-neutral-500">No decisions or activations yet.</p>}</div></section>
   </div>;
 }
