@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Loader2, Save, Plus, Trash2, QrCode, Download, CheckCircle2, Store, Wallet, Zap, Info, FileText,
 } from 'lucide-react';
@@ -11,11 +11,16 @@ import { useRouter } from 'next/navigation';
 
 interface RateRow {
   service: string; paper_size: string | null; color: string | null; sides: string | null;
-  paper_gsm: number | null; option: string | null; unit: 'page' | 'job' | 'sheet'; price_paise: number;
+  paper_gsm: number | null; option: string | null; unit: 'page' | 'job' | 'sheet' | 'duplex_sheet'; price_paise: number;
 }
-type RateKey = `${string}`;
+type EditableRateRow = RateRow & { editorId: number };
 
-const rowKey = (r: RateRow): RateKey => `${r.service}|${r.paper_size}|${r.color}|${r.sides}|${r.paper_gsm}|${r.option}|${r.unit}`;
+function unitLabel(row: RateRow): string {
+  if (row.unit === 'duplex_sheet') return 'Per physical duplex sheet';
+  if (row.unit === 'page') return 'Per page';
+  if (row.unit === 'job') return 'Per copy / set';
+  return row.service === 'laminate' ? 'Per sheet' : 'Legacy sheet (charged per page)';
+}
 
 export default function ShopSettingsPage() {
   const router = useRouter();
@@ -35,8 +40,10 @@ export default function ShopSettingsPage() {
   const [duplicateName, setDuplicateName] = useState(false);
   const [proofPhoto, setProofPhoto] = useState<File | null>(null);
 
-  // rate card
-  const [rows, setRows] = useState<RateRow[]>([]);
+  // A stable editor-only ID lets newly added rows be edited independently,
+  // even before their dimensions differ from an existing row.
+  const nextRowId = useRef(0);
+  const [rows, setRows] = useState<EditableRateRow[]>([]);
   const [dirty, setDirty] = useState(false);
 
   const load = useCallback(async () => {
@@ -54,7 +61,10 @@ export default function ShopSettingsPage() {
       for (const s of svc) map[s.service] = s.enabled;
       setServices(map);
     }
-    if (cardRes.ok) { const { rows } = await cardRes.json(); setRows(rows); }
+    if (cardRes.ok) {
+      const { rows: savedRows } = await cardRes.json() as { rows: RateRow[] };
+      setRows(savedRows.map((row) => ({ ...row, editorId: nextRowId.current++ })));
+    }
     setLoaded(true);
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -109,29 +119,35 @@ export default function ShopSettingsPage() {
     setSaving(true); setBanner(null);
     try {
       const res = await fetch('/api/shop/rate-card', {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rows }),
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows: rows.map(({ editorId: _editorId, ...row }) => row) }),
       });
       if (res.ok) { setDirty(false); setSavedAt(new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })); }
       else { const d = await res.json().catch(() => ({})); setBanner(d?.error?.message ?? 'Save failed'); }
-    } finally { setSaving(false); }
+    } catch { setBanner('Could not save rates. Please check your connection and retry.'); }
+    finally { setSaving(false); }
   };
 
-  const updateRow = (key: RateKey, patch: Partial<RateRow>) => {
-    setRows((rs) => rs.map((r) => (rowKey(r) === key ? { ...r, ...patch } : r)));
+  const updateRow = (editorId: number, patch: Partial<RateRow>) => {
+    setRows((rs) => rs.map((r) => (r.editorId === editorId ? { ...r, ...patch } : r)));
     setDirty(true);
   };
-  const removeRow = (key: RateKey) => { setRows((rs) => rs.filter((r) => rowKey(r) !== key)); setDirty(true); };
-  const addRow = (service: string) => {
+  const removeRow = (editorId: number) => { setRows((rs) => rs.filter((r) => r.editorId !== editorId)); setDirty(true); };
+  const addRow = (selection: string) => {
+    const duplex = selection.endsWith('_duplex');
+    const service = duplex ? selection.replace(/_duplex$/, '') : selection;
     const base: RateRow = { service, paper_size: 'A4', color: 'bw', sides: 'single', paper_gsm: 80, option: null, unit: 'page', price_paise: service === 'bind' ? 3000 : 200 };
     if (service === 'bind') base.paper_size = null, base.color = null, base.sides = null, base.paper_gsm = null, base.option = 'spiral', base.unit = 'job';
     if (service === 'laminate') base.color = null, base.sides = null, base.paper_gsm = null, base.unit = 'sheet';
     if (service === 'photocopy' || service === 'scan') base.sides = null, base.paper_gsm = null;
-    setRows((rs) => [...rs, base]);
+    if (duplex) base.sides = 'duplex';
+    const editorId = nextRowId.current++;
+    setRows((rs) => [...rs, { ...base, editorId }]);
     setDirty(true);
   };
 
   const grouped = useMemo(() => {
-    const g = new Map<string, RateRow[]>();
+    const g = new Map<string, EditableRateRow[]>();
     for (const r of rows) {
       const arr = g.get(r.service) ?? [];
       arr.push(r);
@@ -249,16 +265,23 @@ export default function ShopSettingsPage() {
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <h2 className="text-sm font-extrabold uppercase tracking-widest text-neutral-500">Rate card (₹ per unit)</h2>
           <div className="flex items-center gap-2">
-            <select className="input h-9 w-auto text-xs" value="" onChange={(e) => e.target.value && addRow(e.target.value)}>
+            <select aria-label="Add a rate" className="input h-9 w-auto text-xs" value="" onChange={(e) => e.target.value && addRow(e.target.value)}>
               <option value="">+ Add rate…</option>
               <option value="print">Print</option>
+              <option value="print_duplex">Double-sided print</option>
               <option value="photocopy">Photocopy</option>
+              <option value="photocopy_duplex">Double-sided photocopy</option>
               <option value="scan">Scan</option>
               <option value="bind">Binding</option>
               <option value="laminate">Lamination</option>
             </select>
             <button onClick={saveRateCard} disabled={saving || !dirty} className="btn btn-primary h-9 px-4 text-xs">{saving ? <Loader2 size={14} className="animate-spin" /> : <><Save size={14} />Save rates</>}</button>
           </div>
+        </div>
+
+        <div className="mt-3 rounded-xl border border-orange-200 bg-orange-50 p-3 text-xs leading-relaxed text-orange-950">
+          <p><strong>Double-sided rates:</strong> edit an existing duplex row or add one, then choose a price per printed page or per physical sheet. Five pages use three sheets per copy; each file and copy starts a new sheet.</p>
+          <p className="mt-1">Changing a unit changes the charge, so review its price before saving. Existing rates stay as they are until you edit them. Legacy “sheet” rates for print, photocopy and scan are still charged per document page.</p>
         </div>
 
         {['print', 'photocopy', 'scan', 'bind', 'laminate'].map((service) => {
@@ -273,7 +296,7 @@ export default function ShopSettingsPage() {
                     <tr>
                       {service !== 'bind' && <th className="py-1 pr-2">Size</th>}
                       {service !== 'bind' && service !== 'laminate' && <th className="py-1 pr-2">Colour</th>}
-                      {service === 'print' && <th className="py-1 pr-2">Sides</th>}
+                      {(service === 'print' || service === 'photocopy') && <th className="py-1 pr-2">Sides</th>}
                       {(service === 'print' || service === 'photocopy') && <th className="py-1 pr-2">GSM</th>}
                       {service === 'bind' && <th className="py-1 pr-2">Type</th>}
                       <th className="py-1 pr-2">Unit</th>
@@ -282,8 +305,9 @@ export default function ShopSettingsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {list.map((r) => {
-                      const key = rowKey(r);
+                    {list.map((r, index) => {
+                      const key = r.editorId;
+                      const rowName = `${service} rate ${index + 1}`;
                       return (
                         <tr key={key} className="border-t border-neutral-100">
                           {service !== 'bind' && (
@@ -292,20 +316,35 @@ export default function ShopSettingsPage() {
                           {service !== 'bind' && service !== 'laminate' && (
                             <td className="py-1 pr-2">{cellSel(r.color, (v) => updateRow(key, { color: (v || null) as RateRow['color'] }), [{ value: 'bw', label: 'B&W' }, { value: 'color', label: 'Colour' }], 'w-20')}</td>
                           )}
-                          {service === 'print' && (
-                            <td className="py-1 pr-2">{cellSel(r.sides, (v) => updateRow(key, { sides: (v || null) as RateRow['sides'] }), [{ value: 'single', label: 'Single' }, { value: 'duplex', label: 'Duplex' }], 'w-24')}</td>
+                          {(service === 'print' || service === 'photocopy') && (
+                            <td className="py-1 pr-2">
+                              <select aria-label={`Sides for ${rowName}`} className={cn(inputCls, 'w-28')} value={r.sides ?? ''} onChange={(e) => updateRow(key, { sides: e.target.value || null })}>
+                                <option value="" disabled={r.unit === 'duplex_sheet'}>Any</option>
+                                <option value="single" disabled={r.unit === 'duplex_sheet'}>Single</option>
+                                <option value="duplex">Duplex</option>
+                              </select>
+                            </td>
                           )}
                           {(service === 'print' || service === 'photocopy') && (
                             <td className="py-1 pr-2">
-                              <input className={cn(inputCls, 'w-16')} type="number" value={r.paper_gsm ?? 80} onChange={(e) => updateRow(key, { paper_gsm: Number(e.target.value) })} />
+                              <input aria-label={`Paper GSM for ${rowName}`} className={cn(inputCls, 'w-16')} type="number" min={40} max={300} placeholder="Any" value={r.paper_gsm ?? ''} onChange={(e) => updateRow(key, { paper_gsm: e.target.value === '' ? null : Number(e.target.value) })} />
                             </td>
                           )}
                           {service === 'bind' && (
                             <td className="py-1 pr-2">{cellSel(r.option, (v) => updateRow(key, { option: v || null }), [{ value: 'staple', label: 'Staple' }, { value: 'spiral', label: 'Spiral' }, { value: 'hard', label: 'Hard cover' }], 'w-28')}</td>
                           )}
-                          <td className="py-1 pr-2 text-neutral-500 capitalize">{r.unit}</td>
-                          <td className="py-1 pr-2"><input className={cn(inputCls, 'w-20 text-right font-mono')} type="number" min={0} step="0.5" value={r.price_paise / 100} onChange={(e) => updateRow(key, { price_paise: Math.max(0, Math.round(Number(e.target.value) * 100)) })} /></td>
-                          <td className="py-1"><button onClick={() => removeRow(key)} className="p-1.5 text-neutral-300 hover:text-red-600"><Trash2 size={15} /></button></td>
+                          <td className="py-1 pr-2 text-neutral-600">
+                            {(service === 'print' || service === 'photocopy') && r.sides === 'duplex' ? (
+                              <select aria-label={`Billing unit for ${rowName}`} className={cn(inputCls, 'w-44')} value={r.unit} onChange={(e) => updateRow(key, { unit: e.target.value as RateRow['unit'] })}>
+                                <option value="page">Per printed page</option>
+                                <option value="duplex_sheet">Per physical sheet</option>
+                                {r.unit === 'sheet' && <option value="sheet">Legacy sheet (per page)</option>}
+                                {r.unit === 'job' && <option value="job">Legacy job (per copy)</option>}
+                              </select>
+                            ) : unitLabel(r)}
+                          </td>
+                          <td className="py-1 pr-2"><input aria-label={`Price in rupees for ${rowName}`} className={cn(inputCls, 'w-20 text-right font-mono')} type="number" min={0} step="0.01" value={r.price_paise / 100} onChange={(e) => updateRow(key, { price_paise: Math.max(0, Math.round(Number(e.target.value) * 100)) })} /></td>
+                          <td className="py-1"><button aria-label={`Remove ${rowName}`} onClick={() => removeRow(key)} className="p-1.5 text-neutral-300 hover:text-red-600"><Trash2 size={15} /></button></td>
                         </tr>
                       );
                     })}
@@ -315,7 +354,7 @@ export default function ShopSettingsPage() {
             </div>
           );
         })}
-        <p className="mt-3 text-[10px] text-neutral-400 flex items-center gap-1"><Info size={11} />Empty dims act as “any / default”. Customers see the exact price before paying — round numbers work best.</p>
+        <p className="mt-3 text-[10px] text-neutral-500 flex items-start gap-1"><Info size={11} className="mt-0.5 shrink-0" />Empty dimensions mean “any / default”; the most specific matching rate is used. For predictable duplex pricing, set its size, colour and GSM to match the intended options. Conflicting equally specific physical-sheet rates cannot be saved. To change sides on a physical-sheet row, first change its billing unit. Customers see the calculation before paying.</p>
       </section>
 
       <AccountPassword portal="shop" />

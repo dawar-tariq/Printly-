@@ -9,7 +9,7 @@ export interface RateRow {
   sides: string | null;
   paper_gsm: number | null;
   option: string | null;
-  unit: 'page' | 'job' | 'sheet';
+  unit: 'page' | 'job' | 'sheet' | 'duplex_sheet';
   price_paise: number;
 }
 

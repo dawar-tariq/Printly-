@@ -5,6 +5,8 @@ const state = vi.hoisted(() => ({
   order: { id: '11111111-1111-4111-8111-111111111111', status: 'draft', payment_method: null as string | null },
   files: [] as Array<{ id: string; mime: string; page_count: number | null }>,
   inserted: [] as Array<Record<string, unknown>>,
+  quoteItems: [] as Array<Record<string, unknown>>,
+  quoteCard: [] as Array<Record<string, unknown>>,
 }));
 vi.mock('@/lib/supabase', () => ({ createAdminSupabase: () => ({
   rpc: async (name: string, args: { p_rows: Array<Record<string, unknown>> }) => {
@@ -26,8 +28,8 @@ vi.mock('@/lib/subscription-server', () => ({ shopHasSubscription: async () => t
 vi.mock('@/lib/rate-limit', () => ({ enforcePublicRateLimit: async () => null }));
 vi.mock('@/lib/order-quote', () => ({ loadOrderWithRates: async () => ({
   order: { rush: false, status: 'draft', payment_method: null, draft_version: 1, shops: { rush_surcharge_bps: 1500 } },
-  items: [{ service: 'print', paper_size: 'A4', color: 'bw', sides: 'single', paper_gsm: 80, option: null, copies: 2, pages: 2 }],
-  card: [{ service: 'print', paper_size: null, color: null, sides: null, paper_gsm: null, option: null, unit: 'page', price_paise: 200 }],
+  items: state.quoteItems,
+  card: state.quoteCard,
   gstBps: 1800, rushBps: 1000,
 }) }));
 import { PUT } from './items/route';
@@ -48,6 +50,8 @@ beforeEach(() => {
   state.order = { id: order, status: 'draft', payment_method: null };
   state.files = [{ id: pdfId, mime: 'application/pdf', page_count: 2 }, { id: wordId, mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', page_count: null }];
   state.inserted = [];
+  state.quoteItems = [{ service: 'print', paper_size: 'A4', color: 'bw', sides: 'single', paper_gsm: 80, option: null, copies: 2, pages: 2 }];
+  state.quoteCard = [{ service: 'print', paper_size: null, color: null, sides: null, paper_gsm: null, option: null, unit: 'page', price_paise: 200 }];
 });
 
 describe('pricing uses the selected files', () => {
@@ -66,6 +70,21 @@ describe('pricing uses the selected files', () => {
   it('does not let a draft change after checkout starts', async () => {
     state.order.payment_method = 'upi';
     expect((await put([item(pdfId, 2)])).status).toBe(409);
+  });
+  it('quotes duplex sheets separately for each file and includes the calculation and file IDs', async () => {
+    state.quoteItems = [
+      { ...item(pdfId, 5), sides: 'duplex' },
+      { ...item(wordId, 1), sides: 'duplex' },
+    ];
+    state.quoteCard = [{ service: 'print', paper_size: 'A4', color: 'bw', sides: 'duplex', paper_gsm: 80, option: null, unit: 'duplex_sheet', price_paise: 300 }];
+    const response = await GET(new Request('https://example.test?rush=0', { headers: { cookie: cookie() } }), params);
+    expect(response.status).toBe(200);
+    const result = await response.json();
+    expect(result.quote.lines).toMatchObject([
+      { fileId: pdfId, unit: 'duplex_sheet', qty: 6, unitPricePaise: 300, lineTotalPaise: 1800 },
+      { fileId: wordId, unit: 'duplex_sheet', qty: 2, unitPricePaise: 300, lineTotalPaise: 600 },
+    ]);
+    expect(result.quote).toMatchObject({ subtotalPaise: 2400, taxPaise: 432, totalPaise: 2832 });
   });
   it('quotes the selected rush setting at the shop’s own rate', async () => {
     const request = (rush: string) => GET(new Request(`https://example.test?rush=${rush}`, { headers: { cookie: cookie() } }), params);

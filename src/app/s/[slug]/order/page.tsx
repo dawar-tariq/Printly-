@@ -17,6 +17,9 @@ import { fileMime, isPreviewable, isWord, MAX_DOCUMENT_BYTES, MAX_DOCUMENT_PAGES
 import { createBrowserSupabase } from '@/lib/supabase-client';
 import { cn } from '@/lib/utils';
 import { formatPaiseExact } from '@/lib/format';
+import { duplexSheets } from '@/lib/duplex';
+import { rateUnitLabel } from '@/lib/rate-display';
+import type { Quote } from '@/lib/pricing';
 
 type Service = 'print' | 'photocopy' | 'scan' | 'bind' | 'laminate';
 type Step = 'service' | 'files' | 'options' | 'checkout' | 'upi';
@@ -39,7 +42,7 @@ interface ShopPublic {
   accepting_orders: boolean;
   services: { service: string; enabled: boolean }[];
 }
-interface QuoteResp { quote: { lines: { service: string; description: string; unitPricePaise: number; qty: number; lineTotalPaise: number }[]; subtotalPaise: number; rushFeePaise: number; taxPaise: number; totalPaise: number }; rush: boolean; quote_token: string }
+interface QuoteResp { quote: Quote; rush: boolean; quote_token: string }
 
 const SERVICE_META: Record<Service, { label: string; icon: typeof Printer; blurb: string }> = {
   print: { label: 'Print', icon: Printer, blurb: 'PDF / Word / images' },
@@ -341,6 +344,7 @@ function OrderWizardForShop({ slug }: { slug: string }) {
   }, [step, orderId, rush, quoteRefresh]);
 
   const totalPages = useMemo(() => files.filter((f) => f.state === 'ready').reduce((a, f) => a + (f.page_count ?? 0), 0), [files]);
+  const totalDuplexSheets = useMemo(() => files.filter((f) => f.state === 'ready').reduce((sum, f) => sum + duplexSheets(f.page_count ?? 0, copies), 0), [files, copies]);
   const readyCount = files.filter((f) => f.state === 'ready').length;
   const filesComplete = files.length > 0 && files.every((f) => f.state === 'ready' && Number.isInteger(f.page_count) && (f.page_count ?? 0) >= 1 && (f.page_count ?? 0) <= MAX_DOCUMENT_PAGES);
   const fileOperations = files.some((f) => f.state === 'uploading' || f.state === 'removing');
@@ -593,9 +597,14 @@ function OrderWizardForShop({ slug }: { slug: string }) {
                         <label className="label">Sides</label>
                         <div className="grid grid-cols-2 gap-2">
                           {(['single', 'duplex'] as const).map((s) => (
-                            <button key={s} onClick={() => setSides(s)} className={cn('h-11 rounded-xl border-2 font-semibold text-sm capitalize', sides === s ? 'border-orange-600 bg-orange-50 text-orange-900' : 'border-neutral-200')}>{s === 'single' ? 'Single side' : 'Double (duplex)'}</button>
+                            <button key={s} type="button" aria-pressed={sides === s} onClick={() => setSides(s)} className={cn('h-11 rounded-xl border-2 font-semibold text-sm capitalize', sides === s ? 'border-orange-600 bg-orange-50 text-orange-900' : 'border-neutral-200')}>{s === 'single' ? 'Single side' : 'Double (duplex)'}</button>
                           ))}
                         </div>
+                        {sides === 'duplex' && <div className="mt-2 rounded-xl border border-orange-200 bg-orange-50 p-3 text-xs leading-relaxed text-orange-950">
+                          <p><strong>Whole files, in order:</strong> pages 1 and 2 share a sheet, then 3 and 4, and so on. An odd last page has a blank back. Each file and each copy starts on a new sheet.</p>
+                          <p className="mt-1 font-semibold">{totalDuplexSheets} physical sheet{totalDuplexSheets === 1 ? '' : 's'} needed for {copies} cop{copies === 1 ? 'y' : 'ies'} of each file.</p>
+                          <p className="mt-1">The shop may charge per document page (including blank pages in the file) or per physical sheet. The extra blank reverse is not a document page. Your exact rate and calculation appear at checkout.</p>
+                        </div>}
                       </div>
                       {/* gsm */}
                       <div>
@@ -618,7 +627,7 @@ function OrderWizardForShop({ slug }: { slug: string }) {
                         </div>
                       </div>
                       <button onClick={() => setLamination(!lamination)} className={cn('w-full flex items-center justify-between rounded-xl border-2 px-4 py-3 text-left', lamination ? 'border-orange-600 bg-orange-50' : 'border-neutral-200')}>
-                        <span><span className="font-semibold text-sm">Add lamination</span><br /><span className="text-[11px] text-neutral-500">Every sheet, both sides</span></span>
+                        <span><span className="font-semibold text-sm">Add lamination</span><br /><span className="text-[11px] text-neutral-500">The shop’s price and billing quantity appear at checkout</span></span>
                         <span className={cn('w-6 h-6 rounded-md border-2 grid place-items-center', lamination ? 'bg-orange-600 border-orange-600 text-white' : 'border-neutral-300')}>{lamination && '✓'}</span>
                       </button>
                     </>
@@ -667,8 +676,15 @@ function OrderWizardForShop({ slug }: { slug: string }) {
               <div className="card mt-3 p-4 text-sm">
                 <div className="flex items-center justify-between font-bold"><span>Order summary</span><span>{readyCount} file{readyCount !== 1 ? 's' : ''}</span></div>
                 <ul className="mt-2 space-y-1 text-neutral-600">
-                  {quote.quote.lines.map((l, i) => (
-                    <li key={i} className="flex justify-between gap-4"><span className="truncate">{l.description}</span><span className="tabular-nums">{formatPaiseExact(l.lineTotalPaise)}</span></li>
+                  {quote.quote.lines.map((line, i) => (
+                    <li key={i} className="flex items-start justify-between gap-4 py-1">
+                      <div className="min-w-0">
+                        {line.fileId && <div className="break-all text-xs font-semibold text-neutral-800">{files.find((file) => file.id === line.fileId)?.name ?? 'File'}</div>}
+                        <div className="break-words">{line.description}</div>
+                        <div className="mt-0.5 text-xs text-neutral-500">{line.qty} × {formatPaiseExact(line.unitPricePaise)} per {rateUnitLabel(line.unit, line.service)}</div>
+                      </div>
+                      <span className="shrink-0 tabular-nums">{formatPaiseExact(line.lineTotalPaise)}</span>
+                    </li>
                   ))}
                 </ul>
                 <div className="border-t border-neutral-100 mt-2 pt-2 space-y-1 text-neutral-600">

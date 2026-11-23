@@ -40,6 +40,37 @@ describe('rate-card replacement', () => {
     expect(await response.json()).toEqual({ ok: true, count: 1 });
     expect(state.calls).toEqual([{ name: 'replace_shop_rate_card', args: { p_shop_id: 'shop-1', p_rows: [row] } }]);
   });
+  it('accepts explicit physical-sheet duplex rates for print and photocopy only', async () => {
+    const duplex = { ...row, sides: 'duplex', unit: 'duplex_sheet', price_paise: 300 };
+    const photocopy = { ...duplex, service: 'photocopy' };
+    expect((await PUT(request([row, duplex, photocopy]))).status).toBe(200);
+    expect(state.calls[0].args.p_rows).toEqual([row, duplex, photocopy]);
+    state.calls = [];
+    for (const bad of [
+      { ...duplex, sides: 'single' }, { ...duplex, sides: null },
+      { ...duplex, service: 'scan' }, { ...duplex, service: 'laminate' },
+    ]) {
+      const response = await PUT(request([bad]));
+      expect(response.status).toBe(422);
+      expect((await response.json()).error.message).toMatch(/double-sided print or photocopy/i);
+    }
+    expect(state.calls).toHaveLength(0);
+  });
+  it('rejects ambiguous new sheet rates but accepts a more specific duplex rate', async () => {
+    const wildcard = { ...row, sides: null, unit: 'page' };
+    const overlapping = { ...row, sides: 'duplex', paper_gsm: null, unit: 'duplex_sheet' };
+    const rejected = await PUT(request([wildcard, overlapping]));
+    expect(rejected.status).toBe(422);
+    expect((await rejected.json()).error.message).toMatch(/overlaps another equally specific rate/i);
+    expect(state.calls).toHaveLength(0);
+    expect((await PUT(request([wildcard, { ...overlapping, paper_gsm: 80 }]))).status).toBe(200);
+    expect(state.calls).toHaveLength(1);
+  });
+  it('continues to accept existing legacy sheet rates without rewriting them', async () => {
+    const legacy = { ...row, sides: 'duplex', unit: 'sheet', price_paise: 300 };
+    expect((await PUT(request([legacy]))).status).toBe(200);
+    expect(state.calls[0].args.p_rows).toEqual([legacy]);
+  });
   it('explains duplicate options and reports a database failure without claiming success', async () => {
     state.rpcError = { code: '23505', message: 'duplicate key' };
     const duplicate = await PUT(request());

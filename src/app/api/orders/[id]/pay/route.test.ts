@@ -94,6 +94,37 @@ describe('checkout uses the quote the customer reviewed', () => {
     expect(state.rpcCalls).toHaveLength(1);
     expect((await pay({ quote_token: 'b'.repeat(64) })).status).toBe(409);
   });
+  it('commits the reviewed duplex-sheet calculation and preserves it after rates change', async () => {
+    const secondId = '44444444-4444-4444-8444-444444444444';
+    state.items = [
+      { ...state.items[0], file_id: 'file-a', sides: 'duplex', pages: 5, copies: 2 },
+      { ...state.items[0], id: secondId, file_id: 'file-b', sides: 'duplex', pages: 1, copies: 2 },
+    ];
+    state.card = [{ ...state.card[0], sides: 'duplex', unit: 'duplex_sheet', price_paise: 300 }];
+    const quoted = token();
+    const first = await pay({ quote_token: quoted });
+    expect(first.status).toBe(200);
+    expect(await first.json()).toMatchObject({ mode: 'cod', total_paise: 2832 });
+    expect(state.rpcCalls[0].p_lines).toEqual([
+      { id: itemId, unit_price_paise: 300, line_total_paise: 1800 },
+      { id: secondId, unit_price_paise: 300, line_total_paise: 600 },
+    ]);
+    expect(state.rpcCalls[0].p_checkout).toMatchObject({ subtotal_paise: 2400, tax_paise: 432, total_paise: 2832, pricing_engine: 'duplex-v1' });
+    state.card[0].price_paise = 900;
+    const retry = await pay({ quote_token: quoted });
+    expect(await retry.json()).toMatchObject({ mode: 'placed', total_paise: 2832 });
+    expect(state.rpcCalls).toHaveLength(1);
+  });
+  it('requires a fresh review if a duplex rate changes before checkout', async () => {
+    state.items[0] = { ...state.items[0], file_id: 'file-a', sides: 'duplex', pages: 5 };
+    state.card[0] = { ...state.card[0], sides: 'duplex', unit: 'duplex_sheet', price_paise: 300 };
+    const quoted = token();
+    state.card[0].price_paise = 350;
+    const result = await pay({ quote_token: quoted });
+    expect(result.status).toBe(409);
+    expect((await result.json()).error.code).toBe('quote_changed');
+    expect(state.rpcCalls).toHaveLength(0);
+  });
   it('limits new checkouts without blocking recovery of a payment already started', async () => {
     const quoted = token();
     const first = await pay({ method: 'upi', quote_token: quoted });

@@ -15,7 +15,7 @@ export async function suggestedOrientation(doc: LoadedDocument): Promise<PrintOr
   return view.width > view.height ? 'landscape' : 'portrait';
 }
 
-export async function printDocument(doc: LoadedDocument, requestedPaper: string, orientation: PrintOrientation) {
+export async function printDocument(doc: LoadedDocument, requestedPaper: string, orientation: PrintOrientation, sides: 'single' | 'duplex' = 'single') {
   if (doc.pageCount > MAX_RASTER_PRINT_PAGES) throw new Error(`For more than ${MAX_RASTER_PRINT_PAGES} pages, open the PDF in your browser's PDF viewer and use its Print command.`);
   const paper = Object.hasOwn(PAPER, requestedPaper) ? requestedPaper : 'A4';
   const [short, long] = PAPER[paper];
@@ -61,6 +61,15 @@ export async function printDocument(doc: LoadedDocument, requestedPaper: string,
         sheet.appendChild(canvas);
         target.body.appendChild(sheet);
       }
+    }
+    if (sides === 'duplex' && doc.pageCount % 2 !== 0) {
+      // Ensure the raster print document has a blank reverse after the odd
+      // last page. The operator must still select duplex, one page per side,
+      // and verify that the browser/printer actually honours the blank page.
+      const blank = target.createElement('div');
+      blank.className = 'page';
+      blank.setAttribute('data-duplex-blank', 'true');
+      target.body.appendChild(blank);
     }
     // A browser may return from print() before its dialog is closed. Keep the
     // frame and images around until afterprint (with a longer fallback timeout).

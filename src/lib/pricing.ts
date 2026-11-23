@@ -1,4 +1,6 @@
 /** Printly pricing engine — pure, integer-paise, half-up rounding. */
+import { duplexSheets } from '@/lib/duplex';
+
 export interface RateRow {
   service: string;
   paper_size: string | null;
@@ -6,11 +8,14 @@ export interface RateRow {
   sides: string | null;
   paper_gsm: number | null;
   option: string | null;
-  unit: 'page' | 'job' | 'sheet';
+  // `sheet` is the historical unit, charged per document page. Only the new,
+  // explicitly configured duplex_sheet unit counts physical sheets.
+  unit: 'page' | 'job' | 'sheet' | 'duplex_sheet';
   price_paise: number;
 }
 
 export interface ItemSpec {
+  file_id?: string | null;
   service: string;
   paper_size?: string | null;
   color?: string | null;
@@ -22,6 +27,7 @@ export interface ItemSpec {
 }
 
 export interface QuoteLine {
+  fileId: string | null;
   service: string;
   description: string;
   unit: RateRow['unit'];
@@ -59,11 +65,25 @@ function rowSpecificity(row: RateRow): number {
   return OPTION_DIM_KEYS.reduce((acc, k) => acc + (row[k] !== null ? 1 : 0), 0);
 }
 
+/** Can both rows match the same item with the same precedence? */
+export function ratesOverlapAtEqualPriority(a: RateRow, b: RateRow): boolean {
+  return a.service === b.service && (a.option ?? null) === (b.option ?? null) &&
+    rowSpecificity(a) === rowSpecificity(b) &&
+    OPTION_DIM_KEYS.every((key) => a[key] === null || b[key] === null || a[key] === b[key]);
+}
+
 export function findRate(item: ItemSpec, card: RateRow[]): RateRow {
   const serviceRows = card.filter((r) => r.service === item.service && (r.option ?? null) === (item.option ?? null));
   const matches = serviceRows.filter((r) => OPTION_DIM_KEYS.every((k) => dimEquals(r[k], item[k])));
   if (matches.length > 0) {
-    return matches.sort((a, b) => rowSpecificity(b) - rowSpecificity(a))[0];
+    const sorted = matches.sort((a, b) => rowSpecificity(b) - rowSpecificity(a));
+    const tied = sorted.filter((row) => rowSpecificity(row) === rowSpecificity(sorted[0]));
+    // Preserve historical precedence for old cards, but never choose an
+    // ambiguous new physical-sheet price based on random database row IDs.
+    if (tied.length > 1 && tied.some((row) => row.unit === 'duplex_sheet')) {
+      throw new PricingError('The shop has overlapping double-sided rates. Please contact the shop to resolve its pricing.');
+    }
+    return sorted[0];
   }
   // widen: ignore sides, then gsm
   const relaxed = serviceRows.filter((r) =>
@@ -77,7 +97,17 @@ export function findRate(item: ItemSpec, card: RateRow[]): RateRow {
 
 export function qtyFor(item: ItemSpec, unit: RateRow['unit']): number {
   if (unit === 'job') return Math.max(1, item.copies);
-  return Math.max(1, item.pages) * Math.max(1, item.copies); // page & sheet
+  if (unit === 'duplex_sheet') {
+    if ((item.service !== 'print' && item.service !== 'photocopy') || item.sides !== 'duplex') {
+      throw new PricingError('A physical duplex-sheet rate can only price double-sided printing or photocopying.');
+    }
+    // Round each file/copy separately; the last odd page never shares a sheet
+    // with the next file or the next copy.
+    return duplexSheets(Math.max(1, item.pages), Math.max(1, item.copies));
+  }
+  if (unit === 'page' || unit === 'sheet') return Math.max(1, item.pages) * Math.max(1, item.copies);
+  // Fail closed if a future database value is not understood by this app.
+  throw new PricingError('The shop’s pricing settings need to be checked.');
 }
 
 export function computeQuote(
@@ -95,6 +125,7 @@ export function computeQuote(
     checkedPaise(rate.price_paise);
     const lineTotalPaise = checkedPaise(rate.price_paise * qty);
     return {
+      fileId: item.file_id ?? null,
       service: item.service,
       description: lineDescription(item, rate.unit),
       unit: rate.unit,
@@ -117,7 +148,7 @@ function lineDescription(item: ItemSpec, unit: RateRow['unit']): string {
     item.paper_size,
     item.color === 'color' ? 'Color' : 'B&W',
     item.sides === 'duplex' ? 'Duplex' : null,
-    unit === 'page' ? `${item.pages}p × ${item.copies}` : `× ${item.copies}`,
+    unit === 'page' || unit === 'duplex_sheet' ? `${item.pages}p × ${item.copies}` : `× ${item.copies}`,
   ].filter(Boolean);
   const label = item.service === 'photocopy' ? 'Photocopy' : item.service === 'scan' ? 'Scan' : 'Print';
   return `${label} — ${bits.join(', ')}`;

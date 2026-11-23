@@ -5,6 +5,7 @@ import { CheckCircle2, ChevronLeft, ChevronRight, ExternalLink, Loader2, Printer
 import { DocumentCanvas, useLoadedDocument } from '@/components/DocumentCanvas';
 import { MAX_RASTER_PRINT_PAGES, printDocument, suggestedOrientation, type PrintOrientation } from '@/lib/document-print';
 import { SERVICE_LABEL } from '@/lib/constants';
+import { duplexSheets, duplexSheetsPerCopy } from '@/lib/duplex';
 
 export interface FilePrintSpec {
   id: string; file_id: string | null; service: string; paper_size: string | null; color: string | null; sides: string | null;
@@ -39,7 +40,7 @@ export function PrintFileDialog({ url, mime, name, specs, onClose, onChecked }: 
     if (!doc || !reviewed || preparing) return;
     setPreparing(true); setPrintError(null);
     try {
-      await printDocument(doc, printSpec?.paper_size ?? 'A4', orientation);
+      await printDocument(doc, printSpec?.paper_size ?? 'A4', orientation, printSpec?.sides === 'duplex' ? 'duplex' : 'single');
       // Opening a dialog does not prove that anything was actually printed.
       setPrintAction('dialog');
     } catch (err) { setPrintError(err instanceof Error ? err.message : 'Could not open print preview.'); }
@@ -76,6 +77,13 @@ export function PrintFileDialog({ url, mime, name, specs, onClose, onChecked }: 
               </li>)}
             </ul> : <p className="mt-2 text-xs text-amber-900">No settings are linked to this file. Check the order’s print specification before printing.</p>}
           </div>
+          {printSpec?.sides === 'duplex' && (printSpec.service === 'print' || printSpec.service === 'photocopy') && <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-950">
+            <p className="font-bold">Double-sided: {duplexSheetsPerCopy(printSpec.pages)} sheet(s) per copy, {duplexSheets(printSpec.pages, printSpec.copies)} total.</p>
+            <p className="mt-1">Print the whole file in order: pages 1/2, 3/4 and so on. Leave an odd last page’s reverse blank. Start each file and each copy on a fresh sheet; print one copy per job if the printer cannot guarantee this.</p>
+            <p className="mt-1">In the printer dialog, select two-sided printing and one page per side, then check the flip edge and the physical output. Printly cannot turn duplex on for your printer.</p>
+            {doc && doc.pageCount % 2 !== 0 && doc.pageCount <= MAX_RASTER_PRINT_PAGES && <p className="mt-1">The Printly-prepared print adds a blank final page; check that your printer keeps it. The browser PDF viewer and downloaded files are unchanged.</p>}
+          </div>}
+          {doc && printSpec && (printSpec.service === 'print' || printSpec.service === 'photocopy') && doc.pageCount !== printSpec.pages && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-900">The preview has {doc.pageCount} pages, but the order was priced for {printSpec.pages}. Contact the customer before printing.</p>}
           <p className="text-xs leading-relaxed text-neutral-600">Choose the printer and confirm paper, colour, sides and copies in the device’s print dialog. Printly cannot set every printer option or tell whether paper was printed.</p>
           {doc && <label className="block text-xs font-bold text-neutral-700">Page orientation
             <select value={orientation} onChange={(event) => setOrientation(event.target.value as PrintOrientation)} disabled={preparing} className="input mt-1 h-10 text-sm"><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select>

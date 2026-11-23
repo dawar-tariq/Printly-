@@ -60,7 +60,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   try {
     quote = computeQuote(
       items.map((i) => ({
-        service: i.service, paper_size: i.paper_size, color: i.color, sides: i.sides,
+        file_id: i.file_id, service: i.service, paper_size: i.paper_size, color: i.color, sides: i.sides,
         paper_gsm: i.paper_gsm, option: i.option, copies: i.copies, pages: i.pages,
       })),
       card,
@@ -85,7 +85,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     p_checkout: {
       customer_name, customer_phone, customer_email: customer_email ?? '', notes: notes ?? '', method, rush: !!rush,
       subtotal_paise: quote.subtotalPaise, tax_paise: quote.taxPaise + quote.rushFeePaise, total_paise: quote.totalPaise,
-      quote_token,
+      // The database rejects old pricing engines when a physical-sheet rate
+      // exists, so an older deployment cannot commit pages × copies by mistake.
+      pricing_engine: 'duplex-v1', quote_token,
     },
   });
   if (error) return draftMutationError(error);

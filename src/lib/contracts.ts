@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { passwordPolicyError } from '@/lib/password-policy';
+import { ratesOverlapAtEqualPriority } from '@/lib/pricing';
 
 export const PAPER_SIZES = ['A4', 'A3', 'A5', 'Legal'] as const;
 
@@ -119,10 +120,25 @@ export const rateCardRowInput = z.object({
   sides: z.enum(['single', 'duplex']).nullable(),
   paper_gsm: z.number().int().min(40).max(300).nullable(),
   option: z.string().max(40).nullable(),
-  unit: z.enum(['page', 'job', 'sheet']),
+  unit: z.enum(['page', 'job', 'sheet', 'duplex_sheet']),
   price_paise: z.number().int().min(0).max(1_000_000),
+}).refine(
+  (row) => row.unit !== 'duplex_sheet' || ((row.service === 'print' || row.service === 'photocopy') && row.sides === 'duplex'),
+  { path: ['unit'], message: 'A physical duplex-sheet rate requires double-sided print or photocopy.' },
+);
+export const rateCardPutInput = z.object({ rows: z.array(rateCardRowInput).min(1).max(120) }).superRefine(({ rows }, context) => {
+  for (let i = 0; i < rows.length; i++) {
+    for (let j = i + 1; j < rows.length; j++) {
+      if ((rows[i].unit === 'duplex_sheet' || rows[j].unit === 'duplex_sheet') && ratesOverlapAtEqualPriority(rows[i], rows[j])) {
+        context.addIssue({
+          code: 'custom', path: ['rows', j],
+          message: 'A physical-sheet duplex rate overlaps another equally specific rate. Specify size, colour and GSM, or remove the conflicting rate.',
+        });
+        return;
+      }
+    }
+  }
 });
-export const rateCardPutInput = z.object({ rows: z.array(rateCardRowInput).min(1).max(120) });
 
 export const statusTransitionInput = z.object({
   to: z.enum(['printing', 'ready', 'collected', 'queued', 'cancelled']),

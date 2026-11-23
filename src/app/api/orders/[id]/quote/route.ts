@@ -28,7 +28,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   try {
     const quote = computeQuote(
       items.map((i) => ({
-        service: i.service, paper_size: i.paper_size, color: i.color, sides: i.sides,
+        file_id: i.file_id, service: i.service, paper_size: i.paper_size, color: i.color, sides: i.sides,
         paper_gsm: i.paper_gsm, option: i.option, copies: i.copies, pages: i.pages,
       })),
       card,

@@ -4,7 +4,9 @@ import { createAdminSupabase, createServerSupabase } from '@/lib/supabase';
 import { shopHasSubscription } from '@/lib/subscription-server';
 import { Logo } from '@/components/Logo';
 import { Star, MapPin, Phone, Clock, Printer, FileText, ScanLine, BookOpen, Layers, Copy, ArrowRight, ShieldCheck } from 'lucide-react';
-import { formatPaise } from '@/lib/format';
+import { formatPaiseExact } from '@/lib/format';
+import { rateUnitLabel } from '@/lib/rate-display';
+import type { RateRow } from '@/lib/pricing';
 import { findPublicShop } from '@/lib/public-shop';
 import { publicShopPath } from '@/lib/shop-identity';
 
@@ -39,12 +41,12 @@ export default async function ShopLandingPage({ params }: { params: Promise<{ sl
 
   const [{ data: services }, { data: rates }] = await Promise.all([
     supabase.from('shop_services').select('service, enabled, display_order').eq('shop_id', shop.id).eq('enabled', true).order('display_order'),
-    supabase.from('rate_card').select('service, price_paise').eq('shop_id', shop.id),
+    supabase.from('rate_card').select('service, unit, price_paise').eq('shop_id', shop.id),
   ]);
-  const startingAt = new Map<string, number>();
+  const startingAt = new Map<string, { price: number; unit: RateRow['unit'] }>();
   for (const r of rates ?? []) {
     const cur = startingAt.get(r.service);
-    if (cur === undefined || r.price_paise < cur) startingAt.set(r.service, r.price_paise);
+    if (!cur || r.price_paise < cur.price) startingAt.set(r.service, { price: r.price_paise, unit: r.unit as RateRow['unit'] });
   }
 
   return (
@@ -89,9 +91,9 @@ export default async function ShopLandingPage({ params }: { params: Promise<{ sl
                   <span className="w-10 h-10 rounded-xl bg-orange-50 text-orange-700 grid place-items-center"><Icon size={20} /></span>
                   <div className="flex-1">
                     <div className="font-semibold">{SERVICE_LABEL[service] ?? service}</div>
-                    <div className="text-xs text-neutral-400">{service === 'bind' ? 'Staple / spiral / hard cover' : service === 'laminate' ? 'Per sheet' : 'Per page'}</div>
+                    <div className="text-xs text-neutral-500">{from ? `Per ${rateUnitLabel(from.unit, service)} · options affect price` : 'Shop rates vary by option'}</div>
                   </div>
-                  <div className="text-sm font-bold text-neutral-700">{from !== undefined ? `from ${formatPaise(from)}` : ''}</div>
+                  <div className="text-sm font-bold text-neutral-700">{from ? `from ${formatPaiseExact(from.price)}` : ''}</div>
                 </div>
               );
             })}

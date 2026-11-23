@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { computeQuote, type ItemSpec, type RateRow } from './pricing';
 
 // Execute the actual migration and its transactional RPCs in PostgreSQL.
 const schema = `
@@ -45,7 +46,8 @@ create table public.order_items (id uuid primary key default gen_random_uuid(), 
  option text, copies int not null default 1, pages int not null default 1, binding public.binding_type not null default 'none',
  lamination boolean not null default false, unit_price_paise int not null default 0, line_total_paise int not null default 0);
 create table public.rate_card (id uuid primary key default gen_random_uuid(), shop_id uuid not null references public.shops(id), service text not null,
- paper_size public.paper_size, color public.color_mode, sides public.sides_mode, paper_gsm int, option text, unit text not null, price_paise int not null);
+ paper_size public.paper_size, color public.color_mode, sides public.sides_mode, paper_gsm int, option text,
+ unit text not null check (unit in ('page','job','sheet')), price_paise int not null);
 create table public.platform_settings (key text primary key, value jsonb not null);
 create table public.payments (order_id uuid primary key references public.orders(id) on delete cascade, provider text not null, amount_paise int not null,
  status text not null, utr text, confirmed_by uuid, confirmed_at timestamptz, raw jsonb not null default '{}'::jsonb, updated_at timestamptz default now());
@@ -72,6 +74,7 @@ beforeAll(async () => {
   await query('insert into public.shops(id,owner_id,name,upi_id) values ($1,$2,$3,$4)', [existingShop, owner, 'Existing', 'shop@upi']);
   await db.exec(readFileSync('supabase/migrations/0010_order_draft_safeguards.sql', 'utf8'));
   await db.exec(readFileSync('supabase/migrations/0011_subscriptions.sql', 'utf8'));
+  await db.exec(readFileSync('supabase/migrations/0016_duplex_sheet_rates.sql', 'utf8'));
   actualBackfill = (await query("select shop_id, term, extract(epoch from expires_at-started_at)::int as seconds from public.shop_subscriptions")).rows;
 }, 30000);
 afterAll(async () => { await db?.close(); });
@@ -221,6 +224,45 @@ describe('subscription migration and payment transactions', () => {
     await rpc('submit_upi_payment', [testOrder, 'CUSTOMER-REF']);
     await rpc('decide_shop_upi_payment', [testOrder, existingShop, 'confirm', owner, null]);
     expect((await query('select status, payment_status from public.orders where id=$1', [testOrder])).rows[0]).toEqual({ status: 'queued', payment_status: 'confirmed' });
+  });
+
+  it('commits a reviewed physical-sheet quote through the current checkout transaction', async () => {
+    const firstId = '33333333-3333-4333-8333-333333333333';
+    const secondId = '44444444-4444-4444-8444-444444444444';
+    const rateId = '55555555-5555-4555-8555-555555555555';
+    await query('insert into public.orders(id,shop_id) values ($1,$2)', [testOrder, existingShop]);
+    await query("insert into public.order_items(id,order_id,service,sides,pages,copies) values ($1,$2,'print','duplex',5,2),($3,$2,'print','duplex',1,2)", [firstId, testOrder, secondId]);
+    await query("insert into public.rate_card(id,shop_id,service,paper_size,color,sides,paper_gsm,unit,price_paise) values ($1,$2,'print','A4','bw','duplex',80,'duplex_sheet',300)", [rateId, existingShop]);
+    const items: ItemSpec[] = [
+      { file_id: 'file-a', service: 'print', paper_size: 'A4', color: 'bw', sides: 'duplex', paper_gsm: 80, pages: 5, copies: 2 },
+      { file_id: 'file-b', service: 'print', paper_size: 'A4', color: 'bw', sides: 'duplex', paper_gsm: 80, pages: 1, copies: 2 },
+    ];
+    const rate: RateRow = { service: 'print', paper_size: 'A4', color: 'bw', sides: 'duplex', paper_gsm: 80, option: null, unit: 'duplex_sheet', price_paise: 300 };
+    const quote = computeQuote(items, [rate], { gstBps: 1800 });
+    const version = (await query('select draft_version from public.orders where id=$1', [testOrder])).rows[0].draft_version;
+    const snapshot = (await query("select jsonb_build_object('name',name,'upi_id',upi_id,'eta_minutes',eta_minutes,'rush_surcharge_bps',rush_surcharge_bps,'status',status) as shop from public.shops where id=$1", [existingShop])).rows[0].shop;
+    const rates = (await query(`select jsonb_agg(to_jsonb(r) order by r.id) as rates from
+      (select id,service,paper_size,color,sides,paper_gsm,option,unit,price_paise from public.rate_card where shop_id=$1) r`, [existingShop])).rows[0].rates;
+    const lines = [firstId, secondId].map((id, index) => ({ id, unit_price_paise: quote.lines[index].unitPricePaise, line_total_paise: quote.lines[index].lineTotalPaise }));
+    const checkout = { method: 'cod', customer_name: 'Customer', customer_phone: '9797000000', subtotal_paise: quote.subtotalPaise, tax_paise: quote.taxPaise, total_paise: quote.totalPaise, pricing_engine: 'duplex-v1', quote_token: 'a'.repeat(64) };
+    const args = [testOrder, version, JSON.stringify(rates), 1800, JSON.stringify(snapshot), JSON.stringify(lines), JSON.stringify(checkout)];
+    const oldCheckout = { ...checkout, pricing_engine: undefined };
+    const oldArgs = [...args.slice(0, 6), JSON.stringify(oldCheckout)];
+    // An old server cannot commit its incorrect pages × copies calculation,
+    // even if the physical-sheet row was added after its snapshot was read.
+    await expect(rpc('commit_draft_checkout', oldArgs)).rejects.toThrow('PRICING_CHANGED');
+    await expect(rpc('commit_draft_checkout', [testOrder, version, '[]', 1800, JSON.stringify(snapshot), JSON.stringify(lines), JSON.stringify(oldCheckout)])).rejects.toThrow('PRICING_CHANGED');
+    expect((await query('select total_paise,payment_method from public.orders where id=$1', [testOrder])).rows[0]).toEqual({ total_paise: 0, payment_method: null });
+
+    await query('update public.rate_card set price_paise=350 where id=$1', [rateId]);
+    await expect(rpc('commit_draft_checkout', args)).rejects.toThrow('PRICING_CHANGED');
+    expect((await query('select total_paise,payment_method from public.orders where id=$1', [testOrder])).rows[0]).toEqual({ total_paise: 0, payment_method: null });
+    await query('update public.rate_card set price_paise=300 where id=$1', [rateId]);
+    await rpc('commit_draft_checkout', args);
+    await query('update public.rate_card set price_paise=900 where id=$1', [rateId]);
+    expect((await query('select subtotal_paise,tax_paise,total_paise,commission_paise,status from public.orders where id=$1', [testOrder])).rows[0]).toEqual({ subtotal_paise: 2400, tax_paise: 432, total_paise: 2832, commission_paise: 0, status: 'queued' });
+    expect((await query('select id,line_total_paise from public.order_items where order_id=$1 order by id', [testOrder])).rows).toEqual([{ id: firstId, line_total_paise: 1800 }, { id: secondId, line_total_paise: 600 }]);
+    expect((await query('select amount_paise from public.payments where order_id=$1', [testOrder])).rows[0]).toEqual({ amount_paise: 2832 });
   });
 
   it('restricts expired staff RLS reads to open or started-UPI orders and hides inventory', async () => {

@@ -13,6 +13,7 @@ import { isPreviewable, isWord } from '@/lib/document-shared';
 import { formatPaiseExact, formatDateTime, timeAgo } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { SERVICE_LABEL } from '@/lib/constants';
+import { duplexSheets } from '@/lib/duplex';
 
 interface Detail {
   order: Record<string, unknown> & {
@@ -153,15 +154,24 @@ export function ShopOrderDetail({ backHref = '/shop' }: { backHref?: string }) {
                 <tbody className="divide-y divide-neutral-100">
                   {detail.items.map((i) => (
                     <tr key={i.id}>
-                      <td className="py-2 pr-2 font-semibold">{SERVICE_LABEL[i.service] ?? i.service}{i.option ? ` · ${i.option}` : ''}</td>
+                      <td className="py-2 pr-2 font-semibold">
+                        {SERVICE_LABEL[i.service] ?? i.service}{i.option ? ` · ${i.option}` : ''}
+                        {i.file_id && <span className="block max-w-40 break-all text-[10px] font-normal text-neutral-500">{detail.files.find((file) => file.id === i.file_id)?.original_name ?? 'File unavailable'}</span>}
+                      </td>
                       <td className="py-2 pr-2 text-neutral-600">{i.service === 'bind' || i.service === 'laminate' ? (i.paper_size ?? '') : `${i.paper_size} · ${i.color === 'color' ? 'Colour' : 'B&W'}${i.sides === 'duplex' ? ' · Duplex' : ''} · ${i.paper_gsm}gsm`}</td>
-                      <td className="py-2 pr-2 text-right tabular-nums">{i.service === 'bind' ? `×${i.copies}` : `${i.pages}p ×${i.copies}`}</td>
+                      <td className="py-2 pr-2 text-right tabular-nums">
+                        {i.service === 'bind' ? `×${i.copies}` : `${i.pages}p ×${i.copies}`}
+                        {(i.service === 'print' || i.service === 'photocopy') && i.sides === 'duplex' && <span className="block text-[10px] text-neutral-500">{duplexSheets(i.pages, i.copies)} sheets needed</span>}
+                      </td>
                       <td className="py-2 text-right tabular-nums">{formatPaiseExact(i.line_total_paise)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+            {detail.items.some((item) => (item.service === 'print' || item.service === 'photocopy') && item.sides === 'duplex') && <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-950">
+              <strong>Double-sided instructions:</strong> print each whole file in order, with pages 1/2, 3/4 and so on on opposite sides. Leave an odd last page’s back blank. Start each file and copy on a fresh sheet; print copies separately if needed. Select two-sided and one page per side in the printer dialog, check the flip edge, and inspect the paper. Sheet counts above describe paper needed, not necessarily the billing unit.
+            </div>}
             <div className="border-t border-neutral-100 mt-2 pt-2 text-xs text-neutral-600 space-y-1">
               <div className="flex justify-between"><span>Subtotal</span><span className="tabular-nums">{formatPaiseExact(o.subtotal_paise)}</span></div>
               <div className="flex justify-between"><span>GST + any rush fee</span><span className="tabular-nums">{formatPaiseExact(o.tax_paise)}</span></div>
