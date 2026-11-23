@@ -5,8 +5,10 @@ import { NextResponse } from 'next/server';
 import { createAdminSupabase } from '@/lib/supabase';
 
 export type PublicRateBucket = 'signup' | 'name_check' | 'order_start' | 'dropbox_import' | 'order_feedback'
-  | 'login_attempt' | 'upload_issue' | 'file_processing' | 'draft_changes' | 'checkout' | 'tracking';
+  | 'login_attempt' | 'upload_issue' | 'file_processing' | 'draft_changes' | 'checkout' | 'tracking'
+  | 'support_create' | 'support_access' | 'support_message';
 type DraftRateBucket = 'draft_upload_issue' | 'draft_dropbox_import';
+type ScopedRateBucket = 'tracking_order' | 'support_ticket_message';
 
 function canonicalIp(address: string): string | null {
   const value = address.trim();
@@ -31,17 +33,32 @@ function canonicalIp(address: string): string | null {
  * with one client IP and prevents direct access. Next.js can synthesize
  * x-forwarded-for from a peer address, so it is not a safe fallback here.
  */
-export async function enforcePublicRateLimit(req: Request, bucket: PublicRateBucket): Promise<Response | null> {
+function trustedClientIp(req: Request): string | null {
   const vercel = process.env.VERCEL === '1';
   const trustedProxy = vercel || process.env.PRINTLY_TRUST_PROXY_IP === '1';
   const forwarded = vercel
     ? req.headers.get('x-vercel-forwarded-for') ?? ''
     : trustedProxy ? req.headers.get('x-printly-client-ip') ?? '' : '';
-  const ip = trustedProxy ? canonicalIp(forwarded) : process.env.NODE_ENV !== 'production' ? 'local-development' : null;
+  return trustedProxy ? canonicalIp(forwarded) : process.env.NODE_ENV !== 'production' ? 'local-development' : null;
+}
+
+export async function enforcePublicRateLimit(req: Request, bucket: PublicRateBucket): Promise<Response | null> {
+  const ip = trustedClientIp(req);
   const secret = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!ip || !secret) return unavailable();
   const clientHash = createHmac('sha256', secret).update(`printly-public-rate-v1:${ip}`).digest('hex');
   return consume(bucket, clientHash);
+}
+
+/** Retain a broad per-IP ceiling while isolating tracking use by order on shared Wi-Fi. */
+export async function enforceTrackingRateLimit(req: Request, orderId: string): Promise<Response | null> {
+  const ip = trustedClientIp(req);
+  const secret = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!ip || !secret || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId)) return unavailable();
+  const aggregate = await enforcePublicRateLimit(req, 'tracking');
+  if (aggregate) return aggregate;
+  const scopedHash = createHmac('sha256', secret).update(`printly-tracking-order-v1:${ip}:${orderId.toLowerCase()}`).digest('hex');
+  return consume('tracking_order', scopedHash);
 }
 
 /**
@@ -74,7 +91,15 @@ export async function enforceSubscriptionPromoRateLimit(shopId: string, actorId:
   return consume('checkout', subjectHash);
 }
 
-async function consume(bucket: PublicRateBucket | DraftRateBucket, clientHash: string): Promise<Response | null> {
+/** Limit replies to one private support conversation even if its author changes IP. */
+export async function enforceSupportTicketLimit(ticketId: string): Promise<Response | null> {
+  const secret = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!secret || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(ticketId)) return unavailable();
+  const hash = createHmac('sha256', secret).update(`printly-support-ticket-rate-v1:${ticketId.toLowerCase()}`).digest('hex');
+  return consume('support_ticket_message', hash);
+}
+
+async function consume(bucket: PublicRateBucket | DraftRateBucket | ScopedRateBucket, clientHash: string): Promise<Response | null> {
   try {
     const { data, error } = await createAdminSupabase().rpc('consume_public_rate_limit', { p_bucket: bucket, p_client_hash: clientHash });
     if (error || !data || typeof data.allowed !== 'boolean') return unavailable();

@@ -36,7 +36,7 @@ describe('shop print dialog duplex instructions', () => {
     expect(screen.getByText(/select two-sided printing and one page per side/i)).toBeTruthy();
     expect(screen.getByText(/blank final page/i)).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Open print dialog' }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(screen.getByRole('checkbox'));
+    screen.getAllByRole('checkbox').forEach((checkbox) => fireEvent.click(checkbox));
     fireEvent.click(screen.getByRole('button', { name: 'Open print dialog' }));
     await waitFor(() => expect(mocks.print).toHaveBeenCalledWith(mocks.doc, 'A4', 'portrait', 'duplex'));
     expect(checked).not.toHaveBeenCalled();
@@ -54,7 +54,7 @@ describe('shop print dialog duplex instructions', () => {
   it('does not apply duplex preparation to single-sided orders', async () => {
     render(<PrintFileDialog url="/file" mime="application/pdf" name="file.pdf" specs={[{ ...spec, sides: 'single' }]} onClose={vi.fn()} onChecked={vi.fn()} />);
     expect(screen.queryByText(/sheet\(s\) per copy/i)).toBeNull();
-    fireEvent.click(screen.getByRole('checkbox'));
+    screen.getAllByRole('checkbox').forEach((checkbox) => fireEvent.click(checkbox));
     fireEvent.click(screen.getByRole('button', { name: 'Open print dialog' }));
     await waitFor(() => expect(mocks.print).toHaveBeenCalledWith(mocks.doc, 'A4', 'portrait', 'single'));
   });

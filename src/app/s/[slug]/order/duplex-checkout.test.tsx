@@ -7,6 +7,7 @@ import { computeQuote, type ItemSpec, type RateRow } from '@/lib/pricing';
 vi.mock('next/navigation', () => ({ useParams: () => ({ slug: 'p-demo1' }), useRouter: () => ({ push: vi.fn() }) }));
 vi.mock('next/link', () => ({ default: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => <a href={href} {...props}>{children}</a> }));
 vi.mock('@/lib/supabase-client', () => ({ createBrowserSupabase: () => ({ storage: { from: () => ({ uploadToSignedUrl: async () => ({ error: null }) }) } }) }));
+vi.mock('@/lib/resumable-upload', () => ({ createResumableTransfer: ({ onProgress }: { onProgress: (sent: number, total: number) => void }) => ({ start: async () => { onProgress(100, 100); }, abort: async () => {} }) }));
 import OrderWizard from './page';
 
 const order = '11111111-1111-4111-8111-111111111111';

@@ -1,7 +1,9 @@
 export type MaintenanceNotice = 'maintenance' | 'unavailable';
 
 export const MAINTENANCE_STATUS_PATH = '/api/maintenance-status';
-export const MAINTENANCE_CHECK_INTERVAL_MS = 30_000;
+// All requests are independently checked by middleware. Open pages poll less
+// often to reduce background traffic; focus/visibility still check immediately.
+export const MAINTENANCE_CHECK_INTERVAL_MS = 60_000;
 
 export const MAINTENANCE_COPY: Record<MaintenanceNotice, { label: string; title: string; message: string }> = {
   maintenance: {

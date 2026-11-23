@@ -9,12 +9,15 @@ import {
   ChevronLeft, ShieldCheck, Smartphone, Banknote, Link2, FolderInput, Trash2, Zap, Wallet, Eye, RefreshCw,
 } from 'lucide-react';
 import { Logo } from '@/components/Logo';
+import { CustomerLanguagePicker } from '@/components/CustomerLanguagePicker';
+import { useCustomerLanguage } from '@/lib/customer-language';
 import { BrandedQr } from '@/components/BrandedQr';
 import { BrandMark } from '@/components/BrandArtwork';
 import { DocumentEditor } from '@/components/DocumentEditor';
 import { paymentQrPlan } from '@/lib/payment-qr';
 import { fileMime, isPreviewable, isWord, MAX_DOCUMENT_BYTES, MAX_DOCUMENT_PAGES } from '@/lib/document-shared';
 import { createBrowserSupabase } from '@/lib/supabase-client';
+import { createResumableTransfer, type ResumableTransfer } from '@/lib/resumable-upload';
 import { cn } from '@/lib/utils';
 import { formatPaiseExact } from '@/lib/format';
 import { duplexSheets } from '@/lib/duplex';
@@ -31,7 +34,11 @@ interface UploadedFile {
   size: number;
   page_count: number | null;
   source: 'upload' | 'dropbox';
-  state: 'uploading' | 'ready' | 'removing' | 'error';
+  state: 'uploading' | 'verifying' | 'ready' | 'removing' | 'error';
+  progress?: number;
+  transferComplete?: boolean;
+  removalFailed?: boolean;
+  mustRemove?: boolean;
   error?: string;
   localFile?: File;
   pendingId?: string;
@@ -59,6 +66,7 @@ export default function OrderWizard() {
 }
 
 function OrderWizardForShop({ slug }: { slug: string }) {
+  const { language, setLanguage, t } = useCustomerLanguage();
   const router = useRouter();
   const [shopData, setShopData] = useState<ShopPublic | null>(null);
   const [step, setStep] = useState<Step>('service');
@@ -105,7 +113,21 @@ function OrderWizardForShop({ slug }: { slug: string }) {
   // Refs, not rendered state, coordinate simultaneous calls before React rerenders.
   const draft = useRef<{ slug: string; id: string | null; pending: Promise<string | null> | null }>({ slug, id: null, pending: null });
   const importingDropbox = useRef(false);
+  const transfers = useRef(new Map<string, { transfer: ResumableTransfer; fileId: string; path: string; uploaded: boolean }>());
+  const cancelledTransfers = useRef(new Set<string>());
+  const activeTransfers = useRef(new Set<string>());
+  const uploadGeneration = useRef(0);
   if (draft.current.slug !== slug) draft.current = { slug, id: null, pending: null };
+  useEffect(() => {
+    const current = transfers.current;
+    return () => {
+      // An order/presign request may still be pending when this wizard unmounts.
+      // Its eventual response must not start an invisible transfer or finalize.
+      uploadGeneration.current++;
+      for (const attempt of current.values()) void attempt.transfer.abort().catch(() => {});
+      current.clear();
+    };
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -155,54 +177,93 @@ function OrderWizardForShop({ slug }: { slug: string }) {
 
   const uploadOne = useCallback(async (file: File, retry?: UploadedFile) => {
     const localId = retry?.id ?? crypto.randomUUID();
+    if (activeTransfers.current.has(localId)) return;
+    activeTransfers.current.add(localId);
+    const generation = uploadGeneration.current;
+    const stopped = () => uploadGeneration.current !== generation || cancelledTransfers.current.has(localId);
     const mime = fileMime(file.name, file.type || 'application/octet-stream');
+    cancelledTransfers.current.delete(localId);
     if (retry) setFiles((all) => all.map((entry) => entry.id === localId ? { ...entry, state: 'uploading', error: undefined } : entry));
-    else setFiles((all) => [...all, { id: localId, name: file.name, mime, size: file.size, page_count: null, source: 'upload', state: 'uploading', localFile: file }]);
+    else setFiles((all) => [...all, { id: localId, name: file.name, mime, size: file.size, page_count: null, source: 'upload', state: 'uploading', progress: 0, localFile: file }]);
     let pendingId = retry?.pendingId;
     let pendingPath = retry?.pendingPath;
+    let mustRemove = false;
     try {
       const oid = await ensureOrder();
+      if (stopped()) return;
       if (!oid) throw new Error('Could not start the order. Please try again.');
       if (!isPreviewable(mime) && !isWord(mime)) throw new Error('Only PDF, Word, JPEG and PNG files are supported.');
       if (!file.size || file.size > MAX_DOCUMENT_BYTES) throw new Error('File must be non-empty and no larger than 25 MB.');
-      // A failed request may already have uploaded or finalized the previous attempt.
-      if (pendingId && pendingPath) {
-        await removeUpload(oid, pendingId, pendingPath);
-        pendingId = undefined; pendingPath = undefined;
+      let attempt = transfers.current.get(localId);
+      if (!attempt) {
+        // Never abandon a known pending path if setup failed before the
+        // resumable transfer was created. Tombstone and clean it first.
+        if (pendingId && pendingPath) {
+          await removeUpload(oid, pendingId, pendingPath);
+          if (stopped()) return;
+          pendingId = undefined; pendingPath = undefined;
+        }
+        // A retry after an interrupted transfer reuses its existing path and
+        // token. Only a new attempt obtains another signed link.
+        const presign = await fetch(`/api/orders/${oid}/files`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: file.name, mime, size: file.size }),
+        });
+        const pdata = await presign.json().catch(() => ({}));
+        if (stopped()) return;
+        if (!presign.ok || typeof pdata.file_id !== 'string' || typeof pdata.path !== 'string' || typeof pdata.token !== 'string') throw new Error(pdata?.error?.message ?? 'Upload rejected');
+        pendingId = pdata.file_id; pendingPath = pdata.path;
+        setFiles((all) => all.map((entry) => entry.id === localId ? { ...entry, pendingId, pendingPath } : entry));
+        const transfer = createResumableTransfer({ file, mime, path: pdata.path, token: pdata.token, onProgress: (sent, total) => {
+          if (stopped()) return;
+          const progress = total > 0 ? Math.min(100, Math.floor(sent * 100 / total)) : 0;
+          setFiles((all) => all.map((entry) => entry.id === localId && entry.state === 'uploading' && entry.progress !== progress ? { ...entry, progress } : entry));
+        } });
+        attempt = { transfer, fileId: pdata.file_id, path: pdata.path, uploaded: false };
+        transfers.current.set(localId, attempt);
       }
-      const presign = await fetch(`/api/orders/${oid}/files`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: file.name, mime, size: file.size }),
+      pendingId = attempt.fileId; pendingPath = attempt.path;
+      if (!attempt.uploaded) { await attempt.transfer.start(); attempt.uploaded = true; }
+      if (stopped()) return;
+      setFiles((all) => all.map((entry) => entry.id === localId ? { ...entry, progress: 100, transferComplete: true, state: 'verifying' } : entry));
+      const finalize = () => fetch(`/api/orders/${oid}/files/${attempt!.fileId}/finalize`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: attempt!.path, original_name: file.name, mime }),
       });
-      const pdata = await presign.json().catch(() => ({}));
-      if (!presign.ok) throw new Error(pdata?.error?.message ?? 'Upload rejected');
-      pendingId = pdata.file_id; pendingPath = pdata.path;
-      setFiles((all) => all.map((entry) => entry.id === localId ? { ...entry, pendingId, pendingPath } : entry));
-      const supabase = createBrowserSupabase();
-      // Supabase sends Blobs as multipart; its part MIME comes from the File, not the option.
-      const upload = file.type === mime ? file : new File([file], file.name, { type: mime, lastModified: file.lastModified });
-      const { error } = await supabase.storage.from('order-files').uploadToSignedUrl(pdata.path, pdata.token, upload, { contentType: mime });
-      if (error) throw new Error(error.message);
-      const fin = await fetch(`/api/orders/${oid}/files/${pdata.file_id}/finalize`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: pdata.path, original_name: file.name, mime }),
-      });
+      // Finalization is idempotent: a lost response must not create another upload.
+      let fin: Response;
+      try { fin = await finalize(); } catch {
+        if (stopped()) return;
+        fin = await finalize();
+      }
+      if (stopped()) return;
       const fdata = await fin.json().catch(() => ({}));
-      if (!fin.ok) throw new Error(fdata?.error?.message ?? 'Could not read file');
+      if (!fin.ok) {
+        // Validation may have tombstoned the object, but cleanup can fail.
+        // Retain its ID/path until the explicit removal succeeds.
+        if (fin.status === 422) mustRemove = true;
+        throw new Error(fdata?.error?.message ?? 'Could not verify the file. Please retry.');
+      }
+      if (stopped()) return;
+      transfers.current.delete(localId);
       setFiles((all) => all.map((entry) => entry.id === localId ? { ...entry, id: fdata.file_id, page_count: fdata.page_count, state: 'ready', localFile: undefined, pendingId: undefined, pendingPath: undefined } : entry));
     } catch (err) {
-      setFiles((all) => all.map((entry) => entry.id === localId ? { ...entry, state: 'error', pendingId, pendingPath, error: err instanceof Error ? err.message : 'Upload failed' } : entry));
-    }
+      if (!stopped()) setFiles((all) => all.map((entry) => entry.id === localId ? { ...entry, state: 'error', pendingId, pendingPath, mustRemove, error: err instanceof Error ? err.message : 'Upload failed' } : entry));
+    } finally { activeTransfers.current.delete(localId); }
   }, [ensureOrder, removeUpload]);
 
   const removeFile = useCallback(async (file: UploadedFile) => {
+    cancelledTransfers.current.add(file.id);
     setFiles((all) => all.map((entry) => entry.id === file.id ? { ...entry, state: 'removing' } : entry));
     try {
+      const attempt = transfers.current.get(file.id);
+      if (attempt) await attempt.transfer.abort();
       if (orderId && (file.state === 'ready' || file.pendingId)) await removeUpload(orderId, file.pendingId ?? file.id, file.pendingPath);
+      transfers.current.delete(file.id);
       setFiles((all) => all.filter((entry) => entry.id !== file.id));
     } catch (err) {
       setBanner(err instanceof Error ? err.message : 'Could not remove this file. Please retry.');
       // The server may already have detached the file even if storage cleanup
       // failed. Keep checkout disabled until removal is successfully retried.
-      setFiles((all) => all.map((entry) => entry.id === file.id ? { ...file, state: 'error', pendingId: file.pendingId ?? (file.state === 'ready' ? file.id : undefined), error: 'Removal was not completed. Please retry removal.' } : entry));
+      setFiles((all) => all.map((entry) => entry.id === file.id ? { ...file, state: 'error', removalFailed: true, pendingId: file.pendingId ?? (file.state === 'ready' ? file.id : undefined), error: 'Removal was not completed. Please retry removal.' } : entry));
     }
   }, [orderId, removeUpload]);
 
@@ -347,7 +408,7 @@ function OrderWizardForShop({ slug }: { slug: string }) {
   const totalDuplexSheets = useMemo(() => files.filter((f) => f.state === 'ready').reduce((sum, f) => sum + duplexSheets(f.page_count ?? 0, copies), 0), [files, copies]);
   const readyCount = files.filter((f) => f.state === 'ready').length;
   const filesComplete = files.length > 0 && files.every((f) => f.state === 'ready' && Number.isInteger(f.page_count) && (f.page_count ?? 0) >= 1 && (f.page_count ?? 0) <= MAX_DOCUMENT_PAGES);
-  const fileOperations = files.some((f) => f.state === 'uploading' || f.state === 'removing');
+  const fileOperations = files.some((f) => f.state === 'uploading' || f.state === 'verifying' || f.state === 'removing');
   const hasDropboxChooser = !!process.env.NEXT_PUBLIC_DROPBOX_APP_KEY;
 
   const submitPayment = useCallback(async () => {
@@ -411,13 +472,13 @@ function OrderWizardForShop({ slug }: { slug: string }) {
   const shopName = shopData?.shop.name ?? '…';
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(1200px_600px_at_50%_-10%,#ffedd5,transparent)]">
+    <div lang={language} dir={language === 'ur' ? 'rtl' : 'ltr'} className="min-h-screen bg-[radial-gradient(1200px_600px_at_50%_-10%,#ffedd5,transparent)]">
       <header className="max-w-lg mx-auto px-4 h-14 flex items-center justify-between gap-3 no-print">
         <div className="flex min-w-0 items-center gap-1">
           {step !== 'service' && <button disabled={busy} aria-label="Go back" onClick={() => { const prev: Record<Step, Step | null> = { service: null, files: 'service', options: 'files', checkout: 'options', upi: null }; const p = prev[step]; if (p) setStep(p); }} className="p-2 -ml-2 text-neutral-500 disabled:opacity-40"><ChevronLeft size={22} /></button>}
           <Logo />
         </div>
-        <span className="min-w-0 text-xs font-semibold text-neutral-500 max-w-[60%] truncate">{shopName}</span>
+        <span className="min-w-0 flex-1 text-xs font-semibold text-neutral-500 truncate">{shopName}</span><CustomerLanguagePicker language={language} onChange={setLanguage} />
       </header>
 
       {/* progress dots */}
@@ -436,11 +497,12 @@ function OrderWizardForShop({ slug }: { slug: string }) {
       )}
 
       <main className="max-w-lg mx-auto px-4 mt-4 pb-20">
+        {language !== 'en' && <p className="mb-3 text-xs text-neutral-600">{t.limitedTranslation}</p>}
         {/* STEP 1 — service */}
         {step === 'service' && (
           <section>
-            <h1 className="text-2xl font-extrabold tracking-tight">What do you need?</h1>
-            <p className="text-sm text-neutral-500 mt-1">Pick a service to get started.</p>
+            <h1 className="text-2xl font-extrabold tracking-tight">{t.whatNeed}</h1>
+            <p className="text-sm text-neutral-500 mt-1">{t.pickService}</p>
             {shopLoading && <p className="mt-5 text-sm text-neutral-500" role="status">Loading services…</p>}
             {!shopLoading && shopData && !shopData.accepting_orders && <p role="status" className="mt-5 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">This shop is not accepting orders right now. Please check back soon.</p>}
             {!shopLoading && shopData && !shopData.services.some((s) => s.enabled) && <p className="mt-5 text-sm text-neutral-500">This shop has no services available right now.</p>}
@@ -458,9 +520,9 @@ function OrderWizardForShop({ slug }: { slug: string }) {
                         <Icon size={26} className="text-orange-700" />
                         {activeSel && <CheckCircle2 size={20} className="text-orange-700" aria-hidden="true" />}
                       </span>
-                      <div className="mt-2 font-bold">{M.label}</div>
+                      <div className="mt-2 font-bold">{t[s]}</div>
                       <div className="text-[11px] text-neutral-600">{M.blurb}</div>
-                      {activeSel && <span className="mt-2 block text-xs font-bold text-orange-800">Selected</span>}
+                      {activeSel && <span className="mt-2 block text-xs font-bold text-orange-800">{t.selected}</span>}
                     </button>
                   );
                 })}
@@ -470,15 +532,16 @@ function OrderWizardForShop({ slug }: { slug: string }) {
               try { if (await ensureOrder()) setStep('files'); }
               catch { setBanner('Could not start the order. Please try again.'); }
               finally { setBusy(false); }
-            }} className="btn btn-primary w-full h-13 py-4 text-lg mt-6">{busy ? 'Starting order…' : 'Continue'}</button>
+            }} className="btn btn-primary w-full h-13 py-4 text-lg mt-6">{busy ? t.starting : t.continue}</button>
           </section>
         )}
 
         {/* STEP 2 — files */}
         {step === 'files' && (
           <section>
-            <h1 className="text-2xl font-extrabold tracking-tight">Add your files</h1>
-            <p className="text-sm text-neutral-500 mt-1">PDF, Word, JPEG or PNG · max 25 MB each · up to 10 files · images up to 40 megapixels</p>
+            <h1 className="text-2xl font-extrabold tracking-tight">{t.addFiles}</h1>
+            <p className="text-sm text-neutral-500 mt-1">{t.fileLimit}</p>
+            <p className="mt-2 text-xs text-neutral-600">{t.keepTab}</p>
 
             <input ref={fileInput} type="file" multiple accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" className="hidden" disabled={dropboxBusy}
               onChange={(event) => {
@@ -492,7 +555,7 @@ function OrderWizardForShop({ slug }: { slug: string }) {
 
             <button type="button" disabled={dropboxBusy || files.length >= 10} onClick={() => fileInput.current?.click()} className="mt-5 w-full rounded-2xl border-2 border-dashed border-orange-300 bg-orange-50/60 py-10 grid place-items-center transition-colors hover:bg-orange-50 disabled:opacity-50">
               <UploadCloud size={36} className="text-orange-600" />
-              <span className="mt-2 font-bold text-orange-900">Tap to upload from device</span>
+              <span className="mt-2 font-bold text-orange-900">{t.uploadDevice}</span>
               <span className="text-xs text-orange-800/60 mt-1">Gallery, Drive downloads, file manager…</span>
             </button>
 
@@ -520,18 +583,20 @@ function OrderWizardForShop({ slug }: { slug: string }) {
                     <div className="min-w-0 flex-1">
                       <div className="break-all text-sm font-semibold">{f.name}</div>
                       <div className="text-[11px] text-neutral-500">
-                        {f.state === 'uploading' && 'Uploading…'}
-                        {f.state === 'removing' && 'Removing…'}
-                        {f.state === 'ready' && `${f.page_count === null ? 'Page count needed' : `${f.page_count} page${f.page_count !== 1 ? 's' : ''}`} · ${f.source === 'dropbox' ? 'from Dropbox' : 'uploaded'}`}
+                        {f.state === 'uploading' && `${t.uploading}… ${f.progress ?? 0}%`}
+                        {f.state === 'verifying' && t.checking}
+                        {f.state === 'removing' && t.removing}
+                        {f.state === 'ready' && `${f.page_count === null ? t.pageCountNeeded : `${f.page_count} page${f.page_count !== 1 ? 's' : ''}`} · ${f.source === 'dropbox' ? 'from Dropbox' : 'uploaded'}`}
                         {f.state === 'error' && <span role="alert" className="text-red-700">{f.error}</span>}
                       </div>
                     </div>
-                    {(f.state === 'uploading' || f.state === 'removing') && <Loader2 size={18} className="shrink-0 animate-spin text-orange-600" />}
+                    {(f.state === 'uploading' || f.state === 'verifying' || f.state === 'removing') && <Loader2 size={18} className="shrink-0 animate-spin text-orange-600" />}
                     {f.state === 'ready' && <CheckCircle2 size={18} className="shrink-0 text-green-600" />}
                   </div>
+                  {f.state === 'uploading' && <progress aria-label={`${t.uploading} ${f.name}`} max={100} value={f.progress ?? 0} className="mt-2 h-2 w-full accent-orange-600" />}
                   {f.state === 'ready' && isWord(f.mime) && <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-                    <p>Word cannot be previewed or counted here. Open it in Word and enter the number of pages; the price depends on this count. The shop will verify the layout.</p>
-                    <label className="mt-2 block font-bold">Pages in this Word file
+                    <p>{t.wordWarning}</p>
+                    <label className="mt-2 block font-bold">{t.wordPages}
                       <input type="number" min="1" max={MAX_DOCUMENT_PAGES} value={f.page_count ?? ''} placeholder="Enter page count" className="input mt-1 h-10 text-sm" onChange={(event) => {
                         const value = Number(event.target.value);
                         setFiles((all) => all.map((entry) => entry.id === f.id ? { ...entry, page_count: Number.isInteger(value) && value >= 1 && value <= MAX_DOCUMENT_PAGES ? value : null } : entry));
@@ -539,16 +604,16 @@ function OrderWizardForShop({ slug }: { slug: string }) {
                     </label>
                   </div>}
                   <div className="mt-2 flex flex-wrap gap-2 pl-8">
-                    {f.state === 'ready' && isPreviewable(f.mime) && <button type="button" onClick={() => setEditingFile(f)} className="btn btn-ghost min-h-9 px-3 text-xs"><Eye size={14} />Preview &amp; edit</button>}
-                    {f.state === 'error' && f.localFile && <button type="button" onClick={() => void uploadOne(f.localFile!, f)} className="btn btn-ghost min-h-9 px-3 text-xs"><RefreshCw size={14} />Retry upload</button>}
-                    {(f.state === 'ready' || f.state === 'error') && <button type="button" onClick={() => void removeFile(f)} className="btn btn-ghost min-h-9 px-3 text-xs text-red-700"><Trash2 size={14} />Remove</button>}
+                    {f.state === 'ready' && isPreviewable(f.mime) && <button type="button" onClick={() => setEditingFile(f)} className="btn btn-ghost min-h-9 px-3 text-xs"><Eye size={14} />{t.previewEdit}</button>}
+                    {f.state === 'error' && f.localFile && !f.removalFailed && !f.mustRemove && <button type="button" onClick={() => void uploadOne(f.localFile!, f)} className="btn btn-ghost min-h-9 px-3 text-xs"><RefreshCw size={14} />{f.transferComplete ? t.retryCheck : t.resume}</button>}
+                    {(f.state === 'ready' || f.state === 'error' || ((f.state === 'uploading' || f.state === 'verifying') && !!f.pendingId)) && <button type="button" onClick={() => void removeFile(f)} className="btn btn-ghost min-h-9 px-3 text-xs text-red-700"><Trash2 size={14} />{f.state === 'uploading' || f.state === 'verifying' ? t.cancelUpload : f.removalFailed ? t.retryRemoval : t.remove}</button>}
                   </div>
                 </li>
               ))}
             </ul>
-            {files.length > 0 && !filesComplete && <p className="mt-3 text-xs text-neutral-600">Finish uploads, remove errors and enter every Word page count before continuing.</p>}
+            {files.length > 0 && !filesComplete && <p className="mt-3 text-xs text-neutral-600">{t.finishUploads}</p>}
             <button disabled={!filesComplete || dropboxBusy || busy} onClick={async () => { setBusy(true); try { const ok = await pushItems(); if (ok) setStep('options'); } finally { setBusy(false); } }} className="btn btn-primary w-full py-4 text-lg mt-6">
-              {busy ? 'Saving…' : <>Continue {filesComplete && `· ${totalPages} page${totalPages !== 1 ? 's' : ''}`}</>}
+              {busy ? t.saving : <>{t.continue} {filesComplete && `· ${totalPages} page${totalPages !== 1 ? 's' : ''}`}</>}
             </button>
           </section>
         )}
@@ -556,13 +621,13 @@ function OrderWizardForShop({ slug }: { slug: string }) {
         {/* STEP 3 — options */}
         {step === 'options' && (
           <section>
-            <h1 className="text-2xl font-extrabold tracking-tight">Options</h1>
+            <h1 className="text-2xl font-extrabold tracking-tight">{t.options}</h1>
             <p className="text-sm text-neutral-500 mt-1">Applied to all {readyCount} file{readyCount !== 1 ? 's' : ''} · {totalPages} total pages</p>
 
             <div className="card mt-5 p-4 space-y-5">
               {/* copies */}
               <div className="flex items-center justify-between">
-                <div><div className="font-semibold text-sm">Copies</div><div className="text-[11px] text-neutral-400">Sets to print</div></div>
+                <div><div className="font-semibold text-sm">{t.copies}</div><div className="text-[11px] text-neutral-400">Sets to print</div></div>
                 <div className="flex items-center gap-3">
                   <button className="w-9 h-9 rounded-lg bg-neutral-100 font-bold text-lg" onClick={() => setCopies(Math.max(1, copies - 1))}>−</button>
                   <span className="w-8 text-center font-extrabold text-lg">{copies}</span>
@@ -574,16 +639,16 @@ function OrderWizardForShop({ slug }: { slug: string }) {
                 <>
                   {/* color */}
                   <div>
-                    <label className="label">Colour</label>
+                    <label className="label">{t.colour}</label>
                     <div className="grid grid-cols-2 gap-2">
                       {(['bw', 'color'] as const).map((c) => (
-                        <button key={c} onClick={() => setColor(c)} className={cn('h-11 rounded-xl border-2 font-semibold text-sm', color === c ? 'border-orange-600 bg-orange-50 text-orange-900' : 'border-neutral-200')}>{c === 'bw' ? 'Black & White' : 'Colour'}</button>
+                        <button key={c} onClick={() => setColor(c)} className={cn('h-11 rounded-xl border-2 font-semibold text-sm', color === c ? 'border-orange-600 bg-orange-50 text-orange-900' : 'border-neutral-200')}>{c === 'bw' ? t.blackWhite : t.colour}</button>
                       ))}
                     </div>
                   </div>
                   {/* size */}
                   <div>
-                    <label className="label">Paper size</label>
+                    <label className="label">{t.paperSize}</label>
                     <div className="grid grid-cols-4 gap-2">
                       {(['A4', 'A3', 'A5', 'Legal'] as const).map((s) => (
                         <button key={s} onClick={() => setSize(s)} className={cn('h-11 rounded-xl border-2 font-semibold text-sm', size === s ? 'border-orange-600 bg-orange-50 text-orange-900' : 'border-neutral-200')}>{s}</button>
@@ -594,21 +659,21 @@ function OrderWizardForShop({ slug }: { slug: string }) {
                     <>
                       {/* sides */}
                       <div>
-                        <label className="label">Sides</label>
+                        <label className="label">{t.sides}</label>
                         <div className="grid grid-cols-2 gap-2">
                           {(['single', 'duplex'] as const).map((s) => (
-                            <button key={s} type="button" aria-pressed={sides === s} onClick={() => setSides(s)} className={cn('h-11 rounded-xl border-2 font-semibold text-sm capitalize', sides === s ? 'border-orange-600 bg-orange-50 text-orange-900' : 'border-neutral-200')}>{s === 'single' ? 'Single side' : 'Double (duplex)'}</button>
+                            <button key={s} type="button" aria-pressed={sides === s} onClick={() => setSides(s)} className={cn('h-11 rounded-xl border-2 font-semibold text-sm capitalize', sides === s ? 'border-orange-600 bg-orange-50 text-orange-900' : 'border-neutral-200')}>{s === 'single' ? t.single : t.double}</button>
                           ))}
                         </div>
                         {sides === 'duplex' && <div className="mt-2 rounded-xl border border-orange-200 bg-orange-50 p-3 text-xs leading-relaxed text-orange-950">
-                          <p><strong>Whole files, in order:</strong> pages 1 and 2 share a sheet, then 3 and 4, and so on. An odd last page has a blank back. Each file and each copy starts on a new sheet.</p>
-                          <p className="mt-1 font-semibold">{totalDuplexSheets} physical sheet{totalDuplexSheets === 1 ? '' : 's'} needed for {copies} cop{copies === 1 ? 'y' : 'ies'} of each file.</p>
-                          <p className="mt-1">The shop may charge per document page (including blank pages in the file) or per physical sheet. The extra blank reverse is not a document page. Your exact rate and calculation appear at checkout.</p>
+                          <p>{t.duplexWhole}</p>
+                          <p className="mt-1 font-semibold">{language === 'en' ? <>{totalDuplexSheets} physical sheet{totalDuplexSheets === 1 ? '' : 's'} needed for {copies} cop{copies === 1 ? 'y' : 'ies'} of each file.</> : t.duplexSummary.replace('{sheets}', String(totalDuplexSheets)).replace('{copies}', String(copies))}</p>
+                          <p className="mt-1">{t.duplexBilling}</p>
                         </div>}
                       </div>
                       {/* gsm */}
                       <div>
-                        <label className="label">Paper quality</label>
+                        <label className="label">{t.paperQuality}</label>
                         <select value={gsm} onChange={(e) => setGsm(Number(e.target.value))} className="input">
                           {[70, 75, 80, 90, 100].map((g) => <option key={g} value={g}>{g} GSM{g === 80 ? ' (standard)' : g >= 90 ? ' (thick)' : ''}</option>)}
                         </select>
@@ -619,7 +684,7 @@ function OrderWizardForShop({ slug }: { slug: string }) {
                   {(service === 'print' || service === 'photocopy') && (
                     <>
                       <div>
-                        <label className="label">Binding (add-on)</label>
+                        <label className="label">{t.binding}</label>
                         <div className="grid grid-cols-4 gap-2">
                           {(['none', 'staple', 'spiral', 'hard'] as const).map((b) => (
                             <button key={b} onClick={() => setBinding(b)} className={cn('h-11 rounded-xl border-2 font-semibold text-xs capitalize', binding === b ? 'border-orange-600 bg-orange-50 text-orange-900' : 'border-neutral-200')}>{b}</button>
@@ -627,7 +692,7 @@ function OrderWizardForShop({ slug }: { slug: string }) {
                         </div>
                       </div>
                       <button onClick={() => setLamination(!lamination)} className={cn('w-full flex items-center justify-between rounded-xl border-2 px-4 py-3 text-left', lamination ? 'border-orange-600 bg-orange-50' : 'border-neutral-200')}>
-                        <span><span className="font-semibold text-sm">Add lamination</span><br /><span className="text-[11px] text-neutral-500">The shop’s price and billing quantity appear at checkout</span></span>
+                        <span><span className="font-semibold text-sm">{t.addLamination}</span><br /><span className="text-[11px] text-neutral-500">The shop’s price and billing quantity appear at checkout</span></span>
                         <span className={cn('w-6 h-6 rounded-md border-2 grid place-items-center', lamination ? 'bg-orange-600 border-orange-600 text-white' : 'border-neutral-300')}>{lamination && '✓'}</span>
                       </button>
                     </>
@@ -648,33 +713,33 @@ function OrderWizardForShop({ slug }: { slug: string }) {
               )}
             </div>
 
-            <button disabled={busy} onClick={async () => { setBusy(true); try { const ok = await pushItems(); if (ok) setStep('checkout'); } finally { setBusy(false); } }} className="btn btn-primary w-full py-4 text-lg mt-6">{busy ? 'Saving…' : 'Continue to payment'}</button>
+            <button disabled={busy} onClick={async () => { setBusy(true); try { const ok = await pushItems(); if (ok) setStep('checkout'); } finally { setBusy(false); } }} className="btn btn-primary w-full py-4 text-lg mt-6">{busy ? t.saving : t.continuePay}</button>
           </section>
         )}
 
         {/* STEP 4 — checkout */}
         {step === 'checkout' && (
           <section>
-            <h1 className="text-2xl font-extrabold tracking-tight">Almost there</h1>
-            <p className="text-sm text-neutral-500 mt-1">Add your contact details for the shop. Your token appears on the tracking page.</p>
+            <h1 className="text-2xl font-extrabold tracking-tight">{t.almostThere}</h1>
+            <p className="text-sm text-neutral-500 mt-1">{t.contactDetails}</p>
 
             <fieldset disabled={busy} className="card mt-4 p-4 space-y-3">
-              <div><label className="label">Your name *<input value={name} onChange={(e) => setName(e.target.value)} className="input" placeholder="e.g. Aisha Khan" autoComplete="name" /></label></div>
-              <div><label className="label">Phone *<input value={phone} onChange={(e) => setPhone(e.target.value)} className="input" placeholder="97970 00000" inputMode="numeric" autoComplete="tel" /></label></div>
-              <div><label className="label">Email (optional)<input value={email} onChange={(e) => setEmail(e.target.value)} className="input" placeholder="you@example.com" inputMode="email" type="email" /></label></div>
-              <div><label className="label">Notes for the shop<input value={notes} onChange={(e) => setNotes(e.target.value)} className="input" placeholder="e.g. double-sided, spiral on left edge…" /></label></div>
+              <div><label className="label">{t.name} *<input value={name} onChange={(e) => setName(e.target.value)} className="input" placeholder="e.g. Aisha Khan" autoComplete="name" /></label></div>
+              <div><label className="label">{t.phone} *<input value={phone} onChange={(e) => setPhone(e.target.value)} className="input" placeholder="97970 00000" inputMode="numeric" autoComplete="tel" /></label></div>
+              <div><label className="label">{t.email}<input value={email} onChange={(e) => setEmail(e.target.value)} className="input" placeholder="you@example.com" inputMode="email" type="email" /></label></div>
+              <div><label className="label">{t.notes}<input value={notes} onChange={(e) => setNotes(e.target.value)} className="input" placeholder="e.g. double-sided, spiral on left edge…" /></label></div>
             </fieldset>
 
             {/* rush */}
             <button disabled={busy} onClick={() => setRush(!rush)} className={cn('w-full mt-3 flex items-center justify-between rounded-xl border-2 px-4 py-3 text-left disabled:opacity-60', rush ? 'border-orange-600 bg-orange-50' : 'border-neutral-200 bg-white')}>
-              <span><span className="font-semibold text-sm flex items-center gap-1.5"><Zap size={14} className="text-orange-600" />Rush order</span><br /><span className="text-[11px] text-neutral-500">Flag this order as urgent to the shop; any surcharge is shown in the total.</span></span>
+              <span><span className="font-semibold text-sm flex items-center gap-1.5"><Zap size={14} className="text-orange-600" />{t.rush}</span><br /><span className="text-[11px] text-neutral-500">Flag this order as urgent to the shop; any surcharge is shown in the total.</span></span>
               <span className={cn('w-6 h-6 rounded-md border-2 grid place-items-center', rush ? 'bg-orange-600 border-orange-600 text-white' : 'border-neutral-300')}>{rush && '✓'}</span>
             </button>
 
             {/* order summary */}
             {quote && (
               <div className="card mt-3 p-4 text-sm">
-                <div className="flex items-center justify-between font-bold"><span>Order summary</span><span>{readyCount} file{readyCount !== 1 ? 's' : ''}</span></div>
+                <div className="flex items-center justify-between font-bold"><span>{t.orderSummary}</span><span>{readyCount} file{readyCount !== 1 ? 's' : ''}</span></div>
                 <ul className="mt-2 space-y-1 text-neutral-600">
                   {quote.quote.lines.map((line, i) => (
                     <li key={i} className="flex items-start justify-between gap-4 py-1">
@@ -688,32 +753,32 @@ function OrderWizardForShop({ slug }: { slug: string }) {
                   ))}
                 </ul>
                 <div className="border-t border-neutral-100 mt-2 pt-2 space-y-1 text-neutral-600">
-                  <div className="flex justify-between"><span>Subtotal</span><span className="tabular-nums">{formatPaiseExact(quote.quote.subtotalPaise)}</span></div>
+                  <div className="flex justify-between"><span>{t.subtotal}</span><span className="tabular-nums">{formatPaiseExact(quote.quote.subtotalPaise)}</span></div>
                   {quote.quote.rushFeePaise > 0 && <div className="flex justify-between"><span>Rush fee</span><span className="tabular-nums">{formatPaiseExact(quote.quote.rushFeePaise)}</span></div>}
                   <div className="flex justify-between"><span>GST</span><span className="tabular-nums">{formatPaiseExact(quote.quote.taxPaise)}</span></div>
                 </div>
                 <div className="border-t border-neutral-200 mt-2 pt-2 flex justify-between items-baseline">
-                  <span className="font-extrabold">Total payable</span>
+                  <span className="font-extrabold">{t.total}</span>
                   <span className="text-2xl font-extrabold tabular-nums text-orange-700">{formatPaiseExact(quote.quote.totalPaise)}</span>
                 </div>
               </div>
             )}
 
-            {quoteLoading && <p role="status" className="mt-3 text-center text-sm text-neutral-500">Calculating your total…</p>}
-            {!quoteLoading && !quote && <button type="button" disabled={busy} onClick={() => setQuoteRefresh((value) => value + 1)} className="btn btn-ghost mt-3 w-full min-h-11 text-sm">Retry total</button>}
+            {quoteLoading && <p role="status" className="mt-3 text-center text-sm text-neutral-500">{t.calculating}</p>}
+            {!quoteLoading && !quote && <button type="button" disabled={busy} onClick={() => setQuoteRefresh((value) => value + 1)} className="btn btn-ghost mt-3 w-full min-h-11 text-sm">{t.retryTotal}</button>}
             {/* method tabs */}
             <div className="grid grid-cols-2 gap-2 mt-3">
               {(['upi', 'cod'] as const).map((m) => (
                 <button key={m} disabled={busy} onClick={() => setMethod(m)} className={cn('h-12 rounded-xl border-2 font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-60', method === m ? 'border-orange-600 bg-orange-50 text-orange-900' : 'border-neutral-200 bg-white')}>
-                  {m === 'upi' ? <><Wallet size={16} /> UPI · Pay now</> : <><Banknote size={16} /> Cash at counter</>}
+                  {m === 'upi' ? <><Wallet size={16} /> {t.upi}</> : <><Banknote size={16} /> {t.cash}</>}
                 </button>
               ))}
             </div>
 
             <button disabled={busy || quoteLoading || !quote} onClick={submitPayment} className="btn btn-primary w-full py-4 text-lg mt-4">
-              {busy ? <Loader2 size={20} className="animate-spin" /> : method === 'upi' ? 'Proceed to pay' : 'Place order (Cash on collection)'}
+              {busy ? <Loader2 size={20} className="animate-spin" /> : method === 'upi' ? t.proceedPay : t.placeCash}
             </button>
-            <p className="mt-2 text-center text-[11px] text-neutral-400 flex items-center justify-center gap-1"><ShieldCheck size={12} /> Payment goes directly to the shop’s UPI · Printly never holds your money</p>
+            <p className="mt-2 text-center text-[11px] text-neutral-400 flex items-center justify-center gap-1"><ShieldCheck size={12} /> {t.directPayment}</p>
           </section>
         )}
 
@@ -722,11 +787,11 @@ function OrderWizardForShop({ slug }: { slug: string }) {
           <section className="-mt-1">
             <div className="rounded-3xl overflow-hidden shadow-2xl">
               <div className="bg-neutral-950 text-white px-6 pt-6 pb-5 text-center relative">
-                <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-400">Secure UPI checkout</div>
-                <div className="mt-1 text-sm text-neutral-300">Paying to</div>
+                <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-400">{t.upiCheckout}</div>
+                <div className="mt-1 text-sm text-neutral-300">{t.payingTo}</div>
                 <div className="text-xl font-extrabold tracking-tight">{upi.shop_name}</div>
                 <div className="mt-3 text-5xl font-black tabular-nums tracking-tight">₹{(upi.total_paise / 100).toFixed(2)}</div>
-                <div className="mt-1 text-[11px] text-neutral-500">Check this amount in your UPI app before paying</div>
+                <div className="mt-1 text-[11px] text-neutral-500">{t.checkAmount}</div>
               </div>
 
               <div className="bg-white px-6 py-6 text-center border-x border-neutral-100">
@@ -735,27 +800,27 @@ function OrderWizardForShop({ slug }: { slug: string }) {
                   : qrFailed
                     ? <div className="mx-auto grid min-h-28 max-w-56 place-items-center rounded-xl bg-neutral-50 p-4 text-xs text-neutral-600" role="status">QR unavailable. Use the button below to open your UPI app.</div>
                     : <div className="w-56 h-56 mx-auto skeleton" />}
-                <div className="mt-3 flex items-center justify-center gap-1.5 text-xs text-neutral-500">{qrDataUrl && !qrBrandInside && <BrandMark className="h-4 w-4" />}Scan with any UPI app</div>
+                <div className="mt-3 flex items-center justify-center gap-1.5 text-xs text-neutral-500">{qrDataUrl && !qrBrandInside && <BrandMark className="h-4 w-4" />}{t.scanUpi}</div>
                 <div className="mt-1 flex items-center justify-center gap-4 text-[10px] font-bold text-neutral-400">
                   <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-blue-600 inline-block" />GPay</span>
                   <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-purple-600 inline-block" />PhonePe</span>
                   <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-sky-500 inline-block" />Paytm</span>
                   <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-green-600 inline-block" />BHIM</span>
                 </div>
-                <a href={upi.link} className="btn btn-dark w-full h-12 mt-4"><Smartphone size={17} /> Open UPI app & pay</a>
+                <a href={upi.link} className="btn btn-dark w-full h-12 mt-4"><Smartphone size={17} /> {t.openUpi}</a>
                 <div className="mt-2 text-[11px] font-mono text-neutral-400 break-all">{upi.pa}</div>
               </div>
 
               <div className="bg-neutral-50 border border-neutral-100 px-6 py-5 rounded-b-3xl">
-                <label className="label">UPI reference / UTR (optional)</label>
+                <label className="label">{t.reference}</label>
                 <input value={utr} onChange={(e) => setUtr(e.target.value)} className="input text-center font-mono tracking-wider" placeholder="e.g. 426178900123" inputMode="numeric" />
                 <button disabled={busy} onClick={confirmPaid} className="btn btn-primary w-full h-13 py-4 text-lg mt-3">
-                  {busy ? <Loader2 size={20} className="animate-spin" /> : <>I&apos;ve paid ₹{(upi.total_paise / 100).toFixed(2)}</>}
+                  {busy ? <Loader2 size={20} className="animate-spin" /> : <>{t.paid} ₹{(upi.total_paise / 100).toFixed(2)}</>}
                 </button>
-                <p className="mt-2 text-center text-[10px] text-neutral-400">The shop confirms your payment, then your order enters the print queue. Keep this screen open.</p>
+                <p className="mt-2 text-center text-xs text-neutral-600">{t.paymentSafety}</p>
               </div>
             </div>
-            <button disabled={busy} onClick={() => router.push(`/track/${orderId}`)} className="w-full text-center text-sm text-neutral-500 mt-4 hover:underline disabled:opacity-50">Go to tracking without marking payment</button>
+            <button disabled={busy} onClick={() => router.push(`/track/${orderId}`)} className="w-full text-center text-sm text-neutral-500 mt-4 hover:underline disabled:opacity-50">{t.trackWithout}</button>
           </section>
         )}
       </main>

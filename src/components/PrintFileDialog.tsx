@@ -17,12 +17,13 @@ export function PrintFileDialog({ url, mime, name, specs, onClose, onChecked }: 
   const { doc, loading, error } = useLoadedDocument(url, mime);
   const [page, setPage] = useState(1);
   const [orientation, setOrientation] = useState<PrintOrientation>('portrait');
-  const [reviewed, setReviewed] = useState(false);
+  const [checked, setChecked] = useState({ paper: false, colour: false, sides: false, copies: false });
   const [preparing, setPreparing] = useState(false);
   const [printAction, setPrintAction] = useState<'dialog' | 'viewer' | null>(null);
   const [printError, setPrintError] = useState<string | null>(null);
   const [nativeUrl, setNativeUrl] = useState<string | null>(null);
   const printSpec = specs.find((item) => item.service === 'print' || item.service === 'photocopy') ?? specs[0];
+  const reviewed = Object.values(checked).every(Boolean);
   useEffect(() => {
     const element = dialog.current;
     element?.showModal();
@@ -88,12 +89,21 @@ export function PrintFileDialog({ url, mime, name, specs, onClose, onChecked }: 
           {doc && <label className="block text-xs font-bold text-neutral-700">Page orientation
             <select value={orientation} onChange={(event) => setOrientation(event.target.value as PrintOrientation)} disabled={preparing} className="input mt-1 h-10 text-sm"><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select>
           </label>}
-          <label className="flex items-start gap-2 text-xs leading-relaxed text-neutral-700"><input type="checkbox" checked={reviewed} onChange={(event) => setReviewed(event.target.checked)} className="mt-0.5 accent-orange-600" />I will check the customer’s settings in the print dialog.</label>
+          <fieldset className="space-y-2 rounded-xl border border-neutral-200 p-3 text-xs leading-relaxed text-neutral-700">
+            <legend className="px-1 font-extrabold text-neutral-900">Before printing: check each setting</legend>
+            {([
+              ['paper', `Paper size and stock: ${printSpec?.paper_size ?? 'check the order'}${printSpec?.paper_gsm ? `, ${printSpec.paper_gsm} gsm` : ''}.`],
+              ['colour', `Colour: ${printSpec?.color === 'color' ? 'colour' : printSpec?.color === 'bw' ? 'black and white' : 'check the order'}.`],
+              ['sides', `Sides and flip edge: ${printSpec?.sides === 'duplex' ? 'double-sided; one page per side' : printSpec?.sides === 'single' ? 'single-sided' : 'check the order'}.`],
+              ['copies', `Pages, orientation and copies: ${printSpec ? `${printSpec.pages} page(s), ${printSpec.copies} cop${printSpec.copies === 1 ? 'y' : 'ies'}` : 'check the order'}.`],
+            ] as const).map(([key, label]) => <label key={key} className="flex items-start gap-2"><input type="checkbox" checked={checked[key]} onChange={(event) => setChecked((previous) => ({ ...previous, [key]: event.target.checked }))} className="mt-0.5 accent-orange-600" /><span>{label}</span></label>)}
+            <p className="pt-1 text-[11px] text-neutral-500">Ticking these is a reminder to set them in the printer dialog; it does not change the printer or prove that paper was printed.</p>
+          </fieldset>
           {doc && doc.pageCount > MAX_RASTER_PRINT_PAGES ? <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">For PDFs over {MAX_RASTER_PRINT_PAGES} pages, use the browser PDF viewer below to avoid exhausting this device’s memory. Its print command and support depend on your browser.</p> :
             <button type="button" onClick={() => void print()} disabled={!doc || !reviewed || preparing} className="btn btn-primary min-h-11 w-full px-4 text-sm">{preparing ? <><Loader2 size={16} className="animate-spin" />Preparing all pages…</> : <><Printer size={16} />Open print dialog</>}</button>}
           {doc?.kind === 'pdf' && nativeUrl && (reviewed
             ? <a href={nativeUrl} target="_blank" rel="noopener noreferrer" onClick={() => setPrintAction('viewer')} className="inline-flex items-center gap-1 text-xs font-bold text-orange-800 underline">Open PDF in browser viewer <ExternalLink size={13} /></a>
-            : <p className="text-xs text-neutral-500">Check the print-settings box above to open the PDF viewer.</p>)}
+            : <p className="text-xs text-neutral-500">Check all print-settings reminders above to open the PDF viewer.</p>)}
           {doc?.kind === 'pdf' && doc.pageCount <= MAX_RASTER_PRINT_PAGES && <p className="text-[11px] leading-relaxed text-neutral-500">This print dialog prepares PDF pages at up to 144 dpi. For very fine details, use the browser PDF viewer or download the file.</p>}
           {printError && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{printError}</p>}
           {printAction && <div role="status" className="rounded-xl border border-green-200 bg-green-50 p-3 text-xs leading-relaxed text-green-900">

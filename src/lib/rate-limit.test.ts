@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const state = vi.hoisted(() => ({ rpc: vi.fn() }));
 vi.mock('server-only', () => ({}));
 vi.mock('@/lib/supabase', () => ({ createAdminSupabase: () => ({ rpc: state.rpc }) }));
-import { enforceDraftRateLimit, enforcePublicRateLimit, enforceSubscriptionPromoRateLimit, enforceUploadIssueLimit } from './rate-limit';
+import { enforceDraftRateLimit, enforcePublicRateLimit, enforceSubscriptionPromoRateLimit, enforceTrackingRateLimit, enforceUploadIssueLimit } from './rate-limit';
 
 beforeEach(() => {
   vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'test-private-key');
@@ -23,6 +23,20 @@ describe('public abuse limiter', () => {
     expect(JSON.stringify(args)).not.toContain('192.0.2.18');
     await enforcePublicRateLimit(request('192.0.2.19'), 'order_start');
     expect(state.rpc.mock.calls[1][1].p_client_hash).not.toBe(args.p_client_hash);
+  });
+  it('enforces both aggregate IP and per-order tracking limits without storing either identifier', async () => {
+    const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    expect(await enforceTrackingRateLimit(request(), id)).toBeNull();
+    expect(state.rpc.mock.calls.map((call) => call[1].p_bucket)).toEqual(['tracking', 'tracking_order']);
+    const scoped = state.rpc.mock.calls[1][1].p_client_hash;
+    expect(scoped).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify(state.rpc.mock.calls)).not.toContain(id);
+    expect(JSON.stringify(state.rpc.mock.calls)).not.toContain('192.0.2.18');
+    await enforceTrackingRateLimit(request(), id.toUpperCase());
+    expect(state.rpc.mock.calls[3][1].p_client_hash).toBe(scoped);
+    await enforceTrackingRateLimit(request(), 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
+    expect(state.rpc.mock.calls[5][1].p_client_hash).not.toBe(scoped);
+    expect((await enforceTrackingRateLimit(request(), 'bad'))?.status).toBe(503);
   });
   it('bounds upload links by both IP and draft, without storing the draft ID', async () => {
     const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';

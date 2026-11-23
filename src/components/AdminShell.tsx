@@ -4,13 +4,14 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Logo } from '@/components/Logo';
 import { SignOutButton } from '@/components/SignOutButton';
-import { LayoutDashboard, Store, ShieldAlert, CreditCard, Settings } from 'lucide-react';
+import { LayoutDashboard, Store, ShieldAlert, CreditCard, Settings, MessageCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const TABS = [
   { href: '/admin', label: 'Analytics', icon: LayoutDashboard, exact: true },
   { href: '/admin/shops', label: 'Shops & KYC', icon: Store },
   { href: '/admin/disputes', label: 'Disputes', icon: ShieldAlert },
+  { href: '/admin/support', label: 'Support', icon: MessageCircle },
   { href: '/admin/subscriptions', label: 'Subscription', icon: CreditCard },
   { href: '/admin/settings', label: 'Settings', icon: Settings },
 ];

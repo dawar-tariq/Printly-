@@ -34,8 +34,9 @@ describe('limited order recovery', () => {
     const button = await screen.findByRole('button', { name: 'Payment received' });
     expect(screen.getByText(/independently check your receiving account/i)).toBeTruthy();
     fireEvent.click(button); expect(posts).toHaveLength(0);
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
     confirmation.mockReturnValue(true); fireEvent.click(button);
-    await waitFor(() => expect(posts).toEqual([{ action: 'confirm' }]));
+    await waitFor(() => expect(posts).toEqual([{ action: 'confirm', utr: 'REF-123', verification_confirmed: true, duplicate_acknowledged: false }]));
     expect(screen.getByRole('link', { name: 'Back to orders' }).getAttribute('href')).toBe('/shop/recovery');
     await screen.findByText('Payment confirmed and order queued.');
   });

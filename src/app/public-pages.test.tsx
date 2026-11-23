@@ -27,11 +27,12 @@ describe('public information pages', () => {
     expect(screen.getByRole('main')).toBeTruthy();
     expect(document.querySelector('a[href="/privacy"]')).toBeTruthy();
   });
-  it('is honest about retention, order links, and the missing public support email', () => {
+  it('is honest about retention, order links, and private support access', () => {
     render(<PrivacyPage />);
     expect(screen.getByText(/does not currently provide a fixed automatic deletion schedule/i)).toBeTruthy();
     expect(screen.getByText(/tracking link can be used to view order status/i)).toBeTruthy();
-    expect(screen.getByText(/public Printly support email is not currently listed/i)).toBeTruthy();
+    expect(screen.getByText(/a lost code cannot be recovered/i)).toBeTruthy();
+    expect(document.querySelector('a[href="/support"]')).toBeTruthy();
     expect(document.querySelector('a[href^="mailto:"]')).toBeNull();
   });
   it('does not promise automatic refunds', () => {

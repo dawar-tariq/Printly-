@@ -30,7 +30,7 @@ it('pauses background tracking and refreshes as soon as the tab becomes visible'
   await act(async () => { fireEvent(document, new Event('visibilitychange')); });
   expect(fetchMock).toHaveBeenCalledTimes(2);
   await act(async () => { vi.advanceTimersByTime(15_000); });
-  expect(fetchMock).toHaveBeenCalledTimes(3);
+  expect(fetchMock).toHaveBeenCalledTimes(3); // 60 seconds since the fixed timer started
 });
 
 const tracked = (token: string) => ({
@@ -60,4 +60,33 @@ it('retains the last order and warns if a refresh returns invalid data', async (
   await act(async () => { fireEvent(document, new Event('visibilitychange')); });
   expect(screen.getByText('A1')).toBeTruthy();
   expect(screen.getByRole('status').textContent).toMatch(/may be out of date/i);
+});
+
+it('uses the slower interval when the browser requests data saving', async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal('navigator', { userAgent: navigator.userAgent, connection: { saveData: true } });
+  const fetchMock = vi.fn(async () => Response.json({ track: tracked('A1') }));
+  vi.stubGlobal('fetch', fetchMock);
+  render(<TrackPage />);
+  await act(async () => {});
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  await act(async () => { vi.advanceTimersByTime(30_000); });
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  await act(async () => { vi.advanceTimersByTime(30_000); });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+it('stops periodic polling for a completed order but allows manual and visibility refresh', async () => {
+  vi.useFakeTimers();
+  const fetchMock = vi.fn(async () => Response.json({ track: { ...tracked('A1'), status: 'collected', collected_at: '2026-11-19T13:00:00Z' } }));
+  vi.stubGlobal('fetch', fetchMock);
+  render(<TrackPage />);
+  await act(async () => {});
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  await act(async () => { vi.advanceTimersByTime(120_000); });
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Refresh tracking' })); });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  await act(async () => { fireEvent(document, new Event('visibilitychange')); });
+  expect(fetchMock).toHaveBeenCalledTimes(3);
 });

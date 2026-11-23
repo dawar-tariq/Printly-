@@ -7,6 +7,9 @@ import {
   Logo } from '@/components/Logo';
 import { formatPaiseExact, formatDateTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
+import { lowBandwidth } from '@/lib/connection';
+import { useCustomerLanguage } from '@/lib/customer-language';
+import { CustomerLanguagePicker } from '@/components/CustomerLanguagePicker';
 import {
   Loader2, Printer, CheckCircle2, Package, Store, Star, AlertTriangle, Wallet, X, Hourglass,
 } from 'lucide-react';
@@ -25,6 +28,7 @@ const STEPS = [
 ];
 
 export default function TrackPage() {
+  const { language, setLanguage, t } = useCustomerLanguage();
   const { id } = useParams<{ id: string }>();
   const [track, setTrack] = useState<Track | null | 'loading' | 'unavailable'>('loading');
   const [trackError, setTrackError] = useState(false);
@@ -43,6 +47,7 @@ export default function TrackPage() {
   const [disputeBusy, setDisputeBusy] = useState(false);
   const [disputeError, setDisputeError] = useState<string | null>(null);
   const refreshSequence = useRef(0);
+  const terminal = useRef(false);
 
   const load = useCallback(async () => {
     const sequence = ++refreshSequence.current;
@@ -55,6 +60,7 @@ export default function TrackPage() {
           throw new Error('Invalid tracking response');
         }
         if (sequence !== refreshSequence.current) return;
+        terminal.current = ['collected', 'cancelled', 'failed'].includes(data.track.status);
         setTrack(data.track); setTrackError(false);
       } else if (sequence !== refreshSequence.current) return;
       else if (res.status === 404) {
@@ -72,7 +78,7 @@ export default function TrackPage() {
   useEffect(() => {
     // A client-side navigation to a different tracking link must not show the
     // previous order while the new one is loading.
-    setTrack('loading'); setTrackError(false);
+    setTrack('loading'); setTrackError(false); terminal.current = false;
     setRating(0); setComment(''); setReviewed(false); setReviewError(null);
     setReportUtr(''); setReportMessage(null);
     setDisputeOpen(false); setDisputeType('other'); setDisputeText(''); setDisputeDone(false); setDisputeError(null);
@@ -80,7 +86,9 @@ export default function TrackPage() {
     // customer returns, and otherwise use a modest interval while visible.
     const refreshIfVisible = () => { if (document.visibilityState !== 'hidden') void load(); };
     refreshIfVisible();
-    const timer = window.setInterval(refreshIfVisible, 15_000);
+    const timer = window.setInterval(() => {
+      if (!terminal.current && document.visibilityState !== 'hidden') void load();
+    }, lowBandwidth() ? 60_000 : 30_000);
     document.addEventListener('visibilitychange', refreshIfVisible);
     return () => { refreshSequence.current++; window.clearInterval(timer); document.removeEventListener('visibilitychange', refreshIfVisible); };
   }, [load]);
@@ -145,22 +153,24 @@ export default function TrackPage() {
   }
   if (track === 'unavailable') {
     return (
-      <div className="min-h-screen grid place-items-center px-6 text-center">
+      <div lang={language} dir={language === 'ur' ? 'rtl' : 'ltr'} className="min-h-screen grid place-items-center px-6 text-center">
         <div>
-          <h1 className="text-2xl font-extrabold">Tracking is temporarily unavailable</h1>
-          <p className="text-neutral-500 mt-2 text-sm">Please check your connection and try again. Your order may still be in progress.</p>
-          <button type="button" onClick={() => void load()} className="btn btn-dark h-11 px-6 mt-6">Try again</button>
+          <div className="mb-4"><CustomerLanguagePicker language={language} onChange={setLanguage} /></div>
+          <h1 className="text-2xl font-extrabold">{t.trackingUnavailable}</h1>
+          <p className="text-neutral-500 mt-2 text-sm">{t.checkConnection}</p>
+          <button type="button" onClick={() => void load()} className="btn btn-dark h-11 px-6 mt-6">{t.tryAgain}</button>
         </div>
       </div>
     );
   }
   if (!track) {
     return (
-      <div className="min-h-screen grid place-items-center px-6 text-center">
+      <div lang={language} dir={language === 'ur' ? 'rtl' : 'ltr'} className="min-h-screen grid place-items-center px-6 text-center">
         <div>
-          <h1 className="text-2xl font-extrabold">Order not found</h1>
-          <p className="text-neutral-500 mt-2 text-sm">Check the link — it may be mistyped.</p>
-          <Link href="/" className="btn btn-dark h-11 px-6 mt-6">Go home</Link>
+          <div className="mb-4"><CustomerLanguagePicker language={language} onChange={setLanguage} /></div>
+          <h1 className="text-2xl font-extrabold">{t.orderNotFound}</h1>
+          <p className="text-neutral-500 mt-2 text-sm">{t.checkLink}</p>
+          <Link href="/" className="btn btn-dark h-11 px-6 mt-6">{t.goHome}</Link>
         </div>
       </div>
     );
@@ -174,66 +184,67 @@ export default function TrackPage() {
   const activeIndex = STEPS.findIndex((s) => s.key === track.status);
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(1200px_600px_at_50%_-10%,#ffedd5,transparent)]">
+    <div lang={language} dir={language === 'ur' ? 'rtl' : 'ltr'} className="min-h-screen bg-[radial-gradient(1200px_600px_at_50%_-10%,#ffedd5,transparent)]">
       <header className="max-w-lg mx-auto px-4 h-14 flex items-center justify-between">
         <Logo />
-        <span className="text-xs text-neutral-400">Order tracking</span>
+        <div className="flex items-center gap-2"><button type="button" onClick={() => void load()} className="text-xs font-bold text-orange-800 underline">{t.refreshTracking}</button><CustomerLanguagePicker language={language} onChange={setLanguage} /></div>
       </header>
 
       <main className="max-w-lg mx-auto px-4 pb-16">
+        {language !== 'en' && <p className="text-xs text-neutral-600">{t.limitedTranslation}</p>}
         {trackError && <p role="status" className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">Could not refresh the order. The information below may be out of date; we’ll keep trying.</p>}
         {/* Token card */}
         <section className="card mt-2 p-6 text-center">
           <div className="break-words [overflow-wrap:anywhere] text-xs font-bold uppercase tracking-widest text-neutral-400">{track.shop_name}{track.shop_city ? ` · ${track.shop_city}` : ''}</div>
           {track.token ? (
             <>
-              <div className="mt-2 text-[10px] uppercase tracking-[0.3em] text-neutral-400">Your token</div>
+              <div className="mt-2 text-[10px] uppercase tracking-[0.3em] text-neutral-400">{t.yourToken}</div>
               <div className="text-7xl font-black tracking-tight text-orange-600 my-1">{track.token}</div>
             </>
           ) : awaitingConfirmation ? (
             <>
               <Hourglass size={40} className="mx-auto mt-3 text-orange-500" />
-              <div className="mt-2 text-lg font-extrabold">Waiting for payment confirmation</div>
-              <p className="text-sm text-neutral-500 mt-1 max-w-xs mx-auto">The shop is verifying your UPI payment. Your token will appear here once the shop confirms it.</p>
+              <div className="mt-2 text-lg font-extrabold">{t.waitConfirm}</div>
+              <p className="text-sm text-neutral-500 mt-1 max-w-xs mx-auto">{t.shopVerifying}</p>
             </>
           ) : awaitingPayment ? (
-            <div className="mt-3 text-lg font-extrabold">Payment not reported yet</div>
+            <div className="mt-3 text-lg font-extrabold">{t.notReported}</div>
           ) : (
-            <div className="mt-3 text-lg font-extrabold">Order received</div>
+            <div className="mt-3 text-lg font-extrabold">{t.orderReceived}</div>
           )}
 
-          <p className="mt-3 text-xs text-neutral-500">Save this tracking link to check your order later.</p>
+          <p className="mt-3 text-xs text-neutral-500">{t.saveTracking}</p>
 
           {/* payment state banners */}
           {awaitingPayment && (
-            <div className="mt-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs px-4 py-2.5 text-left">If you already paid, report it below from the browser you used to order, or contact the shop with your payment reference.</div>
+            <div className="mt-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs px-4 py-2.5 text-left">{t.pendingHelp}</div>
           )}
           {awaitingConfirmation && (
-            <div className="mt-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs px-4 py-2.5 flex items-center gap-2 text-left"><Wallet size={14} className="shrink-0" />A payment report was sent. The shop still needs to verify the transfer.</div>
+            <div className="mt-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs px-4 py-2.5 flex items-center gap-2 text-left"><Wallet size={14} className="shrink-0" />{t.submittedHelp}</div>
           )}
           {rejected && (
-            <div className="mt-4 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs px-4 py-2.5 text-left">The shop could not verify your payment. Please check with the counter before paying again.</div>
+            <div className="mt-4 rounded-xl bg-red-50 border border-red-200 text-red-800 text-xs px-4 py-2.5 text-left">{t.rejectedHelp}</div>
           )}
           {codPending && (
-            <div className="mt-4 rounded-xl bg-blue-50 border border-blue-200 text-blue-900 text-xs px-4 py-2.5 flex items-center gap-2 text-left"><Wallet size={14} className="shrink-0" />Cash on collection — pay ₹{(track.total_paise / 100).toFixed(2)} at the counter.</div>
+            <div className="mt-4 rounded-xl bg-blue-50 border border-blue-200 text-blue-900 text-xs px-4 py-2.5 flex items-center gap-2 text-left"><Wallet size={14} className="shrink-0" />{t.cashDue.replace('{amount}', `₹${(track.total_paise / 100).toFixed(2)}`)}</div>
           )}
           {confirmed && (
-            <div className="mt-4 rounded-xl bg-green-50 border border-green-200 text-green-900 text-xs px-4 py-2.5 flex items-center gap-2 text-left"><CheckCircle2 size={14} className="shrink-0" />Payment confirmed{track.payment_method === 'upi' ? ' via UPI' : ''}. {track.rush ? 'The shop has been told this is a rush order.' : ''}</div>
+            <div className="mt-4 rounded-xl bg-green-50 border border-green-200 text-green-900 text-xs px-4 py-2.5 flex items-center gap-2 text-left"><CheckCircle2 size={14} className="shrink-0" />{t.paymentConfirmed}{track.payment_method === 'upi' ? ' via UPI' : ''}. {track.rush ? 'The shop has been told this is a rush order.' : ''}</div>
           )}
         </section>
 
         {track.status === 'draft' && track.payment_method === 'upi' && (awaitingPayment || rejected) && (
           <section className="card mt-4 p-4 text-sm">
-            <h2 className="font-extrabold">Already sent the payment?</h2>
-            <p className="mt-1 text-xs leading-relaxed text-neutral-600">Only report a payment you have sent. The shop must still verify it. {rejected && 'Contact the shop before trying again; do not pay twice.'}</p>
-            <label className="label mt-3">UPI reference / UTR (optional)
+            <h2 className="font-extrabold">{t.alreadySent}</h2>
+            <p className="mt-1 text-xs leading-relaxed text-neutral-600">{t.reportHelp} {rejected && language === 'en' && 'Do not pay twice.'}</p>
+            <label className="label mt-3">{t.reference}
               <input value={reportUtr} onChange={(event) => setReportUtr(event.target.value)} maxLength={40} className="input" placeholder="e.g. 426178900123" />
             </label>
             <button type="button" disabled={reportBusy} onClick={() => void reportPayment()} className="btn btn-primary mt-3 min-h-11 w-full px-4 text-sm">
-              {reportBusy ? 'Reporting…' : 'Report payment to shop'}
+              {reportBusy ? t.reporting : t.reportPayment}
             </button>
             {reportMessage && <p role="status" className="mt-2 text-xs text-neutral-700">{reportMessage}</p>}
-            <p className="mt-2 text-xs text-neutral-500">If your order session has expired, contact the shop and share this tracking link and your payment reference. <Link className="font-bold text-orange-800 underline" href={`/s/${encodeURIComponent(track.shop_slug)}`}>View shop details</Link></p>
+            <p className="mt-2 text-xs text-neutral-500">{t.expiredHelp} <Link className="font-bold text-orange-800 underline" href={`/s/${encodeURIComponent(track.shop_slug)}`}>{t.shopDetails}</Link></p>
           </section>
         )}
 
@@ -253,7 +264,7 @@ export default function TrackPage() {
                       current && 'ring-4 ring-orange-600/20')}>
                       <Icon size={18} />
                     </div>
-                    <span className={cn('text-[10px] font-bold', reached ? 'text-orange-800' : 'text-neutral-400')}>{s.label}</span>
+                    <span className={cn('text-[10px] font-bold', reached ? 'text-orange-800' : 'text-neutral-400')}>{s.key === 'queued' ? t.queue : s.key === 'printing' ? t.printing : s.key === 'ready' ? t.ready : t.collected}</span>
                   </div>
                 );
               })}
@@ -287,6 +298,7 @@ export default function TrackPage() {
         )}
         {reviewed && <div className="card mt-4 p-4 text-center text-sm font-semibold text-green-700">Thanks for the feedback!</div>}
 
+        <div className="mt-5 text-center text-xs text-neutral-600">Need to write to Printly? <Link href="/support" className="font-bold text-orange-800 underline">{t.supportLink}</Link>. Save your support code to check replies.</div>
         {/* Dispute */}
         <div className="mt-5 text-center">
           {!disputeDone ? (

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Logo } from '@/components/Logo';
 import { SignOutButton } from '@/components/SignOutButton';
-import { LayoutDashboard, Settings, Boxes, BarChart3, CreditCard, ExternalLink, Hourglass, PenLine, Ban } from 'lucide-react';
+import { LayoutDashboard, Settings, Boxes, BarChart3, CreditCard, ExternalLink, Hourglass, PenLine, Ban, MessageCircle } from 'lucide-react';
 import { SubscriptionNotice } from '@/components/SubscriptionNotice';
 import type { ShopSubscription } from '@/lib/subscription';
 import { cn } from '@/lib/utils';
@@ -16,6 +16,7 @@ const TABS = [
   { href: '/shop/reports', label: 'Reports', icon: BarChart3 },
   { href: '/shop/subscription', label: 'Subscription', icon: CreditCard },
   { href: '/shop/settings', label: 'Settings & QR', icon: Settings },
+  { href: '/support', label: 'Support', icon: MessageCircle },
 ];
 
 export function ShopShell({ shop, reviewNote, subscription, warningDays, isOwner, children }: { shop: { id: string; name: string; slug: string; short_code: string; kyc_status: string; status: string }; reviewNote: string; subscription: ShopSubscription | null; warningDays: number; isOwner: boolean; children: React.ReactNode }) {

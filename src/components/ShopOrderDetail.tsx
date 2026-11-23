@@ -14,6 +14,7 @@ import { formatPaiseExact, formatDateTime, timeAgo } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { SERVICE_LABEL } from '@/lib/constants';
 import { duplexSheets } from '@/lib/duplex';
+import { requestUpiDecision } from '@/lib/upi-confirmation';
 
 interface Detail {
   order: Record<string, unknown> & {
@@ -76,19 +77,12 @@ export function ShopOrderDetail({ backHref = '/shop' }: { backHref?: string }) {
   };
 
   const decidePayment = async (action: 'confirm' | 'reject') => {
-    const message = action === 'confirm'
-      ? 'Have you independently verified that this customer’s UPI transfer reached your account? A payment report alone is not proof.'
-      : 'Mark this customer payment as not received? The customer can report it again.';
-    if (busy || !window.confirm(message)) return;
+    if (busy || !detail) return;
     setBusy(true); setReportMessage(null);
     try {
-      const res = await fetch(`/api/shop/orders/${id}/confirm-payment`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) setReportMessage(body?.error?.message ?? 'Could not update payment. Please retry.');
-      else { setReportMessage(action === 'confirm' ? 'Payment confirmed and order queued.' : 'Payment marked not received.'); await load(); }
-    } catch { setReportMessage('Connection interrupted. Refresh the order before trying again.'); }
+      const result = await requestUpiDecision(id, action, detail.payment?.utr ?? detail.order.utr);
+      if (result === 'updated') { setReportMessage(action === 'confirm' ? 'Payment confirmed and order queued.' : 'Payment marked not received.'); await load(); }
+    } catch (err) { setReportMessage(err instanceof Error ? err.message : 'Connection interrupted. Refresh the order before trying again.'); }
     finally { setBusy(false); }
   };
 
@@ -169,6 +163,11 @@ export function ShopOrderDetail({ backHref = '/shop' }: { backHref?: string }) {
                 </tbody>
               </table>
             </div>
+            <fieldset className="no-print mt-3 space-y-2 rounded-xl border border-neutral-200 p-3 text-xs text-neutral-700">
+              <legend className="px-1 font-extrabold text-neutral-900">Before each file: printer checklist</legend>
+              {['Paper size and stock match the order above', 'Colour or black & white matches', 'Single or double-sided and flip edge match', 'Pages, orientation and copy count match'].map((label) => <label key={label} className="flex items-start gap-2"><input type="checkbox" className="mt-0.5 accent-orange-600" /><span>{label}</span></label>)}
+              <p className="text-[11px] text-neutral-500">These visit-only reminders do not set the printer or prove that anything was printed. Check the physical output.</p>
+            </fieldset>
             {detail.items.some((item) => (item.service === 'print' || item.service === 'photocopy') && item.sides === 'duplex') && <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-950">
               <strong>Double-sided instructions:</strong> print each whole file in order, with pages 1/2, 3/4 and so on on opposite sides. Leave an odd last page’s back blank. Start each file and copy on a fresh sheet; print copies separately if needed. Select two-sided and one page per side in the printer dialog, check the flip edge, and inspect the paper. Sheet counts above describe paper needed, not necessarily the billing unit.
             </div>}
