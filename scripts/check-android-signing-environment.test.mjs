@@ -9,7 +9,7 @@ const valid = () => ({
     deployment_branch_policy: { custom_branch_policies: true, protected_branches: false },
     protection_rules: [{ type: 'required_reviewers', reviewers: [{ type: 'User', reviewer: { id: 123 } }] }],
   },
-  policies: { total_count: 1, branch_policies: [{ name: SIGNING_BRANCH }] },
+  policies: { total_count: 1, branch_policies: [{ name: SIGNING_BRANCH, type: 'branch' }] },
 });
 
 describe('protected Android signing environment', () => {
@@ -35,7 +35,9 @@ describe('protected Android signing environment', () => {
     ['unrestricted branches', (v) => { v.environment.deployment_branch_policy = null; }],
     ['all protected branches', (v) => { v.environment.deployment_branch_policy = { custom_branch_policies: false, protected_branches: true }; }],
     ['a wildcard branch', (v) => { v.policies.branch_policies[0].name = 'arena/*'; }],
-    ['an additional branch or tag', (v) => { v.policies.total_count = 2; v.policies.branch_policies.push({ name: 'main' }); }],
+    ['a tag rule named like the branch', (v) => { v.policies.branch_policies[0].type = 'tag'; }],
+    ['an unverifiable policy type', (v) => { delete v.policies.branch_policies[0].type; }],
+    ['an additional branch or tag', (v) => { v.policies.total_count = 2; v.policies.branch_policies.push({ name: 'main', type: 'branch' }); }],
     ['inconsistent policy metadata', (v) => { v.policies.total_count = 2; }],
   ])('refuses %s', (_name, mutate) => {
     const input = valid(); mutate(input);

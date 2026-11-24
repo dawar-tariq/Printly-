@@ -33,7 +33,7 @@ export function validateSigningEnvironment({ repository, repositoryInfo, ref, ev
     throw new Error('The signing environment must use selected branch restrictions.');
   }
   const branches = policies?.branch_policies;
-  if (policies?.total_count !== 1 || !Array.isArray(branches) || branches.length !== 1 || branches[0]?.name !== SIGNING_BRANCH) {
+  if (policies?.total_count !== 1 || !Array.isArray(branches) || branches.length !== 1 || branches[0]?.name !== SIGNING_BRANCH || branches[0]?.type !== 'branch') {
     throw new Error('Allow only the exact reviewed working branch in the signing environment.');
   }
 }

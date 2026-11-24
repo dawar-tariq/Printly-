@@ -1,0 +1,28 @@
+name: Android signing protection check (read-only)
+
+# This branch-specific check exercises the actual GitHub Actions token against
+# the review environment without requesting approval or accessing any secrets.
+on:
+  push:
+    branches:
+      - 'arena/309fdf51-printly'
+    paths:
+      - 'scripts/check-android-signing-environment.mjs'
+      - '.github/workflows/android-signing-protection-check.yml'
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Verify environment protections without accessing secrets
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/check-android-signing-environment.mjs
