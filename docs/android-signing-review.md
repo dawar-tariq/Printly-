@@ -4,15 +4,17 @@ This is a **review build**, not a publication or website deployment. The public 
 
 The workflow creates an encrypted APK artifact rather than an unencrypted one, because anyone with read access to a public repository may download GitHub Actions artifacts. Public package, signer and checksum evidence accompanies the encrypted file; neither the keystore nor passwords are uploaded. The independent artifact passphrase is needed to decrypt it.
 
-## 1. Identify the existing signing key
+## 1. Verify the release key and any existing installation
 
-Keep the keystore, alias and passwords private and backed up. Never put them in chat, source files, logs or screenshots. On your own computer, JDK's `keytool` can inspect the keystore without placing the password in shell history:
+A new release key was created for this app and backed up in private storage. The keystore is `printly-owner-release.p12`, the type is `PKCS12`, and the alias is `printly-owner-release`; its password is saved separately. The saved `signing-info.txt` and `certificate.pem` contain the **public** certificate information. Verify that fingerprint independently before configuring the signing environment. A certificate fingerprint is public; it is not the APK file's SHA-256.
+
+Keep the keystore and password private and backed up. Never put them in chat, source files, logs or screenshots. For example, on a trusted computer JDK's `keytool` can inspect the keystore without placing the password in shell history:
 
 ```sh
-keytool -list -v -keystore "/secure/path/to/your-existing.keystore"
+keytool -list -v -storetype PKCS12 -keystore "/secure/path/to/printly-owner-release.p12"
 ```
 
-Enter the store password privately when prompted. Note the keystore type (`JKS` or `PKCS12`), the alias of the intended `PrivateKeyEntry`, and that entry's certificate **SHA-256 fingerprint**. A certificate fingerprint is public; it is not the APK file's SHA-256. Record the fingerprint through a trusted, independent process.
+Enter the store password privately when prompted. Verify the `PrivateKeyEntry` alias and its certificate **SHA-256 fingerprint** against the saved public information.
 
 If there may already be an installed APK for this package, inspect the original APK with Android SDK tools before any distribution:
 
@@ -40,7 +42,7 @@ Confirm the package, signer fingerprint and version code against the intended ex
 For example, with GitHub CLI installed and authenticated **on your own computer**, Linux/macOS users can securely send the keystore bytes to the environment without printing them:
 
 ```sh
-base64 < "/secure/path/to/your-existing.keystore" | tr -d '\r\n' | gh secret set PRINTLY_ANDROID_KEYSTORE_BASE64 --repo dawar-tariq/Printly- --env printly-owner-signing
+base64 < "/secure/path/to/printly-owner-release.p12" | tr -d '\r\n' | gh secret set PRINTLY_ANDROID_KEYSTORE_BASE64 --repo dawar-tariq/Printly- --env printly-owner-signing
 ```
 
 On Windows PowerShell the equivalent is:
