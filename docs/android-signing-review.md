@@ -2,7 +2,7 @@
 
 This is a **review build**, not a publication or website deployment. The public repository is `dawar-tariq/Printly-`; the working branch is `arena/309fdf51-printly`. The Android package is `io.github.dawartariq.printly.owner`, currently with `versionCode` 1. The new website routes and notifications are not yet deployed or configured. Do not give a review APK to shop owners or assume it will upgrade an existing installation.
 
-The workflow creates an encrypted APK artifact rather than an unencrypted one, because anyone with read access to a public repository may download GitHub Actions artifacts. Public package, signer and checksum evidence accompanies the encrypted file; neither the keystore nor passwords are uploaded. The independent artifact passphrase is needed to decrypt it.
+The workflow creates an encrypted APK artifact rather than an unencrypted one, because anyone with read access to a public repository may download GitHub Actions artifacts. Public package, signer and checksum evidence accompanies the encrypted file; neither the keystore nor passwords are uploaded. The independent artifact passphrase is needed to decrypt it. After approval, the workflow first encrypts and decrypts harmless sample data; if that check fails it reports a non-secret error category and never uses the signing key.
 
 ## 1. Verify the release key and any existing installation
 
