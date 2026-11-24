@@ -96,8 +96,10 @@ async function ownerIdentity(page) {
   phase = 'starting staging app'; logs = '';
   server = child(['start', '-H', '127.0.0.1', '-p', '3131'], env);
   await ready(server);
+  // Chromium's --single-process mode collapses isolated Playwright cookie jars.
+  // Separate processes are essential when checking owner/staff authorization.
   browser = await playwright.launch({ executablePath: await chromium.executablePath(),
-    args: chromium.args.filter((arg) => arg !== '--disable-web-security'), headless: true });
+    args: chromium.args.filter((arg) => !['--disable-web-security', '--single-process'].includes(arg)), headless: true });
 
   phase = 'creating synthetic shop';
   const setup = await browser.newContext();
@@ -149,8 +151,10 @@ async function ownerIdentity(page) {
   await Promise.all([staff.waitForURL(/\/shop(?:\?|$|\/)/, { timeout: 45000 }), staff.getByRole('button', { name: 'Sign in' }).click()]);
   await staff.getByText(/Only the owner can change this setting/).waitFor();
   assert.notEqual(owner.context(), staff.context(), 'Owner and staff test contexts must be isolated');
-  const ownerCookies = (await owner.context().cookies(base)).filter((cookie) => cookie.name.includes('auth-token'));
-  const staffCookies = (await staff.context().cookies(base)).filter((cookie) => cookie.name.includes('auth-token'));
+  // Do not filter by the HTTP loopback URL: Chromium accepts Secure cookies
+  // for loopback, but its DevTools URL filter omits them for an http scheme.
+  const ownerCookies = (await owner.context().cookies()).filter((cookie) => cookie.name.includes('auth-token'));
+  const staffCookies = (await staff.context().cookies()).filter((cookie) => cookie.name.includes('auth-token'));
   assert(ownerCookies.length && staffCookies.length, 'Both synthetic sessions need auth cookies');
   assert.notEqual(ownerCookies[0].value, staffCookies[0].value, 'Synthetic sessions must not share a cookie');
   const ownerStatus = await ownerIdentity(owner);
