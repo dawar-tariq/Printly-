@@ -65,6 +65,18 @@ async function configurePage(page) {
   page.setDefaultTimeout(30000);
   await page.route(`${base}/**`, (route) => route.continue({ headers: { ...route.request().headers(), 'x-printly-client-ip': ip } }));
 }
+async function expectOwnerUpdate(pending, label) {
+  const response = await pending;
+  const body = await response.json().catch(() => ({}));
+  if (response.status() !== 200) throw new Error(`${label}: HTTP ${response.status()}, ${body?.error?.code || 'no error code'}`);
+}
+async function ownerIdentity(page) {
+  return page.evaluate(async () => {
+    const response = await fetch('/api/shop/me', { cache: 'no-store' });
+    const body = await response.json();
+    return { status: response.status, isOwner: body.is_owner, code: body.error?.code };
+  });
+}
 
 (async () => {
   const bootstrapResponse = await fetch(`https://${project}.supabase.co/functions/v1/${bootstrap}`, {
@@ -116,9 +128,18 @@ async function configurePage(page) {
   await Promise.all([owner.waitForURL(/\/shop(?:\?|$|\/)/, { timeout: 45000 }), owner.getByRole('button', { name: 'Sign in' }).click()]);
   const close = owner.getByRole('button', { name: 'Close shop' }); await close.waitFor();
   let update = owner.waitForResponse((r) => r.url() === `${base}/api/shop/availability` && r.request().method() === 'PUT');
-  await close.click(); assert.equal((await update).status(), 200, 'Owner close failed');
+  await close.click(); await expectOwnerUpdate(update, 'Owner close failed');
   await owner.getByText('Shop is closed', { exact: true }).waitFor();
   assert.equal(ok(await admin.from('shops').select('is_open').eq('id', shopId).single(), 'Read closed state').is_open, false);
+  update = owner.waitForResponse((r) => r.url() === `${base}/api/shop/availability` && r.request().method() === 'PUT');
+  await owner.getByRole('button', { name: 'Reopen shop' }).click();
+  await expectOwnerUpdate(update, 'Immediate owner reopen failed');
+  await owner.getByText('Shop setting: open', { exact: true }).waitFor();
+  update = owner.waitForResponse((r) => r.url() === `${base}/api/shop/availability` && r.request().method() === 'PUT');
+  await owner.getByRole('button', { name: 'Close shop' }).click();
+  await expectOwnerUpdate(update, 'Second owner close failed');
+  await owner.getByText('Shop is closed', { exact: true }).waitFor();
+  console.log('✓ Owner can close, reopen and close again');
 
   phase = 'staff cannot change availability';
   const staff = await browser.newPage(); await configurePage(staff);
@@ -127,6 +148,17 @@ async function configurePage(page) {
   await staff.getByLabel('Password').fill(staffPassword);
   await Promise.all([staff.waitForURL(/\/shop(?:\?|$|\/)/, { timeout: 45000 }), staff.getByRole('button', { name: 'Sign in' }).click()]);
   await staff.getByText(/Only the owner can change this setting/).waitFor();
+  assert.notEqual(owner.context(), staff.context(), 'Owner and staff test contexts must be isolated');
+  const ownerCookies = (await owner.context().cookies(base)).filter((cookie) => cookie.name.includes('auth-token'));
+  const staffCookies = (await staff.context().cookies(base)).filter((cookie) => cookie.name.includes('auth-token'));
+  assert(ownerCookies.length && staffCookies.length, 'Both synthetic sessions need auth cookies');
+  assert.notEqual(ownerCookies[0].value, staffCookies[0].value, 'Synthetic sessions must not share a cookie');
+  const ownerStatus = await ownerIdentity(owner);
+  assert.equal(ownerStatus.status, 200, `Owner identity lookup HTTP ${ownerStatus.status}, ${ownerStatus.code || ''}`);
+  assert.equal(ownerStatus.isOwner, true, 'Owner session became non-owner after staff sign-in');
+  const staffStatus = await ownerIdentity(staff);
+  assert.equal(staffStatus.status, 200, `Staff identity lookup HTTP ${staffStatus.status}, ${staffStatus.code || ''}`);
+  assert.equal(staffStatus.isOwner, false, 'Staff session appeared as owner');
   assert.equal(await staff.getByRole('button', { name: 'Reopen shop' }).count(), 0);
   const denied = await staff.evaluate(async () => {
     const response = await fetch('/api/shop/availability', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ is_open: true }) });
@@ -150,9 +182,12 @@ async function configurePage(page) {
   console.log('✓ Owner closure appears publicly and blocks new drafts');
 
   phase = 'reopening and starting checkout';
+  const ownerBeforeReopen = await ownerIdentity(owner);
+  assert.equal(ownerBeforeReopen.status, 200, `Owner identity before reopen HTTP ${ownerBeforeReopen.status}, ${ownerBeforeReopen.code || ''}`);
+  assert.equal(ownerBeforeReopen.isOwner, true, 'Owner session became non-owner before reopen');
   const reopen = owner.getByRole('button', { name: 'Reopen shop' });
   update = owner.waitForResponse((r) => r.url() === `${base}/api/shop/availability` && r.request().method() === 'PUT');
-  await reopen.click(); assert.equal((await update).status(), 200, 'Owner reopen failed');
+  await reopen.click(); await expectOwnerUpdate(update, 'Owner reopen failed');
   await owner.getByText('Shop setting: open', { exact: true }).waitFor();
   await customer.reload({ waitUntil: 'domcontentloaded' });
   await customer.getByRole('button', { name: /^Print/ }).first().click();
@@ -183,7 +218,7 @@ async function configurePage(page) {
   }, orderId);
   assert.equal(quote.status, 200); assert.match(quote.body.quote_token, /^[0-9a-f]{64}$/);
   update = owner.waitForResponse((r) => r.url() === `${base}/api/shop/availability` && r.request().method() === 'PUT');
-  await owner.getByRole('button', { name: 'Close shop' }).click(); assert.equal((await update).status(), 200);
+  await owner.getByRole('button', { name: 'Close shop' }).click(); await expectOwnerUpdate(update, 'Close before unstarted checkout failed');
   await owner.getByText('Shop is closed', { exact: true }).waitFor();
   const rejected = await customer.evaluate(async ({ id, quoteToken }) => {
     const quoteResponse = await fetch(`/api/orders/${id}/quote?rush=0`);
@@ -196,7 +231,7 @@ async function configurePage(page) {
   assert.equal(ok(await admin.from('orders').select('payment_method').eq('id', orderId).single(), 'Read blocked checkout').payment_method, null);
   assert.equal(ok(await admin.from('payments').select('id').eq('order_id', orderId), 'Read blocked payments').length, 0);
   update = owner.waitForResponse((r) => r.url() === `${base}/api/shop/availability` && r.request().method() === 'PUT');
-  await owner.getByRole('button', { name: 'Reopen shop' }).click(); assert.equal((await update).status(), 200);
+  await owner.getByRole('button', { name: 'Reopen shop' }).click(); await expectOwnerUpdate(update, 'Reopen before checkout failed');
   await owner.getByText('Shop setting: open', { exact: true }).waitFor();
   console.log('✓ Closed shop rejects quotes and first checkout for an existing draft');
 
@@ -218,7 +253,7 @@ async function configurePage(page) {
   phase = 'recovering started UPI while closed';
   update = owner.waitForResponse((r) => r.url() === `${base}/api/shop/availability` && r.request().method() === 'PUT');
   await owner.getByRole('button', { name: 'Close shop' }).click();
-  assert.equal((await update).status(), 200);
+  await expectOwnerUpdate(update, 'Close after started checkout failed');
   await owner.getByText('Shop is closed', { exact: true }).waitFor();
   await customer.reload({ waitUntil: 'domcontentloaded' });
   await customer.getByRole('heading', { name: 'Check your previous checkout' }).waitFor();
