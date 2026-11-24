@@ -8,6 +8,7 @@ on:
       - 'scripts/create-owner-signing-key.sh'
       - 'scripts/sign-android-review.sh'
       - 'scripts/encrypt-android-review.sh'
+      - 'scripts/check-android-review-encryption.sh'
       - '.github/workflows/android-debug.yml'
       - '.github/workflows/android-release.yml'
 
@@ -22,6 +23,21 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+      - name: Exercise the protected encryption pre-check with disposable data
+        working-directory: apps/printly-owner-android
+        shell: bash
+        env:
+          PRINTLY_ANDROID_ARTIFACT_PASSPHRASE: 'disposable-ci-only-passphrase-not-a-secret'
+        run: |
+          set -eu -o pipefail
+          ../../scripts/check-android-review-encryption.sh
+          PRINTLY_ANDROID_ARTIFACT_PASSPHRASE="${PRINTLY_ANDROID_ARTIFACT_PASSPHRASE}"$'\r\n' ../../scripts/check-android-review-encryption.sh
+          if GITHUB_ACTIONS=false PRINTLY_ANDROID_ARTIFACT_PASSPHRASE=short ../../scripts/check-android-review-encryption.sh 2>/dev/null; then
+            echo 'The encryption pre-check unexpectedly accepted a short passphrase.' >&2; exit 1
+          fi
+          if compgen -G "$RUNNER_TEMP/printly-review-check.*" > /dev/null || compgen -G "$RUNNER_TEMP/printly-review-gpg.*" > /dev/null; then
+            echo 'The encryption pre-check left a temporary directory behind.' >&2; exit 1
+          fi
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
@@ -138,10 +154,10 @@ jobs:
           if printf '%s\n' "$PRINTLY_ANDROID_ARTIFACT_PASSPHRASE" | gpg --batch --pinentry-mode loopback --no-symkey-cache --passphrase-fd 0 --decrypt "$TAMPERED" > /dev/null 2>&1; then
             echo 'A tampered encrypted artifact unexpectedly decrypted successfully.' >&2; exit 1
           fi
-          if PRINTLY_ANDROID_ARTIFACT_PASSPHRASE=short ../../scripts/encrypt-android-review.sh "$RELEASE" "$TAMPERED"; then
+          if GITHUB_ACTIONS=false PRINTLY_ANDROID_ARTIFACT_PASSPHRASE=short ../../scripts/encrypt-android-review.sh "$RELEASE" "$TAMPERED" 2>/dev/null; then
             echo 'A short artifact passphrase was unexpectedly accepted.' >&2; exit 1
           fi
-          if PRINTLY_ANDROID_ARTIFACT_PASSPHRASE="${PRINTLY_ANDROID_ARTIFACT_PASSPHRASE}"$'\n''extra' ../../scripts/encrypt-android-review.sh "$RELEASE" "$TAMPERED"; then
+          if GITHUB_ACTIONS=false PRINTLY_ANDROID_ARTIFACT_PASSPHRASE="${PRINTLY_ANDROID_ARTIFACT_PASSPHRASE}"$'\n''extra' ../../scripts/encrypt-android-review.sh "$RELEASE" "$TAMPERED" 2>/dev/null; then
             echo 'An internally multiline artifact passphrase was unexpectedly accepted.' >&2; exit 1
           fi
       - name: Build a debug-signed test APK

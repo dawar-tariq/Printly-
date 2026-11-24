@@ -75,29 +75,7 @@ jobs:
         shell: bash
         env:
           PRINTLY_ANDROID_ARTIFACT_PASSPHRASE: ${{ secrets.PRINTLY_ANDROID_ARTIFACT_PASSPHRASE }}
-        run: |
-          set -eu -o pipefail
-          umask 077
-          SAMPLE=$(mktemp "$RUNNER_TEMP/printly-review-check.XXXXXXXX")
-          ENCRYPTED="$SAMPLE.gpg"
-          ROUNDTRIP="$SAMPLE.roundtrip"
-          CHECK_HOME=$(mktemp -d "$RUNNER_TEMP/printly-review-check-home.XXXXXXXX")
-          export GNUPGHOME="$CHECK_HOME"
-          trap 'gpgconf --kill gpg-agent >/dev/null 2>&1 || true; rm -rf "$CHECK_HOME"; rm -f "$SAMPLE" "$ENCRYPTED" "$ROUNDTRIP"' EXIT
-          printf '%s\n' 'Disposable review encryption check' > "$SAMPLE"
-          ../../scripts/encrypt-android-review.sh "$SAMPLE" "$ENCRYPTED"
-          passphrase=${PRINTLY_ANDROID_ARTIFACT_PASSPHRASE:-}
-          while [[ "$passphrase" == *$'\n' || "$passphrase" == *$'\r' ]]; do passphrase=${passphrase%?}; done
-          if ! printf '%s\n' "$passphrase" | gpg --batch --yes --pinentry-mode loopback --no-symkey-cache --passphrase-fd 0 --decrypt "$ENCRYPTED" > "$ROUNDTRIP" 2>/dev/null; then
-            echo '::error title=Review encryption check::The sample artifact could not be decrypted on the runner.'
-            exit 1
-          fi
-          unset passphrase PRINTLY_ANDROID_ARTIFACT_PASSPHRASE
-          if ! cmp -s "$SAMPLE" "$ROUNDTRIP"; then
-            echo '::error title=Review encryption check::The sample artifact did not round-trip correctly.'
-            exit 1
-          fi
-          echo '::notice title=Review encryption check::A harmless sample encrypted and decrypted successfully.'
+        run: ../../scripts/check-android-review-encryption.sh
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
