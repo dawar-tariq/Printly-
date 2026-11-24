@@ -43,7 +43,15 @@ jobs:
             echo 'A release build succeeded without configured release signing.' >&2
             exit 1
           fi
-          grep -F 'Release signing is not configured' release-check.txt
+          if ! grep -F 'Release signing is not configured' release-check.txt; then
+            echo 'The unsigned build failed before reaching the signing guard.' >&2
+            tail -n 60 release-check.txt
+            (grep -Ei '(^FAILURE:|^\* What went wrong|^> |^ *>|Could not|Plugin .* was not found|Exception|error:)' release-check.txt || true) | sed -n '1,8p' | while IFS= read -r line; do
+              line=${line//'%'/'%25'}; line=${line//$'\r'/'%0D'}; line=${line//$'\n'/'%0A'}
+              echo "::error title=Unsigned build diagnostics::$line"
+            done
+            exit 1
+          fi
       - name: Verify release signing with disposable CI keys
         working-directory: apps/printly-owner-android
         shell: bash
@@ -92,7 +100,7 @@ jobs:
           EXPECTED_CERTIFICATE=$(openssl x509 -in "$VAULT/certificate.pem" -noout -fingerprint -sha256 | cut -d= -f2)
           # Exercise the actual protected-review signing script, without any
           # real environment secrets or a review request.
-          GITHUB_EVENT_NAME=push ../../scripts/sign-android-review.sh
+          GITHUB_EVENT_NAME=push PRINTLY_ANDROID_KEYSTORE_PASSWORD="${PRINTLY_ANDROID_KEYSTORE_PASSWORD}"$'\r\n' ../../scripts/sign-android-review.sh
           if compgen -G "$RUNNER_TEMP/printly-release.*.keystore" > /dev/null; then echo 'A temporary review keystore was left behind.' >&2; exit 1; fi
           test -s signer-evidence.txt && test -s package-evidence.txt && test -s sha256-evidence.txt
           RELEASE=app/build/outputs/apk/release/app-release.apk
@@ -115,11 +123,15 @@ jobs:
           ENCRYPTED="$RUNNER_TEMP/printly-ci-review.apk.gpg"
           DECRYPTED="$RUNNER_TEMP/printly-ci-review-decrypted.apk"
           TAMPERED="$RUNNER_TEMP/printly-ci-review-tampered.gpg"
+          COPIED="$RUNNER_TEMP/printly-ci-review-copied.gpg"
           export GNUPGHOME="$RUNNER_TEMP/printly-ci-gpg"
           mkdir -m 700 "$GNUPGHOME"
-          trap 'gpgconf --kill gpg-agent >/dev/null 2>&1 || true; rm -rf "$GNUPGHOME"; rm -f "$ENCRYPTED" "$DECRYPTED" "$TAMPERED"' EXIT
+          trap 'gpgconf --kill gpg-agent >/dev/null 2>&1 || true; rm -rf "$GNUPGHOME"; rm -f "$ENCRYPTED" "$DECRYPTED" "$TAMPERED" "$COPIED"' EXIT
           ../../scripts/encrypt-android-review.sh "$RELEASE" "$ENCRYPTED"
           printf '%s\n' "$PRINTLY_ANDROID_ARTIFACT_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --no-symkey-cache --passphrase-fd 0 --output "$DECRYPTED" --decrypt "$ENCRYPTED"
+          cmp "$RELEASE" "$DECRYPTED"
+          PRINTLY_ANDROID_ARTIFACT_PASSPHRASE="${PRINTLY_ANDROID_ARTIFACT_PASSPHRASE}"$'\r\n' ../../scripts/encrypt-android-review.sh "$RELEASE" "$COPIED"
+          printf '%s\n' "$PRINTLY_ANDROID_ARTIFACT_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --no-symkey-cache --passphrase-fd 0 --output "$DECRYPTED" --decrypt "$COPIED"
           cmp "$RELEASE" "$DECRYPTED"
           cp "$ENCRYPTED" "$TAMPERED"
           python3 -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]); b=bytearray(p.read_bytes()); b[-5] ^= 1; p.write_bytes(b)' "$TAMPERED"
@@ -128,6 +140,9 @@ jobs:
           fi
           if PRINTLY_ANDROID_ARTIFACT_PASSPHRASE=short ../../scripts/encrypt-android-review.sh "$RELEASE" "$TAMPERED"; then
             echo 'A short artifact passphrase was unexpectedly accepted.' >&2; exit 1
+          fi
+          if PRINTLY_ANDROID_ARTIFACT_PASSPHRASE="${PRINTLY_ANDROID_ARTIFACT_PASSPHRASE}"$'\n''extra' ../../scripts/encrypt-android-review.sh "$RELEASE" "$TAMPERED"; then
+            echo 'An internally multiline artifact passphrase was unexpectedly accepted.' >&2; exit 1
           fi
       - name: Build a debug-signed test APK
         working-directory: apps/printly-owner-android

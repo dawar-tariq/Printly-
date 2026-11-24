@@ -24,6 +24,7 @@ set -euo pipefail
 [ "$PRINTLY_ANDROID_KEYSTORE_TYPE" = 'PKCS12' ]
 [ "$PRINTLY_ANDROID_KEY_ALIAS" = 'printly-owner-release' ]
 [ "$PRINTLY_ANDROID_KEY_PASSWORD" = "$PRINTLY_ANDROID_KEYSTORE_PASSWORD" ]
+[ "$PRINTLY_ANDROID_KEYSTORE_PASSWORD" = "$FAKE_EXPECTED_PASSWORD" ]
 [ -z "\${KEYSTORE_BASE64+x}" ]
 [ "$(stat -c '%a' "$PRINTLY_ANDROID_KEYSTORE_PATH")" = '600' ]
 [ "$(cat "$PRINTLY_ANDROID_KEYSTORE_PATH")" = 'disposable-keystore' ]
@@ -43,7 +44,7 @@ printf "package: name='%s' versionCode='%s' versionName='1.0.0'\\n" "$FAKE_PACKA
   const env = {
     PATH: process.env.PATH, HOME: root, ANDROID_HOME: join(root, 'sdk'), RUNNER_TEMP: runner,
     KEYSTORE_BASE64: Buffer.from('disposable-keystore').toString('base64'),
-    PRINTLY_ANDROID_KEYSTORE_PASSWORD: 'disposable-password',
+    PRINTLY_ANDROID_KEYSTORE_PASSWORD: 'c'.repeat(64), FAKE_EXPECTED_PASSWORD: 'c'.repeat(64),
     EXPECTED_CERTIFICATE: Array(32).fill('AA').join(':'),
     REQUESTED_VERSION_CODE: '1', GITHUB_EVENT_NAME: 'push',
     FAKE_ACTUAL: 'a'.repeat(64), FAKE_PACKAGE: 'io.github.dawartariq.printly.owner', FAKE_VERSION: '1',
@@ -63,7 +64,7 @@ describe('protected Android review signing script with disposable tools', () => 
     expect(readFileSync(join(f.app, 'package-evidence.txt'), 'utf8')).toContain("name='io.github.dawartariq.printly.owner' versionCode='1'");
     const digest = createHash('sha256').update('disposable-apk').digest('hex');
     expect(readFileSync(join(f.app, 'sha256-evidence.txt'), 'utf8')).toMatch(new RegExp(`^${digest} `));
-    expect(result.stdout + result.stderr).not.toContain('disposable-password');
+    expect(result.stdout + result.stderr).not.toContain('c'.repeat(64));
     expect(result.stdout + result.stderr).not.toContain('disposable-keystore');
   });
 
@@ -72,9 +73,16 @@ describe('protected Android review signing script with disposable tools', () => 
     expect(f.run().status).toBe(0); f.noTemporaryKeystore();
   });
 
+  it('accepts a copied password with trailing CRLF without changing its value', () => {
+    const f = setup({ PRINTLY_ANDROID_KEYSTORE_PASSWORD: 'c'.repeat(64) + '\r\n' });
+    expect(f.run().status).toBe(0); f.noTemporaryKeystore();
+  });
+
   it.each([
     ['missing keystore', { KEYSTORE_BASE64: '' }],
     ['missing password', { PRINTLY_ANDROID_KEYSTORE_PASSWORD: '' }],
+    ['malformed password', { PRINTLY_ANDROID_KEYSTORE_PASSWORD: 'not-the-generated-password' }],
+    ['password with an internal newline', { PRINTLY_ANDROID_KEYSTORE_PASSWORD: 'c'.repeat(32) + '\n' + 'c'.repeat(32) }],
     ['invalid expected fingerprint', { EXPECTED_CERTIFICATE: 'not-a-fingerprint' }],
     ['unmatched manual fingerprint', { GITHUB_EVENT_NAME: 'workflow_dispatch', MANUAL_EXPECTED_CERTIFICATE: 'b'.repeat(64) }],
     ['unexpected event', { GITHUB_EVENT_NAME: 'pull_request' }],
@@ -92,6 +100,6 @@ describe('protected Android review signing script with disposable tools', () => 
     const f = setup(overrides); const result = f.run();
     expect(result.status).not.toBe(0); f.noTemporaryKeystore();
     expect(existsSync(join(f.app, 'sha256-evidence.txt'))).toBe(false);
-    expect(result.stdout + result.stderr).not.toContain('disposable-password');
+    expect(result.stdout + result.stderr).not.toContain('c'.repeat(64));
   });
 });

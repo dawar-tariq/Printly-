@@ -12,8 +12,14 @@ MANUAL_EXPECTED_CERTIFICATE=${MANUAL_EXPECTED_CERTIFICATE:-}
 REQUESTED_VERSION_CODE=${REQUESTED_VERSION_CODE:-}
 GITHUB_EVENT_NAME=${GITHUB_EVENT_NAME:-}
 
-if [ -z "$KEYSTORE_BASE64" ] || [ -z "$PRINTLY_ANDROID_KEYSTORE_PASSWORD" ]; then
-  echo 'Release signing environment secrets are not configured.' >&2
+# Copying the saved text file can add a line ending. The generated keystore
+# password itself is exactly 64 lowercase hexadecimal characters; never strip
+# internal whitespace or accept an ambiguous value.
+while [[ "$PRINTLY_ANDROID_KEYSTORE_PASSWORD" == *$'\n' || "$PRINTLY_ANDROID_KEYSTORE_PASSWORD" == *$'\r' ]]; do
+  PRINTLY_ANDROID_KEYSTORE_PASSWORD=${PRINTLY_ANDROID_KEYSTORE_PASSWORD%?}
+done
+if [ -z "$KEYSTORE_BASE64" ] || [[ ! "$PRINTLY_ANDROID_KEYSTORE_PASSWORD" =~ ^[0-9a-f]{64}$ ]]; then
+  echo 'Release signing environment secrets are not configured correctly.' >&2
   exit 1
 fi
 if [[ ! "$REQUESTED_VERSION_CODE" =~ ^[1-9][0-9]{0,9}$ ]] || (( 10#$REQUESTED_VERSION_CODE > 2100000000 )); then

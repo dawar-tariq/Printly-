@@ -9,6 +9,9 @@ if [ "$#" -ne 2 ] || [ ! -f "$1" ] || [ "$1" = "$2" ]; then
 fi
 passphrase=${PRINTLY_ANDROID_ARTIFACT_PASSPHRASE:-}
 unset PRINTLY_ANDROID_ARTIFACT_PASSPHRASE
+# Allow trailing line endings from copying a text file; still reject a newline
+# inside the passphrase so decryption cannot silently use only its first line.
+while [[ "$passphrase" == *$'\n' || "$passphrase" == *$'\r' ]]; do passphrase=${passphrase%?}; done
 if [ "${#passphrase}" -lt 24 ] || [ "${#passphrase}" -gt 1024 ] || [[ "$passphrase" == *$'\n'* || "$passphrase" == *$'\r'* ]]; then
   echo 'Configure a separate, single-line artifact passphrase of at least 24 characters.' >&2
   exit 1
