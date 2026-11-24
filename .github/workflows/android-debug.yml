@@ -29,9 +29,21 @@ jobs:
           set -o pipefail
           test "$result" -eq 0
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
-      - name: Build an unsigned-for-release test APK
+      - name: Build a debug-signed test APK
         working-directory: apps/printly-owner-android
-        run: ./gradlew --no-daemon assembleDebug
+        shell: bash
+        run: |
+          set +e
+          ./gradlew --no-daemon assembleDebug --stacktrace > build-log.txt 2>&1
+          result=$?
+          cat build-log.txt
+          if [ "$result" -ne 0 ]; then
+            grep -E '(^FAILURE:|^\\* What went wrong|^> |^   > |error:|^Caused by:)' build-log.txt | head -8 | while IFS= read -r line; do
+              line=${line//'%'/'%25'}; line=${line//$'\r'/'%0D'}; line=${line//$'\n'/'%0A'}
+              echo "::error title=Android build::$line"
+            done
+          fi
+          exit "$result"
       - name: Inspect the debug package
         working-directory: apps/printly-owner-android
         run: |
