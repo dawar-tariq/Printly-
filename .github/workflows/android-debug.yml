@@ -40,6 +40,22 @@ jobs:
             exit 1
           fi
           grep -F 'Release signing is not configured' release-check.txt
+      - name: Verify release signing with a disposable CI key
+        working-directory: apps/printly-owner-android
+        shell: bash
+        run: |
+          # This key and release APK are never uploaded or used for distribution.
+          KEYSTORE="$RUNNER_TEMP/printly-ci-test.p12"
+          trap 'rm -f "$KEYSTORE"' EXIT
+          keytool -genkeypair -noprompt -keystore "$KEYSTORE" -storetype PKCS12 \
+            -storepass ci-test-only -keypass ci-test-only -alias ci-test \
+            -keyalg RSA -keysize 2048 -validity 1 -dname 'CN=Disposable CI Test'
+          PRINTLY_ANDROID_KEYSTORE_PATH="$KEYSTORE" PRINTLY_ANDROID_KEYSTORE_PASSWORD=ci-test-only \
+            PRINTLY_ANDROID_KEY_ALIAS=ci-test PRINTLY_ANDROID_KEY_PASSWORD=ci-test-only \
+            ./gradlew --no-daemon assembleRelease
+          RELEASE=app/build/outputs/apk/release/app-release.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$RELEASE"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$RELEASE" | grep -F "package: name='io.github.dawartariq.printly.owner'"
       - name: Build a debug-signed test APK
         working-directory: apps/printly-owner-android
         shell: bash
