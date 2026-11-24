@@ -65,6 +65,34 @@ jobs:
             test "$actual" = "$expected"
             "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$RELEASE" | grep -F "package: name='io.github.dawartariq.printly.owner'"
           done
+      - name: Verify a disposable OpenSSL-generated Android signing key
+        working-directory: apps/printly-owner-android
+        shell: bash
+        run: |
+          set -eu -o pipefail
+          VAULT="$RUNNER_TEMP/printly-disposable-owner-key"
+          trap 'rm -rf "$VAULT"' EXIT
+          ../../scripts/create-owner-signing-key.sh "$VAULT"
+          test "$(stat -c '%a' "$VAULT")" = 700
+          test "$(stat -c '%a' "$VAULT/keystore-password.txt")" = 600
+          test ! -e "$VAULT/encrypted-private-key.pem"
+          export PRINTLY_ANDROID_KEYSTORE_PATH="$VAULT/printly-owner-release.p12"
+          export PRINTLY_ANDROID_KEYSTORE_TYPE=PKCS12
+          export PRINTLY_ANDROID_KEYSTORE_PASSWORD
+          PRINTLY_ANDROID_KEYSTORE_PASSWORD=$(cat "$VAULT/keystore-password.txt")
+          export PRINTLY_ANDROID_KEY_ALIAS=printly-owner-release
+          export PRINTLY_ANDROID_KEY_PASSWORD="$PRINTLY_ANDROID_KEYSTORE_PASSWORD"
+          keytool -list -keystore "$PRINTLY_ANDROID_KEYSTORE_PATH" -storetype PKCS12 -storepass:env PRINTLY_ANDROID_KEYSTORE_PASSWORD -alias "$PRINTLY_ANDROID_KEY_ALIAS" > /dev/null
+          ./gradlew --no-daemon assembleRelease
+          RELEASE=app/build/outputs/apk/release/app-release.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$RELEASE" > ci-openssl-signer.txt
+          mapfile -t signers < <(sed -n 's/^Signer #[0-9]* certificate SHA-256 digest: //p' ci-openssl-signer.txt)
+          test "${#signers[@]}" -eq 1
+          actual=$(printf '%s' "${signers[0]}" | tr -d ':' | tr '[:upper:]' '[:lower:]')
+          expected=$(openssl x509 -in "$VAULT/certificate.pem" -noout -fingerprint -sha256 | cut -d= -f2 | tr -d ':' | tr '[:upper:]' '[:lower:]')
+          [[ "$expected" =~ ^[0-9a-f]{64}$ ]]
+          test "$actual" = "$expected"
+          unset PRINTLY_ANDROID_KEYSTORE_PASSWORD PRINTLY_ANDROID_KEY_PASSWORD
       - name: Verify encrypted review artifacts with disposable data
         working-directory: apps/printly-owner-android
         shell: bash
