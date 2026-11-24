@@ -1,6 +1,7 @@
 {
   "purpose": "signed-review-only",
   "package": "io.github.dawartariq.printly.owner",
-  "version_code": 1,
-  "request_id": "example-not-an-actual-request"
+  "version_code": 2,
+  "request_id": "example-not-an-actual-request",
+  "reference_certificate_sha256": "C3:1F:2F:72:83:F5:F3:29:04:18:5A:2E:FD:E6:B9:7C:E8:97:45:C7:29:2A:33:0B:82:8B:52:58:25:FF:00:1F"
 }

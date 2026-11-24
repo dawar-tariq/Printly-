@@ -35,6 +35,12 @@
                 <data android:scheme="https" android:host="printly-steel-three.vercel.app" android:path="/owner-app" />
             </intent-filter>
         </activity>
+        <!-- Browser Helper enables or disables this component during launch on
+             Android 7.1+. Without a declaration, PackageManager can throw and
+             terminate the launcher before the browser opens. Keep it internal. -->
+        <activity android:name="com.google.androidbrowserhelper.trusted.ManageDataLauncherActivity" android:exported="false">
+            <meta-data android:name="android.support.customtabs.trusted.MANAGE_SPACE_URL" android:value="@string/launch_url" />
+        </activity>
         <activity android:name="com.google.androidbrowserhelper.trusted.FocusActivity" android:exported="false" />
         <activity android:name="com.google.androidbrowserhelper.trusted.NotificationPermissionRequestActivity" android:exported="false" />
         <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.fileprovider" android:grantUriPermissions="true" android:exported="false">

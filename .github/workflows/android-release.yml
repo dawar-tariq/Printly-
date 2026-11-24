@@ -59,14 +59,11 @@ jobs:
         id: request
         working-directory: apps/printly-owner-android
         shell: bash
+        env:
+          EXPECTED_CERTIFICATE: ${{ vars.PRINTLY_ANDROID_EXPECTED_CERT_SHA256 }}
         run: |
           set -eu -o pipefail
-          test -f signed-review-request.json
-          jq -e 'type == "object" and .purpose == "signed-review-only" and
-            .package == "io.github.dawartariq.printly.owner" and
-            (.request_id | type == "string" and test("^[A-Za-z0-9._-]{8,80}$")) and
-            (.version_code | type == "number" and . >= 1 and . <= 2100000000 and . == floor)' signed-review-request.json > /dev/null
-          echo "version_code=$(jq -r .version_code signed-review-request.json)" >> "$GITHUB_OUTPUT"
+          ../../scripts/check-android-review-request.sh signed-review-request.json
           echo "::notice title=Review build::Review-only APK requested from commit $GITHUB_SHA; this does not publish or deploy."
       # Fail before touching the signing key if the configured artifact
       # passphrase or GnuPG setup cannot encrypt and decrypt harmless data.
@@ -98,7 +95,11 @@ jobs:
           EXPECTED_CERTIFICATE: ${{ vars.PRINTLY_ANDROID_EXPECTED_CERT_SHA256 }}
           MANUAL_EXPECTED_CERTIFICATE: ${{ inputs.expected_certificate_sha256 }}
           REQUESTED_VERSION_CODE: ${{ steps.request.outputs.version_code }}
-        run: ../../scripts/sign-android-review.sh
+        run: |
+          set -eu -o pipefail
+          ../../scripts/sign-android-review.sh
+          "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest print app/build/outputs/apk/release/app-release.apk > review-compiled-manifest.xml
+          python3 ../../scripts/check-android-launch-manifest.py review-compiled-manifest.xml io.github.dawartariq.printly.owner
       - name: Encrypt the review APK for the operator
         working-directory: apps/printly-owner-android
         shell: bash
