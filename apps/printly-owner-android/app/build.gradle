@@ -17,14 +17,19 @@ android {
 
     def storePath = System.getenv('PRINTLY_ANDROID_KEYSTORE_PATH')
     def storePasswordValue = System.getenv('PRINTLY_ANDROID_KEYSTORE_PASSWORD')
+    def storeTypeValue = System.getenv('PRINTLY_ANDROID_KEYSTORE_TYPE')
     def keyAliasValue = System.getenv('PRINTLY_ANDROID_KEY_ALIAS')
     def keyPasswordValue = System.getenv('PRINTLY_ANDROID_KEY_PASSWORD')
+    if (storeTypeValue && !(storeTypeValue in ['JKS', 'PKCS12'])) {
+        throw new GradleException('PRINTLY_ANDROID_KEYSTORE_TYPE must be JKS or PKCS12 when supplied.')
+    }
     def releaseSigningReady = [storePath, storePasswordValue, keyAliasValue, keyPasswordValue].every { it != null && !it.isEmpty() }
     signingConfigs {
         if (releaseSigningReady) {
             release {
                 storeFile file(storePath)
                 storePassword storePasswordValue
+                if (storeTypeValue) storeType storeTypeValue
                 keyAlias keyAliasValue
                 keyPassword keyPasswordValue
             }

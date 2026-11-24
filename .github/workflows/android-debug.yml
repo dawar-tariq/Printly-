@@ -40,28 +40,56 @@ jobs:
             exit 1
           fi
           grep -F 'Release signing is not configured' release-check.txt
-      - name: Verify release signing with a disposable CI key
+      - name: Verify release signing with disposable CI keys
         working-directory: apps/printly-owner-android
         shell: bash
         run: |
-          # This key and release APK are never uploaded or used for distribution.
-          KEYSTORE="$RUNNER_TEMP/printly-ci-test.p12"
-          trap 'rm -f "$KEYSTORE"' EXIT
-          keytool -genkeypair -noprompt -keystore "$KEYSTORE" -storetype PKCS12 \
-            -storepass ci-test-only -keypass ci-test-only -alias ci-test \
-            -keyalg RSA -keysize 2048 -validity 1 -dname 'CN=Disposable CI Test'
-          PRINTLY_ANDROID_KEYSTORE_PATH="$KEYSTORE" PRINTLY_ANDROID_KEYSTORE_PASSWORD=ci-test-only \
-            PRINTLY_ANDROID_KEY_ALIAS=ci-test PRINTLY_ANDROID_KEY_PASSWORD=ci-test-only \
-            ./gradlew --no-daemon assembleRelease
+          set -eu -o pipefail
+          # Neither test key nor release APK is uploaded or used for distribution.
+          trap 'rm -f "$RUNNER_TEMP/printly-ci-PKCS12.keystore" "$RUNNER_TEMP/printly-ci-JKS.keystore"' EXIT
+          for STORETYPE in PKCS12 JKS; do
+            KEYSTORE="$RUNNER_TEMP/printly-ci-$STORETYPE.keystore"
+            keytool -genkeypair -noprompt -keystore "$KEYSTORE" -storetype "$STORETYPE" \
+              -storepass ci-test-only -keypass ci-test-only -alias ci-test \
+              -keyalg RSA -keysize 2048 -validity 1 -dname 'CN=Disposable CI Test'
+            PRINTLY_ANDROID_KEYSTORE_PATH="$KEYSTORE" PRINTLY_ANDROID_KEYSTORE_PASSWORD=ci-test-only \
+              PRINTLY_ANDROID_KEYSTORE_TYPE="$STORETYPE" PRINTLY_ANDROID_KEY_ALIAS=ci-test PRINTLY_ANDROID_KEY_PASSWORD=ci-test-only \
+              ./gradlew --no-daemon assembleRelease
+            RELEASE=app/build/outputs/apk/release/app-release.apk
+            "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$RELEASE" > ci-signer.txt
+            mapfile -t signers < <(sed -n 's/^Signer #[0-9]* certificate SHA-256 digest: //p' ci-signer.txt)
+            test "${#signers[@]}" -eq 1
+            actual=$(printf '%s' "${signers[0]}" | tr -d ':' | tr '[:upper:]' '[:lower:]')
+            expected=$(keytool -list -v -keystore "$KEYSTORE" -storetype "$STORETYPE" -storepass ci-test-only -alias ci-test | sed -n 's/^[[:space:]]*SHA256: //p' | tr -d ':' | tr '[:upper:]' '[:lower:]')
+            [[ "$expected" =~ ^[0-9a-f]{64}$ ]]
+            test "$actual" = "$expected"
+            "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$RELEASE" | grep -F "package: name='io.github.dawartariq.printly.owner'"
+          done
+      - name: Verify encrypted review artifacts with disposable data
+        working-directory: apps/printly-owner-android
+        shell: bash
+        env:
+          PRINTLY_ANDROID_ARTIFACT_PASSPHRASE: 'disposable-ci-only-passphrase-not-a-secret'
+        run: |
+          set -eu -o pipefail
           RELEASE=app/build/outputs/apk/release/app-release.apk
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$RELEASE" > ci-signer.txt
-          mapfile -t signers < <(sed -n 's/^Signer #[0-9]* certificate SHA-256 digest: //p' ci-signer.txt)
-          test "${#signers[@]}" -eq 1
-          actual=$(printf '%s' "${signers[0]}" | tr -d ':' | tr '[:upper:]' '[:lower:]')
-          expected=$(keytool -list -v -keystore "$KEYSTORE" -storepass ci-test-only -alias ci-test | sed -n 's/^[[:space:]]*SHA256: //p' | tr -d ':' | tr '[:upper:]' '[:lower:]')
-          [[ "$expected" =~ ^[0-9a-f]{64}$ ]]
-          test "$actual" = "$expected"
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$RELEASE" | grep -F "package: name='io.github.dawartariq.printly.owner'"
+          ENCRYPTED="$RUNNER_TEMP/printly-ci-review.apk.gpg"
+          DECRYPTED="$RUNNER_TEMP/printly-ci-review-decrypted.apk"
+          TAMPERED="$RUNNER_TEMP/printly-ci-review-tampered.gpg"
+          export GNUPGHOME="$RUNNER_TEMP/printly-ci-gpg"
+          mkdir -m 700 "$GNUPGHOME"
+          trap 'gpgconf --kill gpg-agent >/dev/null 2>&1 || true; rm -rf "$GNUPGHOME"; rm -f "$ENCRYPTED" "$DECRYPTED" "$TAMPERED"' EXIT
+          ../../scripts/encrypt-android-review.sh "$RELEASE" "$ENCRYPTED"
+          printf '%s\n' "$PRINTLY_ANDROID_ARTIFACT_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --no-symkey-cache --passphrase-fd 0 --output "$DECRYPTED" --decrypt "$ENCRYPTED"
+          cmp "$RELEASE" "$DECRYPTED"
+          cp "$ENCRYPTED" "$TAMPERED"
+          python3 -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]); b=bytearray(p.read_bytes()); b[-5] ^= 1; p.write_bytes(b)' "$TAMPERED"
+          if printf '%s\n' "$PRINTLY_ANDROID_ARTIFACT_PASSPHRASE" | gpg --batch --pinentry-mode loopback --no-symkey-cache --passphrase-fd 0 --decrypt "$TAMPERED" > /dev/null 2>&1; then
+            echo 'A tampered encrypted artifact unexpectedly decrypted successfully.' >&2; exit 1
+          fi
+          if PRINTLY_ANDROID_ARTIFACT_PASSPHRASE=short ../../scripts/encrypt-android-review.sh "$RELEASE" "$TAMPERED"; then
+            echo 'A short artifact passphrase was unexpectedly accepted.' >&2; exit 1
+          fi
       - name: Build a debug-signed test APK
         working-directory: apps/printly-owner-android
         shell: bash
