@@ -29,7 +29,8 @@ function append(chunk) { logs = (logs + chunk.toString()).slice(-12000); }
 function clean(value) {
   let text = String(value || '');
   for (const part of [token, credentials?.service, credentials?.anon, password, staffPassword]) if (part) text = text.split(part).join('[redacted]');
-  return text.replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[redacted]').slice(-4000);
+  return text.replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[redacted]')
+    .replace(/[0-9a-f]{8}-[0-9a-f-]{27}\.[A-Za-z0-9_-]{8,}/gi, '[redacted support code]').slice(-4000);
 }
 function child(args, env) {
   const proc = spawn(process.execPath, [next, ...args], { env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -156,7 +157,7 @@ async function ownerIdentity(page) {
   const ownerCookies = (await owner.context().cookies()).filter((cookie) => cookie.name.includes('auth-token'));
   const staffCookies = (await staff.context().cookies()).filter((cookie) => cookie.name.includes('auth-token'));
   assert(ownerCookies.length && staffCookies.length, 'Both synthetic sessions need auth cookies');
-  assert.notEqual(ownerCookies[0].value, staffCookies[0].value, 'Synthetic sessions must not share a cookie');
+  assert(ownerCookies[0].value !== staffCookies[0].value, 'Synthetic sessions must not share a cookie');
   const ownerStatus = await ownerIdentity(owner);
   assert.equal(ownerStatus.status, 200, `Owner identity lookup HTTP ${ownerStatus.status}, ${ownerStatus.code || ''}`);
   assert.equal(ownerStatus.isOwner, true, 'Owner session became non-owner after staff sign-in');
@@ -287,14 +288,30 @@ async function ownerIdentity(page) {
   await support.getByRole('button', { name: 'Send request' }).click();
   ticketId = (await supportRequest).postDataJSON().id;
   assert.equal((await supportResponse).status(), 200);
-  await support.getByLabel('Your private access code').waitFor();
+  const privateCode = support.getByRole('textbox', { name: 'Your private access code', exact: true });
+  await privateCode.waitFor();
+  const savedCode = await privateCode.inputValue();
+  assert(/^[0-9a-f-]{36}\.[A-Za-z0-9_-]{43}$/i.test(savedCode), 'Support code format was unexpected');
   await support.getByText('Synthetic support message.').waitFor();
-  await support.getByLabel('Your reply').fill('Synthetic follow-up.');
+  await support.getByRole('textbox', { name: 'Your reply', exact: true }).fill('Synthetic follow-up.');
   const reply = support.waitForResponse((r) => r.url() === `${base}/api/support/conversation` && r.request().method() === 'POST' && r.request().postDataJSON()?.action === 'reply');
   await support.getByRole('button', { name: 'Send reply' }).click();
   assert.equal((await reply).status(), 200);
   await support.getByText('Synthetic follow-up.').waitFor();
-  console.log('✓ Existing code-protected support creation and replies still work');
+  const supportReader = await browser.newPage(); await configurePage(supportReader);
+  await supportReader.goto(`${base}/support`, { waitUntil: 'domcontentloaded' });
+  const wrongCode = await supportReader.evaluate(async ({ id, secret }) => {
+    const response = await fetch('/api/support/conversation', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'read', id, secret }) });
+    return response.status;
+  }, { id: ticketId, secret: randomBytes(32).toString('base64url') });
+  assert.equal(wrongCode, 404, 'A wrong private code must not open the conversation');
+  await supportReader.getByRole('button', { name: 'Open a request', exact: true }).click();
+  await supportReader.getByRole('textbox', { name: 'Private access code', exact: true }).fill(savedCode);
+  await supportReader.getByRole('button', { name: 'Open conversation', exact: true }).click();
+  await supportReader.getByText('Synthetic support message.').waitFor();
+  await supportReader.getByText('Synthetic follow-up.').waitFor();
+  console.log('✓ Existing code-protected support creation, reply and separate-session reopening work');
 })().catch((error) => {
   failed = true;
   console.error(`STAGING_SHOP_PROBE_FAILED at ${phase}: ${clean(error?.message || error)}`);
