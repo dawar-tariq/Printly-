@@ -31,9 +31,19 @@ android {
         }
     }
     buildTypes {
+        // Test APKs cannot overwrite or impersonate a release installation.
+        debug {
+            applicationIdSuffix '.debug'
+            versionNameSuffix '-debug'
+        }
         release {
             minifyEnabled false
             if (releaseSigningReady) signingConfig signingConfigs.release
+        }
+    }
+    gradle.taskGraph.whenReady { graph ->
+        if (!releaseSigningReady && graph.allTasks.any { it.path.startsWith(':app:') && it.name in ['assembleRelease', 'bundleRelease', 'packageRelease'] }) {
+            throw new GradleException('Release signing is not configured. Set all four PRINTLY_ANDROID_KEYSTORE_* / KEY_* variables before building a release.')
         }
     }
     compileOptions {
