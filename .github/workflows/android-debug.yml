@@ -54,7 +54,13 @@ jobs:
             PRINTLY_ANDROID_KEY_ALIAS=ci-test PRINTLY_ANDROID_KEY_PASSWORD=ci-test-only \
             ./gradlew --no-daemon assembleRelease
           RELEASE=app/build/outputs/apk/release/app-release.apk
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$RELEASE"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$RELEASE" > ci-signer.txt
+          mapfile -t signers < <(sed -n 's/^Signer #[0-9]* certificate SHA-256 digest: //p' ci-signer.txt)
+          test "${#signers[@]}" -eq 1
+          actual=$(printf '%s' "${signers[0]}" | tr -d ':' | tr '[:upper:]' '[:lower:]')
+          expected=$(keytool -list -v -keystore "$KEYSTORE" -storepass ci-test-only -alias ci-test | sed -n 's/^[[:space:]]*SHA256: //p' | tr -d ':' | tr '[:upper:]' '[:lower:]')
+          [[ "$expected" =~ ^[0-9a-f]{64}$ ]]
+          test "$actual" = "$expected"
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$RELEASE" | grep -F "package: name='io.github.dawartariq.printly.owner'"
       - name: Build a debug-signed test APK
         working-directory: apps/printly-owner-android
