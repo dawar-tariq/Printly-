@@ -1,0 +1,83 @@
+name: Android signed release build
+
+# Manual only. This builds an artifact but never publishes or deploys it.
+on:
+  workflow_dispatch:
+    inputs:
+      expected_certificate_sha256:
+        description: 'Independently verified release certificate SHA-256 fingerprint'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  signed-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Android platform
+        shell: bash
+        run: |
+          set +o pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+          result=${PIPESTATUS[1]}
+          set -o pipefail
+          test "$result" -eq 0
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Sign and independently verify the APK
+        working-directory: apps/printly-owner-android
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.PRINTLY_ANDROID_KEYSTORE_BASE64 }}
+          PRINTLY_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.PRINTLY_ANDROID_KEYSTORE_PASSWORD }}
+          PRINTLY_ANDROID_KEY_ALIAS: ${{ secrets.PRINTLY_ANDROID_KEY_ALIAS }}
+          PRINTLY_ANDROID_KEY_PASSWORD: ${{ secrets.PRINTLY_ANDROID_KEY_PASSWORD }}
+          EXPECTED_CERTIFICATE: ${{ inputs.expected_certificate_sha256 }}
+        run: |
+          set -eu -o pipefail
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$PRINTLY_ANDROID_KEYSTORE_PASSWORD" ] || [ -z "$PRINTLY_ANDROID_KEY_ALIAS" ] || [ -z "$PRINTLY_ANDROID_KEY_PASSWORD" ]; then
+            echo 'Release signing secrets are not configured.' >&2
+            exit 1
+          fi
+          expected=$(printf '%s' "$EXPECTED_CERTIFICATE" | tr -d ':' | tr '[:upper:]' '[:lower:]')
+          [[ "$expected" =~ ^[0-9a-f]{64}$ ]] || { echo 'Invalid expected certificate SHA-256.' >&2; exit 1; }
+          export PRINTLY_ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/printly-release-keystore.p12"
+          trap 'rm -f "$PRINTLY_ANDROID_KEYSTORE_PATH"' EXIT
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$PRINTLY_ANDROID_KEYSTORE_PATH"
+          unset KEYSTORE_BASE64
+          ./gradlew --no-daemon assembleRelease
+          APK=app/build/outputs/apk/release/app-release.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK" > signer-evidence.txt
+          mapfile -t signers < <(sed -n 's/^Signer #[0-9]* certificate SHA-256 digest: //p' signer-evidence.txt)
+          test "${#signers[@]}" -eq 1
+          actual=$(printf '%s' "${signers[0]}" | tr -d ':' | tr '[:upper:]' '[:lower:]')
+          [ "$actual" = "$expected" ] || { echo 'Signer does not match the independently verified certificate.' >&2; exit 1; }
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" > package-evidence.txt
+          grep -F "package: name='io.github.dawartariq.printly.owner'" package-evidence.txt
+          sha256sum "$APK" > sha256-evidence.txt
+          cat sha256-evidence.txt
+          echo "::notice title=Release APK SHA-256::$(cut -d' ' -f1 sha256-evidence.txt)"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: printly-owner-signed-release-review
+          path: |
+            apps/printly-owner-android/app/build/outputs/apk/release/app-release.apk
+            apps/printly-owner-android/signer-evidence.txt
+            apps/printly-owner-android/package-evidence.txt
+            apps/printly-owner-android/sha256-evidence.txt
+          if-no-files-found: error
+          retention-days: 14
