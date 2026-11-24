@@ -5,6 +5,8 @@ on:
   push:
     paths:
       - 'apps/printly-owner-android/**'
+      - 'scripts/create-owner-signing-key.sh'
+      - 'scripts/encrypt-android-review.sh'
       - '.github/workflows/android-debug.yml'
 
 permissions:

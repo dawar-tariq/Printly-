@@ -28,7 +28,13 @@ describe('Android signing key creation (disposable test key)', () => {
     expect(statSync(join(vault, 'keystore-password.txt')).mode & 0o777).toBe(0o600);
     expect(statSync(join(vault, 'printly-owner-release.p12')).mode & 0o777).toBe(0o600);
     expect(() => statSync(join(vault, 'encrypted-private-key.pem'))).toThrow();
+    expect(() => statSync(join(vault, '.temporary-certificate-authority'))).toThrow();
     expect(readFileSync(join(vault, 'signing-info.txt'), 'utf8')).toMatch(/Alias: printly-owner-release[\s\S]*Certificate SHA-256: (?:[A-F0-9]{2}:){31}[A-F0-9]{2}/);
+    const dates = execFileSync('openssl', ['x509', '-in', join(vault, 'certificate.pem'), '-noout', '-dates'], { encoding: 'utf8' });
+    const start = Date.parse(dates.match(/^notBefore=(.*)$/m)[1]);
+    const end = Date.parse(dates.match(/^notAfter=(.*)$/m)[1]);
+    expect(start).toBeLessThan(Date.now() - 350 * 86400_000);
+    expect(end).toBeGreaterThan(Date.now() + 25 * 365 * 86400_000);
     const info = execFileSync('openssl', ['pkcs12', '-in', join(vault, 'printly-owner-release.p12'), '-passin', `file:${join(vault, 'keystore-password.txt')}`, '-info', '-noout'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
     expect(info).not.toContain(password);
   });
