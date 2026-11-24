@@ -16,6 +16,8 @@ keytool -list -v -storetype PKCS12 -keystore "/secure/path/to/printly-owner-rele
 
 Enter the store password privately when prompted. Verify the `PrivateKeyEntry` alias and its certificate **SHA-256 fingerprint** against the saved public information.
 
+This branch's protected workflow is deliberately specific to that PKCS12 key: it uses the `printly-owner-release` alias and the same password for the key and keystore. If an earlier installation requires a different key, do not run this workflow unchanged; investigate the existing signer and update the release process first.
+
 If there may already be an installed APK for this package, inspect the original APK with Android SDK tools before any distribution:
 
 ```sh
@@ -27,16 +29,12 @@ Confirm the package, signer fingerprint and version code against the intended ex
 
 ## 2. Configure GitHub's protected environment
 
-1. Review the exact branch, `.github/workflows/android-release.yml`, `scripts/check-android-signing-environment.mjs`, `scripts/encrypt-android-review.sh`, Gradle wrapper and Android build inputs. Anyone able to change build code or approve an untrusted workflow could steal signing credentials. Restrict repository administrators and workflow access accordingly.
+1. Review the exact branch, `.github/workflows/android-release.yml`, `scripts/check-android-signing-environment.mjs`, `scripts/sign-android-review.sh`, `scripts/encrypt-android-review.sh`, Gradle wrapper and Android build inputs. Anyone able to change build code or approve an untrusted workflow could steal signing credentials. Restrict repository administrators and workflow access accordingly.
 2. In [repository Settings → Environments](https://github.com/dawar-tariq/Printly-/settings/environments), create `printly-owner-signing`. Under protection rules, require at least one trusted reviewer, **disable “Allow administrators to bypass configured protection rules”**, and restrict deployments to **only** the exact branch `arena/309fdf51-printly` using selected branches/tags. Do not allow wildcard or additional branch/tag rules. If a second independent reviewer is available, also enable prevent self-review. Save the rules and check them in GitHub's UI. Environment protections for public repositories depend on GitHub's product/plan rules; this workflow deliberately refuses to run if the repository is private or the settings cannot be verified.
-3. Add these **environment variables** in that environment, independently from the keystore secrets:
-   - `PRINTLY_ANDROID_KEYSTORE_TYPE`: `JKS` or `PKCS12`, as reported by `keytool`.
-   - `PRINTLY_ANDROID_EXPECTED_CERT_SHA256`: the independently checked certificate fingerprint, as 64 hexadecimal characters or colon-separated byte pairs. If there is an earlier installation, compare with its real app-signing certificate first.
+3. Add the **environment variable** `PRINTLY_ANDROID_EXPECTED_CERT_SHA256`: the independently checked public certificate fingerprint, as 64 hexadecimal characters or colon-separated byte pairs. If there is an earlier installation, compare with its real app-signing certificate first.
 4. Add these **environment secrets**, not repository- or organization-wide secrets:
    - `PRINTLY_ANDROID_KEYSTORE_BASE64`: base64 of the original keystore bytes.
-   - `PRINTLY_ANDROID_KEYSTORE_PASSWORD`.
-   - `PRINTLY_ANDROID_KEY_ALIAS`.
-   - `PRINTLY_ANDROID_KEY_PASSWORD`.
+   - `PRINTLY_ANDROID_KEYSTORE_PASSWORD`: the password for both the PKCS12 keystore and its key.
    - `PRINTLY_ANDROID_ARTIFACT_PASSPHRASE`: a separate, strong, single-line passphrase of at least 24 characters; do not reuse a signing password. Retain it securely until the artifact has been decrypted.
 
 For example, with GitHub CLI installed and authenticated **on your own computer**, Linux/macOS users can securely send the keystore bytes to the environment without printing them:
@@ -48,7 +46,7 @@ base64 < "/secure/path/to/printly-owner-release.p12" | tr -d '\r\n' | gh secret 
 On Windows PowerShell the equivalent is:
 
 ```powershell
-[Convert]::ToBase64String([IO.File]::ReadAllBytes('C:\secure\your-existing.keystore')) | gh secret set PRINTLY_ANDROID_KEYSTORE_BASE64 --repo dawar-tariq/Printly- --env printly-owner-signing
+[Convert]::ToBase64String([IO.File]::ReadAllBytes('C:\secure\printly-owner-release.p12')) | gh secret set PRINTLY_ANDROID_KEYSTORE_BASE64 --repo dawar-tariq/Printly- --env printly-owner-signing
 ```
 
 Set the remaining secrets privately in GitHub's environment UI. Do not type passwords into command-line arguments. The agent cannot read or independently verify secret values and does not need them in chat. Environment secrets require a GitHub account authorized to configure the repository.

@@ -6,8 +6,10 @@ on:
     paths:
       - 'apps/printly-owner-android/**'
       - 'scripts/create-owner-signing-key.sh'
+      - 'scripts/sign-android-review.sh'
       - 'scripts/encrypt-android-review.sh'
       - '.github/workflows/android-debug.yml'
+      - '.github/workflows/android-release.yml'
 
 permissions:
   contents: read
@@ -85,7 +87,14 @@ jobs:
           export PRINTLY_ANDROID_KEY_ALIAS=printly-owner-release
           export PRINTLY_ANDROID_KEY_PASSWORD="$PRINTLY_ANDROID_KEYSTORE_PASSWORD"
           keytool -list -keystore "$PRINTLY_ANDROID_KEYSTORE_PATH" -storetype PKCS12 -storepass:env PRINTLY_ANDROID_KEYSTORE_PASSWORD -alias "$PRINTLY_ANDROID_KEY_ALIAS" > /dev/null
-          ./gradlew --no-daemon assembleRelease
+          export KEYSTORE_BASE64 EXPECTED_CERTIFICATE REQUESTED_VERSION_CODE=1
+          KEYSTORE_BASE64=$(base64 < "$PRINTLY_ANDROID_KEYSTORE_PATH" | tr -d '\r\n')
+          EXPECTED_CERTIFICATE=$(openssl x509 -in "$VAULT/certificate.pem" -noout -fingerprint -sha256 | cut -d= -f2)
+          # Exercise the actual protected-review signing script, without any
+          # real environment secrets or a review request.
+          GITHUB_EVENT_NAME=push ../../scripts/sign-android-review.sh
+          if compgen -G "$RUNNER_TEMP/printly-release.*.keystore" > /dev/null; then echo 'A temporary review keystore was left behind.' >&2; exit 1; fi
+          test -s signer-evidence.txt && test -s package-evidence.txt && test -s sha256-evidence.txt
           RELEASE=app/build/outputs/apk/release/app-release.apk
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$RELEASE" > ci-openssl-signer.txt
           mapfile -t signers < <(sed -n 's/^Signer #[0-9]* certificate SHA-256 digest: //p' ci-openssl-signer.txt)
@@ -94,7 +103,7 @@ jobs:
           expected=$(openssl x509 -in "$VAULT/certificate.pem" -noout -fingerprint -sha256 | cut -d= -f2 | tr -d ':' | tr '[:upper:]' '[:lower:]')
           [[ "$expected" =~ ^[0-9a-f]{64}$ ]]
           test "$actual" = "$expected"
-          unset PRINTLY_ANDROID_KEYSTORE_PASSWORD PRINTLY_ANDROID_KEY_PASSWORD
+          unset KEYSTORE_BASE64 PRINTLY_ANDROID_KEYSTORE_PASSWORD PRINTLY_ANDROID_KEY_PASSWORD
       - name: Verify encrypted review artifacts with disposable data
         working-directory: apps/printly-owner-android
         shell: bash
