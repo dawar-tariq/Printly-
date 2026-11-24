@@ -24,12 +24,15 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- Browser notification delegation also discovers the app through this verified HTTPS filter. -->
+            <!-- The /shop/ filter also matches the push worker scope used for browser notification delegation.
+                 Do not intercept public customer, tracking, support or admin links on a shared phone. -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" android:host="printly-steel-three.vercel.app" />
+                <data android:scheme="https" android:host="printly-steel-three.vercel.app" android:path="/shop" />
+                <data android:scheme="https" android:host="printly-steel-three.vercel.app" android:pathPrefix="/shop/" />
+                <data android:scheme="https" android:host="printly-steel-three.vercel.app" android:path="/owner-app" />
             </intent-filter>
         </activity>
         <activity android:name="com.google.androidbrowserhelper.trusted.FocusActivity" android:exported="false" />
