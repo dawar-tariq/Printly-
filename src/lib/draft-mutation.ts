@@ -21,6 +21,7 @@ export function draftMutationError(error: { message?: string } | null | undefine
   if (message.includes('WRONG_METHOD')) return jsonError(409, 'wrong_method', 'This is not a UPI order.');
   if (message.includes('BAD_PAYMENT_STATE')) return jsonError(409, 'bad_state', 'The payment status changed or is not awaiting this action. Refresh and try again.');
   if (message.includes('PAYMENT_MISSING')) return jsonError(409, 'payment_missing', 'Payment details are missing. Please contact the shop.');
+  if (message.includes('SHOP_CLOSED')) return jsonError(403, 'shop_closed', 'This shop is closed. Please check back when it reopens.');
   if (message.includes('SHOP_UNAVAILABLE')) return jsonError(409, 'shop_unavailable', 'This shop is not accepting orders right now.');
   if (message.includes('EMPTY_ORDER')) return jsonError(422, 'empty_order', 'Add at least one item.');
   if (message.includes('TOKEN_LIMIT_REACHED')) return jsonError(503, 'token_limit', 'The shop cannot issue another token today. Please contact the shop.');

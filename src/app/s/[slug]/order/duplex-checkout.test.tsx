@@ -17,6 +17,7 @@ let selectedItems: ItemSpec[];
 let rate: RateRow;
 
 beforeEach(() => {
+  window.sessionStorage.clear();
   selectedItems = [];
   rate = { service: 'print', paper_size: 'A4', color: 'bw', sides: 'duplex', paper_gsm: 80, option: null, unit: 'duplex_sheet', price_paise: 300 };
   vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => {
@@ -86,5 +87,86 @@ describe('customer duplex checkout', () => {
     await waitFor(() => expect(screen.getByText('10 × ₹1.50 per printed page')).toBeTruthy());
     expect(screen.getByText('2 × ₹1.50 per printed page')).toBeTruthy();
     expect(screen.getByText('₹21.24')).toBeTruthy();
+  });
+
+  it('allows only an identical ambiguous checkout retry after the shop closes', async () => {
+    const mock = vi.mocked(fetch);
+    const original = mock.getMockImplementation()!;
+    const attempts: unknown[] = [];
+    let closed = false;
+    mock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.startsWith('/api/shops/') && closed) return Response.json({ shop: { name: 'Demo Prints', status: 'active', is_open: false }, accepting_orders: false, services: [{ service: 'print', enabled: true }] });
+      if (url === `/api/orders/${order}/pay`) {
+        attempts.push(JSON.parse(String(init?.body)));
+        if (attempts.length === 1) throw new Error('response lost');
+        // The first request could still commit even if this later retry races
+        // the shop closure and is rejected before that commit becomes visible.
+        if (attempts.length === 2) return Response.json({ error: { code: 'shop_closed', message: 'This shop is closed.' } }, { status: 403 });
+        return Response.json({ mode: 'placed', total_paise: 2832 });
+      }
+      return original(input, init);
+    });
+    await goToDuplex();
+    fireEvent.change(screen.getByLabelText(/Your name/), { target: { value: 'Customer' } });
+    fireEvent.change(screen.getByLabelText(/^Phone/), { target: { value: '9797000000' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Proceed to pay' }));
+    await screen.findByText(/Could not complete checkout/);
+    expect((screen.getByLabelText(/Your name/).closest('fieldset') as HTMLFieldSetElement).disabled).toBe(true);
+    closed = true;
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    fireEvent(document, new Event('visibilitychange'));
+    await screen.findByText(/This shop is closed/);
+    const retry = screen.getByRole('button', { name: 'Retry checkout safely' }) as HTMLButtonElement;
+    expect(retry.disabled).toBe(false);
+    fireEvent.click(retry);
+    await waitFor(() => expect(attempts).toHaveLength(2));
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Retry checkout safely' }) as HTMLButtonElement).disabled).toBe(false));
+    expect((screen.getByLabelText(/Your name/).closest('fieldset') as HTMLFieldSetElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry checkout safely' }));
+    await waitFor(() => expect(attempts).toHaveLength(3));
+    expect(attempts[1]).toEqual(attempts[0]);
+    expect(attempts[2]).toEqual(attempts[0]);
+  });
+
+  it('recovers an interrupted checkout after reload, without saving contact details or starting another payment', async () => {
+    const mock = vi.mocked(fetch);
+    const original = mock.getMockImplementation()!;
+    const checks: unknown[] = [];
+    let closed = false;
+    let paymentAttempts = 0;
+    mock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.startsWith('/api/shops/') && closed) return Response.json({ shop: { name: 'Demo Prints', status: 'active', is_open: false }, accepting_orders: false, services: [{ service: 'print', enabled: true }] });
+      if (url === `/api/orders/${order}/pay`) { paymentAttempts++; throw new Error('response lost'); }
+      if (url === `/api/orders/${order}/pay/recover`) {
+        checks.push(JSON.parse(String(init?.body)));
+        if (checks.length === 1) return Response.json({ error: { code: 'checkout_unconfirmed', message: 'Checkout is not confirmed yet. Wait and check again.' } }, { status: 409 });
+        return Response.json({ mode: 'upi', link: 'upi://pay?pa=original%40upi', pa: 'original@upi', pn: 'Demo Prints', am: '28.32', tn: 'Printly', shop_name: 'Demo Prints', total_paise: 2832 });
+      }
+      return original(input, init);
+    });
+    await goToDuplex();
+    fireEvent.change(screen.getByLabelText(/Your name/), { target: { value: 'Private Customer' } });
+    fireEvent.change(screen.getByLabelText(/^Phone/), { target: { value: '9797000000' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Proceed to pay' }));
+    await screen.findByText(/Could not complete checkout/);
+    const saved = window.sessionStorage.getItem('printly-checkout-v1:p-demo1')!;
+    expect(saved).not.toContain('Private Customer'); expect(saved).not.toContain('9797000000');
+    expect(JSON.parse(saved)).toEqual({ order_id: order, method: 'upi', quote_token: 'a'.repeat(64) });
+
+    closed = true;
+    cleanup();
+    render(<OrderWizard />);
+    await screen.findByRole('heading', { name: 'Check your previous checkout' });
+    expect(screen.getByRole('link', { name: 'View tracking link' }).getAttribute('href')).toBe(`/track/${order}`);
+    fireEvent.click(screen.getByRole('button', { name: 'Check previous checkout' }));
+    await screen.findByText(/Checkout is not confirmed yet/);
+    expect(window.sessionStorage.getItem('printly-checkout-v1:p-demo1')).toBe(saved);
+    fireEvent.click(screen.getByRole('button', { name: 'Check previous checkout' }));
+    await screen.findByText(/This checkout was already started/);
+    expect(screen.getByRole('link', { name: /Open UPI app/i }).getAttribute('href')).toBe('upi://pay?pa=original%40upi');
+    expect(paymentAttempts).toBe(1);
+    expect(checks).toEqual([{ method: 'upi', quote_token: 'a'.repeat(64) }, { method: 'upi', quote_token: 'a'.repeat(64) }]);
   });
 });

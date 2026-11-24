@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 
 interface Track {
-  order_id: string; token: string | null; status: string; payment_status: string; payment_method: string;
+  order_id: string; token: string | null; status: string; payment_status: string; payment_method: string | null;
   shop_name: string; shop_slug: string; shop_city: string; total_paise: number; eta_minutes: number | null;
   item_count: number; rush: boolean; created_at: string; ready_at: string | null; collected_at: string | null;
 }
@@ -176,6 +176,7 @@ export default function TrackPage() {
     );
   }
 
+  const checkoutUnconfirmed = track.status === 'draft' && !track.payment_method;
   const awaitingConfirmation = track.payment_method === 'upi' && track.payment_status === 'submitted';
   const awaitingPayment = track.payment_method === 'upi' && track.payment_status === 'pending';
   const rejected = track.payment_status === 'rejected';
@@ -209,6 +210,8 @@ export default function TrackPage() {
             </>
           ) : awaitingPayment ? (
             <div className="mt-3 text-lg font-extrabold">{t.notReported}</div>
+          ) : checkoutUnconfirmed ? (
+            <div className="mt-3 text-lg font-extrabold">{t.checkoutUnconfirmed}</div>
           ) : (
             <div className="mt-3 text-lg font-extrabold">{t.orderReceived}</div>
           )}
@@ -216,6 +219,7 @@ export default function TrackPage() {
           <p className="mt-3 text-xs text-neutral-500">{t.saveTracking}</p>
 
           {/* payment state banners */}
+          {checkoutUnconfirmed && <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-left text-xs text-amber-900">{t.checkoutUnconfirmedHelp}</div>}
           {awaitingPayment && (
             <div className="mt-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs px-4 py-2.5 text-left">{t.pendingHelp}</div>
           )}

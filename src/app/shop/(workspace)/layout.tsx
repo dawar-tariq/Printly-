@@ -44,7 +44,7 @@ export default async function ShopLayout({ children }: { children: React.ReactNo
 
   const admin = createAdminSupabase();
   const [{ data: shop }, { data: onboarding }, { data: plan }] = await Promise.all([
-    admin.from('shops').select('id, name, slug, short_code, kyc_status, status, owner_id').eq('id', staff.shopIds[0]).single(),
+    admin.from('shops').select('id, name, slug, short_code, kyc_status, status, is_open, owner_id').eq('id', staff.shopIds[0]).single(),
     admin.from('shop_onboarding').select('review_note').eq('shop_id', staff.shopIds[0]).maybeSingle(),
     admin.from('subscription_plan').select('warning_days').eq('id', true).maybeSingle(),
   ]);

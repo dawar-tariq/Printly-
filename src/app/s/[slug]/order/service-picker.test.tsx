@@ -44,6 +44,14 @@ describe('customer service picker', () => {
     expect(screen.getByText(/not accepting orders right now/i)).toBeTruthy();
   });
 
+  it('shows a closed notice and disables ordering when the owner closes the shop', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ shop: { name: 'Demo', status: 'active', is_open: false }, accepting_orders: false, services: [{ service: 'print', enabled: true }] })));
+    render(<OrderWizard />);
+    fireEvent.click(await screen.findByRole('button', { name: /print pdf/i }));
+    expect(screen.getByText(/This shop is closed/i)).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Continue' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('does not advance when order creation fails', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) => url.startsWith('/api/shops/')
       ? Response.json({ shop: { name: 'Demo', status: 'active' }, accepting_orders: true, services: [{ service: 'print', enabled: true }] })

@@ -17,6 +17,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   if (!loaded) return jsonError(404, 'order_not_found', 'Order not found');
   const { admin, order, items, card, gstBps, rushBps } = loaded;
   if (order.status !== 'draft' || order.payment_method) return jsonError(409, 'order_locked', 'The order has already entered checkout.');
+  if (order.shops?.is_open !== true) return jsonError(403, 'shop_closed', 'This shop is closed. Please check back when it reopens.');
+  if (order.shops?.status !== 'active') return jsonError(403, 'shop_unavailable', 'This shop is not accepting orders right now.');
   const subscribed = await shopHasSubscription(admin, order.shop_id);
   if (subscribed === null) return jsonError(503, 'db', 'Could not check shop availability. Please retry.');
   if (!subscribed) return jsonError(403, 'shop_unavailable', 'This shop is not accepting orders right now.');

@@ -17,6 +17,13 @@ const track = (payment_status: string) => ({
 });
 
 describe('UPI tracking recovery', () => {
+  it('does not call an unconfirmed draft a received order', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ track: { ...track('pending'), payment_method: null } })));
+    render(<TrackPage />);
+    expect(await screen.findByText('Checkout not confirmed yet')).toBeTruthy();
+    expect(screen.getByText(/earlier attempt may still be processing/i)).toBeTruthy();
+    expect(screen.queryByText('Order received')).toBeNull();
+  });
   it('distinguishes a temporary tracking failure from an unknown order and lets the customer retry', async () => {
     let available = false;
     vi.stubGlobal('fetch', vi.fn(async () => available

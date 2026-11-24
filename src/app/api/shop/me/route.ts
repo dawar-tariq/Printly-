@@ -7,7 +7,7 @@ export async function GET() {
   const admin = createAdminSupabase();
   const { data: shop, error } = await admin
     .from('shops')
-    .select('id, owner_id, slug, short_code, name, address, city, phone, gstin, upi_id, kyc_status, status, rush_surcharge_bps, eta_minutes, rating_avg, rating_count, created_at')
+    .select('id, owner_id, slug, short_code, name, address, city, phone, gstin, upi_id, kyc_status, status, is_open, rush_surcharge_bps, eta_minutes, rating_avg, rating_count, created_at')
     .eq('id', staff.shopIds[0]).single();
   if (error || !shop) {
     console.error('Could not load the signed-in shop:', error?.code);

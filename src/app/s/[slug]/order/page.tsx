@@ -22,10 +22,11 @@ import { cn } from '@/lib/utils';
 import { formatPaiseExact } from '@/lib/format';
 import { duplexSheets } from '@/lib/duplex';
 import { rateUnitLabel } from '@/lib/rate-display';
+import { rememberCheckout, rememberedCheckout, forgetCheckout, type PendingCheckout } from '@/lib/checkout-recovery-client';
 import type { Quote } from '@/lib/pricing';
 
 type Service = 'print' | 'photocopy' | 'scan' | 'bind' | 'laminate';
-type Step = 'service' | 'files' | 'options' | 'checkout' | 'upi';
+type Step = 'service' | 'files' | 'options' | 'checkout' | 'recovery' | 'upi';
 
 interface UploadedFile {
   id: string;
@@ -45,11 +46,12 @@ interface UploadedFile {
   pendingPath?: string;
 }
 interface ShopPublic {
-  shop: { slug: string; name: string; city: string; upi_id: string | null; eta_minutes: number; rating_avg: number; rating_count: number; status: string };
+  shop: { slug: string; name: string; city: string; upi_id: string | null; eta_minutes: number; rating_avg: number; rating_count: number; status: string; is_open: boolean };
   accepting_orders: boolean;
   services: { service: string; enabled: boolean }[];
 }
 interface QuoteResp { quote: Quote; rush: boolean; quote_token: string }
+interface UpiData { link: string; pa: string; pn: string; am: string; tn: string; shop_name: string; total_paise: number }
 
 const SERVICE_META: Record<Service, { label: string; icon: typeof Printer; blurb: string }> = {
   print: { label: 'Print', icon: Printer, blurb: 'PDF / Word / images' },
@@ -101,9 +103,16 @@ function OrderWizardForShop({ slug }: { slug: string }) {
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [quoteRefresh, setQuoteRefresh] = useState(0);
   const checkoutInFlight = useRef(false);
+  // An ambiguous checkout response must remain retryable even if the shop closes.
+  const [recoveryPossible, setRecoveryPossible] = useState(false);
+  const [recoveryChecked, setRecoveryChecked] = useState(false);
+  const [savedCheckout, setSavedCheckout] = useState<PendingCheckout | null>(null);
+  const [recoverySaved, setRecoverySaved] = useState(true);
+  const checkoutRetry = useRef<{ method: 'upi' | 'cod'; customer_name: string; customer_phone: string; customer_email: string; notes: string; rush: boolean; quote_token: string } | null>(null);
 
   // upi screen
-  const [upi, setUpi] = useState<{ link: string; pa: string; pn: string; am: string; tn: string; shop_name: string; total_paise: number } | null>(null);
+  const [upi, setUpi] = useState<UpiData | null>(null);
+  const [recoveredUpi, setRecoveredUpi] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [qrBrandInside, setQrBrandInside] = useState(true);
   const [qrFailed, setQrFailed] = useState(false);
@@ -146,6 +155,38 @@ function OrderWizardForShop({ slug }: { slug: string }) {
     return () => controller.abort();
   }, [slug]);
 
+  // A reload can recover an already-started checkout without retaining the
+  // customer's contact details. This lookup never creates a new payment.
+  useEffect(() => {
+    const saved = rememberedCheckout(slug);
+    if (saved) { setSavedCheckout(saved); setOrderId(saved.order_id); setStep('recovery'); }
+    setRecoveryChecked(true);
+  }, [slug]);
+
+  // An already-open wizard refreshes the owner's setting without disturbing the
+  // draft or an in-progress UPI screen. The database remains authoritative.
+  useEffect(() => {
+    let live = true;
+    let sequence = 0;
+    const refreshAvailability = async () => {
+      if (document.visibilityState !== 'visible') return;
+      const current = ++sequence;
+      try {
+        const response = await fetch(`/api/shops/${encodeURIComponent(slug)}/public`, { cache: 'no-store' });
+        if (!response.ok) return;
+        const next = await response.json() as ShopPublic;
+        if (live && current === sequence && typeof next?.accepting_orders === 'boolean' && typeof next?.shop?.is_open === 'boolean') setShopData(next);
+      } catch { /* The order API still checks availability on every checkout. */ }
+    };
+    const timer = window.setInterval(() => void refreshAvailability(), 30_000);
+    document.addEventListener('visibilitychange', refreshAvailability);
+    return () => { live = false; window.clearInterval(timer); document.removeEventListener('visibilitychange', refreshAvailability); };
+  }, [slug]);
+
+  const markClosed = useCallback(() => {
+    setShopData((current) => current ? { ...current, accepting_orders: false, shop: { ...current.shop, is_open: false } } : current);
+  }, []);
+
   const ensureOrder = useCallback((): Promise<string | null> => {
     const current = draft.current;
     if (current.id) return Promise.resolve(current.id);
@@ -155,7 +196,7 @@ function OrderWizardForShop({ slug }: { slug: string }) {
         const res = await fetch('/api/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ shop_slug: slug }) });
         const data = await res.json().catch(() => ({}));
         if (draft.current !== current) return null;
-        if (!res.ok || typeof data.order_id !== 'string') { setBanner(data?.error?.message ?? 'Could not start order'); return null; }
+        if (!res.ok || typeof data.order_id !== 'string') { if (data?.error?.code === 'shop_closed') markClosed(); setBanner(data?.error?.message ?? 'Could not start order'); return null; }
         current.id = data.order_id;
         setOrderId(data.order_id);
         return data.order_id;
@@ -163,7 +204,7 @@ function OrderWizardForShop({ slug }: { slug: string }) {
     })();
     current.pending = pending;
     return pending;
-  }, [slug]);
+  }, [slug, markClosed]);
 
   const removeUpload = useCallback(async (oid: string, fileId: string, path?: string) => {
     const response = await fetch(`/api/orders/${oid}/files/${fileId}`, {
@@ -396,13 +437,13 @@ function OrderWizardForShop({ slug }: { slug: string }) {
     fetch(`/api/orders/${orderId}/quote?rush=${rush ? '1' : '0'}`, { cache: 'no-store', signal: controller.signal })
       .then(async (res) => {
         const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data?.error?.message ?? 'Could not calculate the total.');
+        if (!res.ok) { if (data?.error?.code === 'shop_closed') markClosed(); throw new Error(data?.error?.message ?? 'Could not calculate the total.'); }
         if (!controller.signal.aborted) setQuote(data);
       })
       .catch((err) => { if (!controller.signal.aborted) setBanner(err instanceof Error ? err.message : 'Could not calculate the total.'); })
       .finally(() => { if (!controller.signal.aborted) setQuoteLoading(false); });
     return () => controller.abort();
-  }, [step, orderId, rush, quoteRefresh]);
+  }, [step, orderId, rush, quoteRefresh, markClosed]);
 
   const totalPages = useMemo(() => files.filter((f) => f.state === 'ready').reduce((a, f) => a + (f.page_count ?? 0), 0), [files]);
   const totalDuplexSheets = useMemo(() => files.filter((f) => f.state === 'ready').reduce((sum, f) => sum + duplexSheets(f.page_count ?? 0, copies), 0), [files, copies]);
@@ -410,6 +451,33 @@ function OrderWizardForShop({ slug }: { slug: string }) {
   const filesComplete = files.length > 0 && files.every((f) => f.state === 'ready' && Number.isInteger(f.page_count) && (f.page_count ?? 0) >= 1 && (f.page_count ?? 0) <= MAX_DOCUMENT_PAGES);
   const fileOperations = files.some((f) => f.state === 'uploading' || f.state === 'verifying' || f.state === 'removing');
   const hasDropboxChooser = !!process.env.NEXT_PUBLIC_DROPBOX_APP_KEY;
+
+  const showUpi = useCallback(async (data: UpiData, recovered: boolean) => {
+    setUpi(data); setRecoveredUpi(recovered); setQrDataUrl(null); setQrFailed(false); setStep('upi');
+    try {
+      const plan = paymentQrPlan(data.link);
+      setQrBrandInside(plan.brandInside);
+      setQrDataUrl(await QRCode.toDataURL(data.link, plan.options));
+    } catch { setQrDataUrl(null); setQrFailed(true); }
+  }, []);
+
+  const checkPreviousCheckout = useCallback(async () => {
+    if (!savedCheckout || checkoutInFlight.current) return;
+    checkoutInFlight.current = true; setBusy(true); setBanner(null);
+    try {
+      const response = await fetch(`/api/orders/${savedCheckout.order_id}/pay/recover`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store',
+        body: JSON.stringify({ method: savedCheckout.method, quote_token: savedCheckout.quote_token }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) { setBanner(data?.error?.message ?? 'Could not check the previous checkout. Please retry.'); return; }
+      if (data.mode === 'placed') { router.push(`/track/${savedCheckout.order_id}`); return; }
+      if (data.mode !== 'upi' || typeof data.link !== 'string') throw new Error('Invalid recovery response');
+      setOrderId(savedCheckout.order_id);
+      await showUpi(data as UpiData, true);
+    } catch { setBanner('Could not check the previous checkout. Retry, and contact the shop before paying again if you already paid.'); }
+    finally { checkoutInFlight.current = false; setBusy(false); }
+  }, [savedCheckout, router, showUpi]);
 
   const submitPayment = useCallback(async () => {
     if (!orderId || !quote || checkoutInFlight.current) return;
@@ -419,14 +487,28 @@ function OrderWizardForShop({ slug }: { slug: string }) {
     try {
       const contactOk = name.trim().length > 0 && phone.replace(/\D/g, '').length >= 8;
       if (!contactOk) { setBanner('Please enter your name and a valid phone number'); return; }
+      // A previous request can still commit after its response is lost. A
+      // later 4xx does not prove that earlier attempt failed, so preserve the
+      // original payload and retry capability until an outcome is recovered.
+      const retryingUnconfirmed = checkoutRetry.current !== null;
+      const payload = checkoutRetry.current ?? { method, customer_name: name.trim(), customer_phone: phone.trim(), customer_email: email.trim(), notes: notes.trim(), rush, quote_token: quote.quote_token };
+      checkoutRetry.current = payload;
+      setRecoveryPossible(true);
+      const identity: PendingCheckout = { order_id: orderId, method: payload.method, quote_token: payload.quote_token };
+      setSavedCheckout(identity);
+      setRecoverySaved(rememberCheckout(slug, identity));
       const res = await fetch(`/api/orders/${orderId}/pay`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ method, customer_name: name.trim(), customer_phone: phone.trim(), customer_email: email.trim(), notes: notes.trim(), rush, quote_token: quote.quote_token }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        if (res.status < 500 && !retryingUnconfirmed) {
+          checkoutRetry.current = null; setRecoveryPossible(false); setSavedCheckout(null); forgetCheckout(slug);
+        }
+        if (data?.error?.code === 'shop_closed') markClosed();
         setBanner(data?.error?.message ?? 'Could not place order');
-        if (data?.error?.code === 'quote_changed') { setQuote(null); setQuoteRefresh((value) => value + 1); }
+        if (data?.error?.code === 'quote_changed' && !retryingUnconfirmed) { setQuote(null); setQuoteRefresh((value) => value + 1); }
         return;
       }
       if (data.mode === 'cod' || data.mode === 'placed') {
@@ -434,25 +516,14 @@ function OrderWizardForShop({ slug }: { slug: string }) {
         return;
       }
       if (data.mode !== 'upi' || typeof data.link !== 'string') throw new Error('Invalid checkout response');
-      setUpi(data);
-      setQrDataUrl(null);
-      setQrFailed(false);
-      setStep('upi');
-      try {
-        const plan = paymentQrPlan(data.link);
-        setQrBrandInside(plan.brandInside);
-        setQrDataUrl(await QRCode.toDataURL(data.link, plan.options));
-      } catch {
-        setQrDataUrl(null);
-        setQrFailed(true);
-      }
+      await showUpi(data as UpiData, retryingUnconfirmed);
     } catch {
       setBanner('Could not complete checkout. Retry with the same details; if you already paid, contact the shop before paying again.');
     } finally {
       checkoutInFlight.current = false;
       setBusy(false);
     }
-  }, [orderId, quote, name, phone, email, notes, method, rush, router]);
+  }, [orderId, quote, name, phone, email, notes, method, rush, router, markClosed, showUpi, slug]);
 
   const confirmPaid = useCallback(async () => {
     if (!orderId) return;
@@ -468,14 +539,14 @@ function OrderWizardForShop({ slug }: { slug: string }) {
   }, [orderId, utr, router]);
 
   /* ---------- render ---------- */
-  const stepIndex = { service: 0, files: 1, options: 2, checkout: 3, upi: 4 }[step];
+  const stepIndex = { service: 0, files: 1, options: 2, checkout: 3, recovery: 3, upi: 4 }[step];
   const shopName = shopData?.shop.name ?? '…';
 
   return (
     <div lang={language} dir={language === 'ur' ? 'rtl' : 'ltr'} className="min-h-screen bg-[radial-gradient(1200px_600px_at_50%_-10%,#ffedd5,transparent)]">
       <header className="max-w-lg mx-auto px-4 h-14 flex items-center justify-between gap-3 no-print">
         <div className="flex min-w-0 items-center gap-1">
-          {step !== 'service' && <button disabled={busy} aria-label="Go back" onClick={() => { const prev: Record<Step, Step | null> = { service: null, files: 'service', options: 'files', checkout: 'options', upi: null }; const p = prev[step]; if (p) setStep(p); }} className="p-2 -ml-2 text-neutral-500 disabled:opacity-40"><ChevronLeft size={22} /></button>}
+          {step !== 'service' && step !== 'recovery' && <button disabled={busy || (step === 'checkout' && recoveryPossible)} aria-label="Go back" onClick={() => { const prev: Record<Step, Step | null> = { service: null, files: 'service', options: 'files', checkout: 'options', recovery: null, upi: null }; const p = prev[step]; if (p) setStep(p); }} className="p-2 -ml-2 text-neutral-500 disabled:opacity-40"><ChevronLeft size={22} /></button>}
           <Logo />
         </div>
         <span className="min-w-0 flex-1 text-xs font-semibold text-neutral-500 truncate">{shopName}</span><CustomerLanguagePicker language={language} onChange={setLanguage} />
@@ -498,13 +569,26 @@ function OrderWizardForShop({ slug }: { slug: string }) {
 
       <main className="max-w-lg mx-auto px-4 mt-4 pb-20">
         {language !== 'en' && <p className="mb-3 text-xs text-neutral-600">{t.limitedTranslation}</p>}
+        {step !== 'service' && step !== 'recovery' && step !== 'upi' && shopData && !shopData.accepting_orders && <p role="status" className="mb-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">{shopData.shop.is_open === false ? t.shopClosed : t.shopUnavailable} {recoveryPossible && t.shopClosedRecovery}</p>}
+        {!recoveryChecked && <p role="status" className="text-sm text-neutral-600">Checking for an interrupted checkout…</p>}
+        {recoveryChecked && step === 'recovery' && savedCheckout && <section className="card p-5">
+          <h1 className="text-xl font-extrabold">Check your previous checkout</h1>
+          <p className="mt-2 text-sm text-neutral-600">A checkout was started in this tab. Check its status before starting another order. This check cannot create a new payment, even if the shop is closed.</p>
+          <p className="mt-3 rounded-xl bg-amber-50 p-3 text-xs leading-relaxed text-amber-900">If you already paid, do not pay again. Check your UPI app and contact the shop if unsure.</p>
+          <button type="button" disabled={busy} onClick={() => void checkPreviousCheckout()} className="btn btn-primary mt-4 min-h-11 w-full px-4 text-sm">{busy ? <Loader2 className="animate-spin" size={16} /> : 'Check previous checkout'}</button>
+          <Link href={`/track/${savedCheckout.order_id}`} className="mt-4 block text-sm font-bold text-orange-800 underline">View tracking link</Link>
+          <button type="button" disabled={busy} onClick={() => {
+            if (!window.confirm('The previous checkout may still complete. Check tracking or contact the shop before starting another order. Forget this checkout?')) return;
+            forgetCheckout(slug); setSavedCheckout(null); setOrderId(null); setBanner(null); setStep('service');
+          }} className="mt-4 text-xs font-bold text-neutral-600 underline">Forget this checkout and start a different order</button>
+        </section>}
         {/* STEP 1 — service */}
-        {step === 'service' && (
+        {recoveryChecked && step === 'service' && (
           <section>
             <h1 className="text-2xl font-extrabold tracking-tight">{t.whatNeed}</h1>
             <p className="text-sm text-neutral-500 mt-1">{t.pickService}</p>
             {shopLoading && <p className="mt-5 text-sm text-neutral-500" role="status">Loading services…</p>}
-            {!shopLoading && shopData && !shopData.accepting_orders && <p role="status" className="mt-5 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">This shop is not accepting orders right now. Please check back soon.</p>}
+            {!shopLoading && shopData && !shopData.accepting_orders && <p role="status" className="mt-5 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">{shopData.shop.is_open === false ? t.shopClosed : t.shopUnavailable}</p>}
             {!shopLoading && shopData && !shopData.services.some((s) => s.enabled) && <p className="mt-5 text-sm text-neutral-500">This shop has no services available right now.</p>}
             <div className="grid grid-cols-2 gap-3 mt-5" aria-label="Choose a service">
               {(Object.keys(SERVICE_META) as Service[])
@@ -612,7 +696,7 @@ function OrderWizardForShop({ slug }: { slug: string }) {
               ))}
             </ul>
             {files.length > 0 && !filesComplete && <p className="mt-3 text-xs text-neutral-600">{t.finishUploads}</p>}
-            <button disabled={!filesComplete || dropboxBusy || busy} onClick={async () => { setBusy(true); try { const ok = await pushItems(); if (ok) setStep('options'); } finally { setBusy(false); } }} className="btn btn-primary w-full py-4 text-lg mt-6">
+            <button disabled={!filesComplete || dropboxBusy || busy || !shopData?.accepting_orders} onClick={async () => { setBusy(true); try { const ok = await pushItems(); if (ok) setStep('options'); } finally { setBusy(false); } }} className="btn btn-primary w-full py-4 text-lg mt-6">
               {busy ? t.saving : <>{t.continue} {filesComplete && `· ${totalPages} page${totalPages !== 1 ? 's' : ''}`}</>}
             </button>
           </section>
@@ -713,7 +797,7 @@ function OrderWizardForShop({ slug }: { slug: string }) {
               )}
             </div>
 
-            <button disabled={busy} onClick={async () => { setBusy(true); try { const ok = await pushItems(); if (ok) setStep('checkout'); } finally { setBusy(false); } }} className="btn btn-primary w-full py-4 text-lg mt-6">{busy ? t.saving : t.continuePay}</button>
+            <button disabled={busy || !shopData?.accepting_orders} onClick={async () => { setBusy(true); try { const ok = await pushItems(); if (ok) setStep('checkout'); } finally { setBusy(false); } }} className="btn btn-primary w-full py-4 text-lg mt-6">{busy ? t.saving : t.continuePay}</button>
           </section>
         )}
 
@@ -723,7 +807,7 @@ function OrderWizardForShop({ slug }: { slug: string }) {
             <h1 className="text-2xl font-extrabold tracking-tight">{t.almostThere}</h1>
             <p className="text-sm text-neutral-500 mt-1">{t.contactDetails}</p>
 
-            <fieldset disabled={busy} className="card mt-4 p-4 space-y-3">
+            <fieldset disabled={busy || recoveryPossible} className="card mt-4 p-4 space-y-3">
               <div><label className="label">{t.name} *<input value={name} onChange={(e) => setName(e.target.value)} className="input" placeholder="e.g. Aisha Khan" autoComplete="name" /></label></div>
               <div><label className="label">{t.phone} *<input value={phone} onChange={(e) => setPhone(e.target.value)} className="input" placeholder="97970 00000" inputMode="numeric" autoComplete="tel" /></label></div>
               <div><label className="label">{t.email}<input value={email} onChange={(e) => setEmail(e.target.value)} className="input" placeholder="you@example.com" inputMode="email" type="email" /></label></div>
@@ -731,7 +815,7 @@ function OrderWizardForShop({ slug }: { slug: string }) {
             </fieldset>
 
             {/* rush */}
-            <button disabled={busy} onClick={() => setRush(!rush)} className={cn('w-full mt-3 flex items-center justify-between rounded-xl border-2 px-4 py-3 text-left disabled:opacity-60', rush ? 'border-orange-600 bg-orange-50' : 'border-neutral-200 bg-white')}>
+            <button disabled={busy || recoveryPossible} onClick={() => setRush(!rush)} className={cn('w-full mt-3 flex items-center justify-between rounded-xl border-2 px-4 py-3 text-left disabled:opacity-60', rush ? 'border-orange-600 bg-orange-50' : 'border-neutral-200 bg-white')}>
               <span><span className="font-semibold text-sm flex items-center gap-1.5"><Zap size={14} className="text-orange-600" />{t.rush}</span><br /><span className="text-[11px] text-neutral-500">Flag this order as urgent to the shop; any surcharge is shown in the total.</span></span>
               <span className={cn('w-6 h-6 rounded-md border-2 grid place-items-center', rush ? 'bg-orange-600 border-orange-600 text-white' : 'border-neutral-300')}>{rush && '✓'}</span>
             </button>
@@ -769,14 +853,15 @@ function OrderWizardForShop({ slug }: { slug: string }) {
             {/* method tabs */}
             <div className="grid grid-cols-2 gap-2 mt-3">
               {(['upi', 'cod'] as const).map((m) => (
-                <button key={m} disabled={busy} onClick={() => setMethod(m)} className={cn('h-12 rounded-xl border-2 font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-60', method === m ? 'border-orange-600 bg-orange-50 text-orange-900' : 'border-neutral-200 bg-white')}>
+                <button key={m} disabled={busy || recoveryPossible} onClick={() => setMethod(m)} className={cn('h-12 rounded-xl border-2 font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-60', method === m ? 'border-orange-600 bg-orange-50 text-orange-900' : 'border-neutral-200 bg-white')}>
                   {m === 'upi' ? <><Wallet size={16} /> {t.upi}</> : <><Banknote size={16} /> {t.cash}</>}
                 </button>
               ))}
             </div>
 
-            <button disabled={busy || quoteLoading || !quote} onClick={submitPayment} className="btn btn-primary w-full py-4 text-lg mt-4">
-              {busy ? <Loader2 size={20} className="animate-spin" /> : method === 'upi' ? t.proceedPay : t.placeCash}
+            {recoveryPossible && <p className="mt-3 text-xs text-amber-900">The last checkout may have started. Retry the same details below; if you already paid, contact the shop before paying again. {!recoverySaved && 'Keep this tab open: this browser could not save a recovery reference for reload.'}</p>}
+            <button disabled={busy || quoteLoading || !quote || (!shopData?.accepting_orders && !recoveryPossible)} onClick={submitPayment} className="btn btn-primary w-full py-4 text-lg mt-4">
+              {busy ? <Loader2 size={20} className="animate-spin" /> : recoveryPossible ? 'Retry checkout safely' : method === 'upi' ? t.proceedPay : t.placeCash}
             </button>
             <p className="mt-2 text-center text-[11px] text-neutral-400 flex items-center justify-center gap-1"><ShieldCheck size={12} /> {t.directPayment}</p>
           </section>
@@ -785,6 +870,8 @@ function OrderWizardForShop({ slug }: { slug: string }) {
         {/* STEP 5 — UPI gateway-styled screen */}
         {step === 'upi' && upi && (
           <section className="-mt-1">
+            {recoveredUpi && <p role="status" className="mb-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">This checkout was already started. If you have paid, do not pay again; report it below or contact the shop.</p>}
+            {!recoverySaved && <p className="mb-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">Keep this tab open or save the tracking link: this browser could not save a recovery reference for reload.</p>}
             <div className="rounded-3xl overflow-hidden shadow-2xl">
               <div className="bg-neutral-950 text-white px-6 pt-6 pb-5 text-center relative">
                 <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-400">{t.upiCheckout}</div>

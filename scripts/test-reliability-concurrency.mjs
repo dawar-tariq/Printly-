@@ -120,6 +120,44 @@ try {
   assert.equal(await sql(`select count(*) from public.order_files where id='${fileD}'`), '0');
   assert.equal(await sql(`select count(*) from public.order_file_tombstones where storage_path='${pathD}'`), '1');
   console.log('✓ A removal racing after finalization detaches and tombstones the file');
+  // Apply the shop availability migration after the original reliability fixtures have
+  // completed. This local PostgreSQL cluster is isolated from all live data.
+  await sql(`create schema auth; create table auth.users(id uuid primary key);
+    insert into auth.users(id) values ('${actor}'),('${other}');
+    alter table public.shops add column owner_id uuid;
+    update public.shops set owner_id='${actor}' where id='${shop}'`);
+  for (const name of ['0021_shop_availability.sql']) {
+    await sqlFile(await readFile(path.join(root, 'supabase/migrations', name), 'utf8'));
+  }
+  const closeShop = `select public.set_shop_open('${shop}','${actor}',false)`;
+  const openShop = `select public.set_shop_open('${shop}','${actor}',true)`;
+  const draft = '12121212-1212-4212-8212-121212121212';
+  const line = '13131313-1313-4313-8313-131313131313';
+  const newDraft = `insert into public.orders(id,shop_id) values ('${draft}','${shop}')`;
+  await contested(closeShop, newDraft, 'SHOP_CLOSED');
+  assert.equal(await sql(`select count(*) from public.orders where id='${draft}'`), '0');
+  console.log('✓ Closing serializes before a competing new draft');
+  await sql(openShop);
+  await contested(newDraft, closeShop);
+  assert.equal(await sql(`select is_open from public.shops where id='${shop}'`), 'f');
+  assert.equal(await sql(`select count(*) from public.orders where id='${draft}'`), '1');
+  console.log('✓ An in-flight draft finishes before a competing close takes effect');
+  await sql(openShop);
+  await sql(`insert into public.order_items(id,order_id,service) values ('${line}','${draft}','print')`);
+  const checkout = `select public.commit_draft_checkout('${draft}',(select draft_version from public.orders where id='${draft}'),
+    '[]'::jsonb,1800,(select jsonb_build_object('name',name,'upi_id',upi_id,'eta_minutes',eta_minutes,'commission_bps',commission_bps,'rush_surcharge_bps',rush_surcharge_bps,'status',status) from public.shops where id='${shop}'),
+    '[{"id":"${line}","unit_price_paise":200,"line_total_paise":200}]'::jsonb,
+    '{"method":"cod","customer_name":"Customer","customer_phone":"9797000000","subtotal_paise":200,"tax_paise":36,"total_paise":236,"commission_paise":0,"quote_token":"abc"}'::jsonb)`;
+  await contested(closeShop, checkout, 'SHOP_CLOSED');
+  assert.equal(await sql(`select status::text || ':' || coalesce(payment_method::text,'none') from public.orders where id='${draft}'`), 'draft:none');
+  assert.equal(await sql(`select count(*) from public.payments where order_id='${draft}'`), '0');
+  console.log('✓ Closing before checkout prevents the first payment transition and rolls back its writes');
+  await sql(openShop);
+  await contested(checkout, closeShop);
+  assert.equal(await sql(`select status::text from public.orders where id='${draft}'`), 'queued');
+  assert.equal(await sql(`select is_open from public.shops where id='${shop}'`), 'f');
+  console.log('✓ Checkout already holding the shop lock completes before closing');
+
   console.log('Real PostgreSQL reliability concurrency checks passed.');
 } finally {
   if (server && server.exitCode === null) {

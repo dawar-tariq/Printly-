@@ -6,10 +6,11 @@ import { Logo } from '@/components/Logo';
 import { SignOutButton } from '@/components/SignOutButton';
 import { cn } from '@/lib/utils';
 import { SubscriptionNotice } from '@/components/SubscriptionNotice';
+import { ShopAvailability } from '@/components/ShopAvailability';
 import type { ShopSubscription } from '@/lib/subscription';
 import { useSubscriptionState } from '@/lib/use-subscription-state';
 
-export function RestrictedShopShell({ shopName, active, subscription, warningDays, isOwner, children }: { shopName: string; active: boolean; subscription: ShopSubscription | null; warningDays: number; isOwner: boolean; children: React.ReactNode }) {
+export function RestrictedShopShell({ shopName, isOpen, active, subscription, warningDays, isOwner, children }: { shopName: string; isOpen?: boolean; active: boolean; subscription: ShopSubscription | null; warningDays: number; isOwner: boolean; children: React.ReactNode }) {
   const pathname = usePathname();
   const current = useSubscriptionState(subscription, warningDays);
   return (
@@ -26,7 +27,7 @@ export function RestrictedShopShell({ shopName, active, subscription, warningDay
           ))}
         </nav>
       </header>
-      <main className="mx-auto min-w-0 max-w-6xl px-3 py-5 sm:px-4"><SubscriptionNotice subscription={subscription} warningDays={warningDays} isOwner={isOwner} lockOnExpire={false} />{children}</main>
+      <main className="mx-auto min-w-0 max-w-6xl px-3 py-5 sm:px-4"><SubscriptionNotice subscription={subscription} warningDays={warningDays} isOwner={isOwner} lockOnExpire={false} />{typeof isOpen === 'boolean' && <ShopAvailability initialOpen={isOpen} isOwner={isOwner} />}{children}</main>
     </div>
   );
 }

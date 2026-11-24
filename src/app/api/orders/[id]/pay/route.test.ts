@@ -56,7 +56,7 @@ const pay = (overrides: Record<string, unknown> = {}, authenticated = true) => P
 beforeEach(() => {
   vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', secret);
   state.order = { id: orderId, shop_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', draft_version: 3, status: 'draft', payment_method: null, payment_status: 'pending',
-    shops: { name: 'Demo Prints', upi_id: 'demo@upi', eta_minutes: 20, commission_bps: 800, rush_surcharge_bps: 1500, status: 'active' } };
+    shops: { name: 'Demo Prints', upi_id: 'demo@upi', eta_minutes: 20, commission_bps: 800, rush_surcharge_bps: 1500, status: 'active', is_open: true } };
   state.items = [{ id: itemId, service: 'print', paper_size: 'A4', color: 'bw', sides: 'single', paper_gsm: 80, option: null, copies: 2, pages: 2 }];
   state.card = [{ id: '55555555-5555-4555-8555-555555555555', service: 'print', paper_size: 'A4', color: 'bw', sides: 'single', paper_gsm: 80, option: null, unit: 'page', price_paise: 200 }];
   state.payment = null; state.rpcCalls = []; state.rpcError = ''; state.subscribed = true;
@@ -163,6 +163,21 @@ describe('checkout uses the quote the customer reviewed', () => {
     const retry = await pay({ method: 'upi', quote_token: quoted });
     expect(await retry.json()).toMatchObject({ mode: 'upi', pa: 'demo@upi', total_paise: 944 });
     expect(state.rpcCalls).toHaveLength(1);
+  });
+  it('blocks first checkout while closed, including a database race, but recovers a started UPI checkout', async () => {
+    (state.order.shops as Record<string, unknown>).is_open = false;
+    let response = await pay();
+    expect(response.status).toBe(403); expect((await response.json()).error.code).toBe('shop_closed');
+    expect(state.rpcCalls).toHaveLength(0);
+    (state.order.shops as Record<string, unknown>).is_open = true;
+    state.rpcError = 'SHOP_CLOSED'; response = await pay();
+    expect(response.status).toBe(403); expect((await response.json()).error.code).toBe('shop_closed');
+    state.rpcError = '';
+    const quoted = token();
+    expect((await pay({ method: 'upi', quote_token: quoted })).status).toBe(200);
+    (state.order.shops as Record<string, unknown>).is_open = false;
+    const recovery = await pay({ method: 'upi', quote_token: quoted });
+    expect(recovery.status).toBe(200); expect(await recovery.json()).toMatchObject({ mode: 'upi', pa: 'demo@upi' });
   });
   it('does not start UPI if the shop has no UPI ID', async () => {
     (state.order.shops as Record<string, unknown>).upi_id = null;

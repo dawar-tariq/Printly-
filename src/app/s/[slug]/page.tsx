@@ -37,7 +37,7 @@ export default async function ShopLandingPage({ params }: { params: Promise<{ sl
   }
   if (!shop) notFound();
   const subscribed = shop.status === 'active' ? await shopHasSubscription(createAdminSupabase(), shop.id) : false;
-  const active = shop.status === 'active' && subscribed === true;
+  const active = shop.status === 'active' && shop.is_open === true && subscribed === true;
 
   const [{ data: services }, { data: rates }] = await Promise.all([
     supabase.from('shop_services').select('service, enabled, display_order').eq('shop_id', shop.id).eq('enabled', true).order('display_order'),
@@ -74,7 +74,7 @@ export default async function ShopLandingPage({ params }: { params: Promise<{ sl
           </div>
           {!active && (
             <div className="mt-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-sm px-4 py-3">
-              This shop is not accepting orders right now. Please check back soon.
+              {shop.is_open === false ? 'This shop is closed. Please check back when it reopens.' : 'This shop is not accepting orders right now. Please check back soon.'}
             </div>
           )}
         </section>
@@ -102,11 +102,14 @@ export default async function ShopLandingPage({ params }: { params: Promise<{ sl
         </section>
 
         {/* CTA */}
-        {active && (
+        {active ? (
           <Link href={`${publicShopPath(shop.short_code)}/order`} className="btn btn-primary w-full h-14 text-lg mt-6 shadow-lg shadow-orange-600/20">
             Start your order <ArrowRight size={20} />
           </Link>
-        )}
+        ) : <div className="mt-6 text-center text-sm text-neutral-600">
+          <p>Already started checkout? Return in the same tab, or use your saved tracking link.</p>
+          <Link href={`/s/${encodeURIComponent(slug)}/order`} className="mt-2 inline-block font-bold text-orange-800 underline">Return to a previous checkout</Link>
+        </div>}
         <p className="mt-3 text-center text-xs text-neutral-400">No app needed · Pay the shop directly on UPI · Collect with your token</p>
       </main>
     </div>

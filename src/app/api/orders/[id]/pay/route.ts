@@ -10,11 +10,12 @@ import { enforcePublicRateLimit } from '@/lib/rate-limit';
 import { draftMutationError } from '@/lib/draft-mutation';
 import { quoteToken } from '@/lib/quote-token';
 import { shopHasSubscription } from '@/lib/subscription-server';
+import { recoverStartedCheckout } from '@/lib/checkout-recovery';
 
 const payInput = z.object({ method: z.enum(['upi', 'cod']), quote_token: z.string().regex(/^[0-9a-f]{64}$/) }).and(checkoutContact);
 const noStore = { headers: { 'Cache-Control': 'private, no-store' } };
 
-type Shop = { name: string; upi_id: string | null; eta_minutes: number; rush_surcharge_bps: number | null; status: string };
+type Shop = { name: string; upi_id: string | null; eta_minutes: number; rush_surcharge_bps: number | null; status: string; is_open: boolean };
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -32,23 +33,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   // A lost response must not create another order/payment. Recover the same
   // checkout only when the caller presents the exact quote used to create it.
-  if (order.status !== 'draft' || order.payment_method) {
-    if (order.payment_method !== method || order.checkout_quote_token !== quote_token) return jsonError(409, 'order_locked', 'Order already entered checkout.');
-    if (method === 'cod' || order.status !== 'draft' || order.payment_status !== 'pending') return jsonOk({ mode: 'placed', total_paise: order.total_paise }, noStore);
-    const { data: payment, error } = await admin.from('payments').select('status, raw').eq('order_id', id).maybeSingle();
-    const raw = payment?.raw as { checkout_upi_id?: unknown; checkout_shop_name?: unknown } | undefined;
-    if (error || payment?.status !== 'created' || typeof raw?.checkout_upi_id !== 'string' || typeof raw.checkout_shop_name !== 'string') {
-      return jsonError(409, 'order_locked', 'Checkout has started. Please contact the shop before paying again.');
-    }
-    const intent = buildUpiIntent({ upiId: raw.checkout_upi_id, payeeName: raw.checkout_shop_name, amountPaise: order.total_paise, note: `Printly ${id.slice(0, 8)}` });
-    return jsonOk({ mode: 'upi', ...intent, shop_name: raw.checkout_shop_name, total_paise: order.total_paise }, noStore);
-  }
+  const recovered = await recoverStartedCheckout(admin, id, order, { method, quote_token });
+  if (recovered) return recovered;
   // Do not throttle recovery of an already-started payment above. This limit
   // applies only when initiating a new checkout, not when an answer was lost.
   const limited = await enforcePublicRateLimit(req, 'checkout');
   if (limited) return limited;
   if (!items.length) return jsonError(422, 'empty_order', 'Add at least one item');
   if (!shop) return jsonError(503, 'db', 'Could not load shop pricing. Please retry.');
+  if (shop.is_open !== true) return jsonError(403, 'shop_closed', 'This shop is closed. Please check back when it reopens.');
   const subscribed = await shopHasSubscription(admin, order.shop_id);
   if (subscribed === null) return jsonError(503, 'db', 'Could not check shop availability. Please retry.');
   if (!subscribed || shop.status !== 'active') return jsonError(403, 'shop_unavailable', 'This shop is not accepting orders right now.');

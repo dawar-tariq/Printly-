@@ -20,5 +20,5 @@ export async function GET(_req: Request, { params }: { params: Promise<{ slug: s
     supabase.from('shop_services').select('service, enabled, display_order').eq('shop_id', shop.id).order('display_order'),
     supabase.from('rate_card').select('service, paper_size, color, sides, paper_gsm, option, unit, price_paise').eq('shop_id', shop.id),
   ]);
-  return jsonOk({ shop, accepting_orders: shop.status === 'active' && subscribed, services: services ?? [], rateCard: rates ?? [] }, { headers: { 'Cache-Control': 'no-store' } });
+  return jsonOk({ shop, accepting_orders: shop.status === 'active' && shop.is_open === true && subscribed, services: services ?? [], rateCard: rates ?? [] }, { headers: { 'Cache-Control': 'no-store' } });
 }

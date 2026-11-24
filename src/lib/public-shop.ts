@@ -4,7 +4,7 @@ import { codeFromPublicId } from './shop-identity';
 
 // Only public directory/checkout details belong in this response. In
 // particular, GSTIN, ownership and review details stay private.
-const PUBLIC_FIELDS = 'id, slug, short_code, name, address, city, phone, upi_id, status, eta_minutes, rating_avg, rating_count';
+const PUBLIC_FIELDS = 'id, slug, short_code, name, address, city, phone, upi_id, status, is_open, eta_minutes, rating_avg, rating_count';
 
 /** Code URLs are canonical; old name-based links continue to work as aliases. */
 export async function findPublicShop(supabase: SupabaseClient, identifier: string) {

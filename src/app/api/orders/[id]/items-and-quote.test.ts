@@ -27,7 +27,7 @@ vi.mock('@/lib/supabase', () => ({ createAdminSupabase: () => ({
 vi.mock('@/lib/subscription-server', () => ({ shopHasSubscription: async () => true }));
 vi.mock('@/lib/rate-limit', () => ({ enforcePublicRateLimit: async () => null }));
 vi.mock('@/lib/order-quote', () => ({ loadOrderWithRates: async () => ({
-  order: { rush: false, status: 'draft', payment_method: null, draft_version: 1, shops: { rush_surcharge_bps: 1500 } },
+  order: { rush: false, status: 'draft', payment_method: null, draft_version: 1, shops: { rush_surcharge_bps: 1500, status: 'active', is_open: true } },
   items: state.quoteItems,
   card: state.quoteCard,
   gstBps: 1800, rushBps: 1000,

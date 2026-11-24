@@ -16,6 +16,7 @@ export async function POST(req: Request) {
   const { data: shop, error: shopError } = await findPublicShop(admin, parsed.data.shop_slug);
   if (shopError) return jsonError(500, 'db', 'Could not look up this shop');
   if (!shop) return jsonError(404, 'shop_not_found', 'Shop not found');
+  if (shop.is_open !== true) return jsonError(403, 'shop_closed', 'This shop is closed. Please check back when it reopens.');
   if (shop.status !== 'active') return jsonError(403, 'shop_unavailable', 'This shop is not accepting orders right now');
   const subscribed = await shopHasSubscription(admin, shop.id);
   if (subscribed === null) return jsonError(503, 'db', 'Could not check shop availability. Please try again.');
@@ -26,6 +27,7 @@ export async function POST(req: Request) {
     .insert({ shop_id: shop.id, status: 'draft', payment_status: 'pending' })
     .select('id')
     .single();
+  if (error?.message.includes('SHOP_CLOSED')) return jsonError(403, 'shop_closed', 'This shop is closed. Please check back when it reopens.');
   if (error?.message.includes('SHOP_UNAVAILABLE')) return jsonError(403, 'shop_unavailable', 'This shop is not accepting orders right now');
   if (error) return jsonError(503, 'db', 'Could not start the order. Please try again.');
   const response = jsonOk({ order_id: order.id, shop_id: shop.id });

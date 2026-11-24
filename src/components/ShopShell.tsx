@@ -6,6 +6,7 @@ import { Logo } from '@/components/Logo';
 import { SignOutButton } from '@/components/SignOutButton';
 import { LayoutDashboard, Settings, Boxes, BarChart3, CreditCard, ExternalLink, Hourglass, PenLine, Ban, MessageCircle } from 'lucide-react';
 import { SubscriptionNotice } from '@/components/SubscriptionNotice';
+import { ShopAvailability } from '@/components/ShopAvailability';
 import type { ShopSubscription } from '@/lib/subscription';
 import { cn } from '@/lib/utils';
 import { publicShopPath } from '@/lib/shop-identity';
@@ -19,7 +20,7 @@ const TABS = [
   { href: '/support', label: 'Support', icon: MessageCircle },
 ];
 
-export function ShopShell({ shop, reviewNote, subscription, warningDays, isOwner, children }: { shop: { id: string; name: string; slug: string; short_code: string; kyc_status: string; status: string }; reviewNote: string; subscription: ShopSubscription | null; warningDays: number; isOwner: boolean; children: React.ReactNode }) {
+export function ShopShell({ shop, reviewNote, subscription, warningDays, isOwner, children }: { shop: { id: string; name: string; slug: string; short_code: string; kyc_status: string; status: string; is_open: boolean }; reviewNote: string; subscription: ShopSubscription | null; warningDays: number; isOwner: boolean; children: React.ReactNode }) {
   const pathname = usePathname();
 
   return (
@@ -45,6 +46,7 @@ export function ShopShell({ shop, reviewNote, subscription, warningDays, isOwner
         </nav>
       </header>
       <main className="max-w-6xl min-w-0 mx-auto px-3 sm:px-4 py-4">
+        <ShopAvailability initialOpen={shop.is_open} isOwner={isOwner} />
         <SubscriptionNotice subscription={subscription} warningDays={warningDays} isOwner={isOwner} />
         {shop.kyc_status === 'pending' && (
           <div className="mb-4 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex items-start gap-2.5">
