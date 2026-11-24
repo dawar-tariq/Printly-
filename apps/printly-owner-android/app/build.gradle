@@ -1,0 +1,47 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'io.github.dawartariq.printly.owner'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'io.github.dawartariq.printly.owner'
+        minSdk 24
+        targetSdk 36
+        versionCode 1
+        versionName '1.0.0'
+        // Increase versionCode for every native APK release. Website-only
+        // changes do not require a new APK. Keep the origin in sync with DAL.
+        resValue 'string', 'launch_url', "https://printly-steel-three.vercel.app/owner-app?android_version=${versionCode}"
+    }
+
+    def storePath = System.getenv('PRINTLY_ANDROID_KEYSTORE_PATH')
+    def storePasswordValue = System.getenv('PRINTLY_ANDROID_KEYSTORE_PASSWORD')
+    def keyAliasValue = System.getenv('PRINTLY_ANDROID_KEY_ALIAS')
+    def keyPasswordValue = System.getenv('PRINTLY_ANDROID_KEY_PASSWORD')
+    def releaseSigningReady = [storePath, storePasswordValue, keyAliasValue, keyPasswordValue].every { it != null && !it.isEmpty() }
+    signingConfigs {
+        if (releaseSigningReady) {
+            release {
+                storeFile file(storePath)
+                storePassword storePasswordValue
+                keyAlias keyAliasValue
+                keyPassword keyPasswordValue
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (releaseSigningReady) signingConfig signingConfigs.release
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.7.4'
+}
