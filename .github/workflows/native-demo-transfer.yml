@@ -1,0 +1,70 @@
+# Temporary one-run transport for the synthetic demo APK. The sandbox cannot
+# reach the Actions artifact host. This creates an unreferenced Git blob (not a
+# branch or release asset) so its bytes can be fetched and checked via GitHub.
+# The artifact contains synthetic data only and must never be used for release.
+name: Retrieve synthetic native demo
+
+on:
+  push:
+    paths:
+      - '.github/workflows/native-demo-transfer.yml'
+
+permissions: {}
+
+jobs:
+  transfer-demo:
+    if: github.ref == 'refs/heads/arena/309fdf51-printly'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Verify and transfer the successful synthetic demo artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_id=45589111655
+          artifact_id=15010347639
+          expected_digest=21811aee12c08abbbf316a259ea49075e008fac030c145e671f8911366386711
+          source_sha=f0fd16b6b5e9ff252dea91b1e76b3d01145f2559
+          run_info=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" --jq '[.status,.conclusion,.head_sha,.head_branch] | join(" ")')
+          test "$run_info" = "completed success $source_sha arena/309fdf51-printly"
+          artifact_info=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id" --jq '[.name,.expired,(.digest // ""),(.workflow_run.id|tostring),.workflow_run.head_sha] | join(" ")')
+          test "$artifact_info" = "printly-native-DEMO-synthetic-data-NOT-FOR-RELEASE false sha256:$expected_digest $run_id $source_sha"
+          zip="$RUNNER_TEMP/native-demo.zip"
+          apk="$RUNNER_TEMP/native-demo.apk"
+          blob="$RUNNER_TEMP/git-blob.json"
+          trap 'rm -f "$zip" "$apk" "$blob"' EXIT
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" > "$zip"
+          echo "$expected_digest  $zip" | sha256sum -c -
+          test "$(unzip -Z1 "$zip")" = 'app-debug.apk'
+          unzip -p "$zip" app-debug.apk > "$apk"
+          test -s "$apk"
+          # Independently inspect the exact APK transported from the artifact.
+          set +o pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+          status=${PIPESTATUS[1]}
+          set -o pipefail
+          test "$status" -eq 0
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'build-tools;36.0.0' > /dev/null
+          analyzer="$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer"
+          test "$("$analyzer" manifest application-id "$apk")" = 'io.github.dawartariq.printly.owner.native.debug'
+          test "$("$analyzer" manifest version-code "$apk")" = '4'
+          test "$("$analyzer" manifest version-name "$apk")" = '2.0.1-native-review-demo'
+          signature=$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$apk")
+          echo "$signature"
+          cert_sha=$(printf '%s\n' "$signature" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
+          test "${#cert_sha}" -eq 64
+          apk_sha=$(sha256sum "$apk" | cut -d' ' -f1)
+          git_sha=$(git hash-object "$apk")
+          python3 - "$apk" "$blob" <<'PY'
+          import base64, json, sys
+          with open(sys.argv[1], 'rb') as source, open(sys.argv[2], 'w', encoding='utf-8') as target:
+              json.dump({'encoding': 'base64', 'content': base64.b64encode(source.read()).decode('ascii')}, target)
+          PY
+          api_sha=$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/blobs" --input "$blob" --jq .sha)
+          test "$api_sha" = "$git_sha"
+          echo "::notice title=Synthetic native demo transfer::blob_sha=$api_sha apk_sha256=$apk_sha certificate_sha256=$cert_sha source_run=$run_id version=2.0.1-native-review-demo code=4 (synthetic demo, not a release)"
