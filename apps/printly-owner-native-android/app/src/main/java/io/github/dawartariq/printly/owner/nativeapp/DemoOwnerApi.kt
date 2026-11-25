@@ -115,14 +115,23 @@ class DemoOwnerApi : OwnerApi {
         }
         if (parts.size == 3 && method == "POST" && parts[2] == "confirm-payment") {
             val input = requireNotNull(body)
-            when (input.optString("action")) {
+            val action = input.optString("action")
+            val paymentStatus = item.optString("payment_status")
+            if (action == "confirm" && !input.optBoolean("verification_confirmed")) throw AppError("verification_required", "Check the transfer before confirming.", 422)
+            if (item.optString("status") != "draft" || item.optString("payment_method") != "upi") throw AppError("bad_state", "This order is not awaiting a UPI decision.", 409)
+            when (action) {
                 "confirm" -> {
-                    if (!input.optBoolean("verification_confirmed")) throw AppError("verification_required", "Check the transfer before confirming.", 422)
-                    if (item.optString("payment_status") != "submitted") throw AppError("bad_state", "Record the customer's report before confirming.", 409)
+                    if (paymentStatus != "submitted") throw AppError("bad_state", "Record the customer's report before confirming.", 409)
                     item.put("status", "queued").put("payment_status", "confirmed")
                 }
-                "report" -> item.put("payment_status", "submitted").put("utr", input.optString("utr"))
-                "reject" -> item.put("payment_status", "rejected")
+                "report" -> {
+                    if (paymentStatus !in listOf("pending", "rejected", "submitted")) throw AppError("bad_state", "Cannot record this report.", 409)
+                    if (paymentStatus != "submitted") item.put("payment_status", "submitted").put("utr", input.optString("utr"))
+                }
+                "reject" -> {
+                    if (paymentStatus !in listOf("pending", "submitted")) throw AppError("bad_state", "Cannot reject this report.", 409)
+                    item.put("payment_status", "rejected")
+                }
                 else -> throw AppError("validation", "Invalid payment action.", 422)
             }
             return JSONObject().put("ok", true)
