@@ -1,0 +1,70 @@
+name: Owner app production smoke
+
+# This read-only smoke test visits public pages and never signs in or changes data.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'arena/309fdf51-printly'
+    paths:
+      - '.github/workflows/owner-app-production-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Locate Chrome and install the browser driver
+        shell: bash
+        run: |
+          set -euo pipefail
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+          test -n "$CHROME"
+          echo "CHROME_PATH=$CHROME" >> "$GITHUB_ENV"
+          npm install --prefix "$RUNNER_TEMP/owner-smoke" --no-save --ignore-scripts --no-audit --no-fund playwright-core@1.55.0
+      - name: Check the owner welcome and existing sign-in
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const { chromium } = require(`${process.env.RUNNER_TEMP}/owner-smoke/node_modules/playwright-core`);
+          const site = 'https://printly-steel-three.vercel.app';
+          (async () => {
+            const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH, args: ['--no-sandbox'] });
+            try {
+              const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+              const page = await context.newPage();
+              const pageErrors = [];
+              page.on('pageerror', error => pageErrors.push(error.message));
+              const entry = await page.goto(`${site}/owner-app?android_version=2`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+              assert.equal(entry?.status(), 200, 'owner app must return HTTP 200');
+              await page.getByRole('heading', { name: 'Get orders from anyone, anywhere.' }).waitFor({ state: 'visible', timeout: 15000 });
+              assert.equal(await page.evaluate(() => localStorage.getItem('printly-owner-android-version')), '2');
+              await page.getByRole('button', { name: 'Next', exact: true }).click();
+              await page.getByRole('heading', { name: 'Manage everything in one place.' }).waitFor();
+              await page.getByRole('button', { name: 'Next', exact: true }).click();
+              await page.getByRole('heading', { name: 'Grow your print shop.' }).waitFor();
+              await page.getByRole('button', { name: 'Get started' }).click();
+              await page.waitForURL(url => url.pathname === '/login' && url.searchParams.get('next') === '/shop', { timeout: 15000 });
+              await page.getByRole('heading', { name: 'Shop owner sign in' }).waitFor();
+              await page.goto(`${site}/owner-app?android_version=2`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+              await page.waitForURL(url => url.pathname === '/login' && url.searchParams.get('next') === '/shop', { timeout: 15000 });
+              const root = await context.request.get(`${site}/`);
+              assert.equal(root.status(), 200, 'public homepage must return HTTP 200');
+              const manifest = await context.request.get(`${site}/owner-app.webmanifest`);
+              assert.equal(manifest.status(), 200, 'owner app manifest must return HTTP 200');
+              assert.equal((await manifest.json()).id, '/owner-app');
+              const association = await context.request.get(`${site}/.well-known/assetlinks.json`, { failOnStatusCode: false });
+              console.log(`Android association endpoint returned HTTP ${association.status()} (configuration is separate from the 404 fix).`);
+              assert.deepEqual(pageErrors, [], 'owner app should not raise browser errors');
+              console.log('PASS: public site, owner app HTTP 200, all introduction slides, first-time and returning login redirects, and manifest.');
+              await context.close();
+            } finally {
+              await browser.close();
+            }
+          })().catch(error => { console.error(error); process.exitCode = 1; });
+          NODE
