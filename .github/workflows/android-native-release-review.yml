@@ -1,8 +1,9 @@
 name: Native Android protected signed review
 
-# This is an encrypted REVIEW artifact only: it does not publish or deploy.
-# A deliberately committed native request file can trigger the branch workflow
-# without merging. Never add one until the exact source and key are approved.
+# An approved run creates an encrypted review artifact and an unpublished
+# GitHub release draft for an authorized device test. It does not publish the
+# release, deploy the site, or configure the owner download. A deliberately
+# committed request can trigger the branch workflow without merging.
 on:
   workflow_dispatch:
     inputs:
@@ -40,6 +41,11 @@ jobs:
   signed-native-review:
     needs: verify-protection
     environment: printly-owner-signing
+    # The scoped token can create an unpublished draft after signing; no step
+    # publishes it, changes hosting, or exposes an unencrypted Actions artifact.
+    permissions:
+      actions: read
+      contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -102,6 +108,13 @@ jobs:
           test "$("$analyzer" manifest version-name "$APK")" = "$REQUESTED_VERSION_NAME"
           "$analyzer" manifest print "$APK" > "$RUNNER_TEMP/native-release-manifest.xml"
           python3 check-manifest.py "$RUNNER_TEMP/native-release-manifest.xml" io.github.dawartariq.printly.owner
+          if grep -q '^application-debuggable' package-evidence.txt; then echo 'A release APK must not be debuggable.' >&2; exit 1; fi
+          unzip -p "$APK" 'classes*.dex' > "$RUNNER_TEMP/native-release.dex"
+          grep -aqF 'https://printly0.vercel.app' "$RUNNER_TEMP/native-release.dex"
+          grep -aqF 'lgfqetnfazawglwllymb.supabase.co' "$RUNNER_TEMP/native-release.dex"
+          if grep -aqF 'https://printly-native-test.vercel.app' "$RUNNER_TEMP/native-release.dex" || grep -aqF 'rahfmpsdbwbktlobntkm.supabase.co' "$RUNNER_TEMP/native-release.dex"; then
+            echo 'Staging host found in production DEX.' >&2; exit 1
+          fi
       - name: Encrypt the native review APK for the operator
         working-directory: apps/printly-owner-native-android
         shell: bash
@@ -109,6 +122,10 @@ jobs:
           PRINTLY_ANDROID_ARTIFACT_PASSPHRASE: ${{ secrets.PRINTLY_ANDROID_ARTIFACT_PASSPHRASE }}
         run: |
           set -eu -o pipefail
+          umask 077
+          # Keep the identical verified bytes on the ephemeral runner for the
+          # draft-release step; only encrypted bytes go to Actions artifacts.
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/Printly-for-Shops-2.0.1.apk"
           ../../scripts/encrypt-android-review.sh app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/app-release.apk.gpg
           rm -f app/build/outputs/apk/release/app-release.apk
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -122,3 +139,15 @@ jobs:
             apps/printly-owner-native-android/sha256-evidence.txt
           if-no-files-found: error
           retention-days: 7
+      - name: Create and verify an unpublished device-test draft
+        working-directory: apps/printly-owner-native-android
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_VERSION_CODE: ${{ steps.request.outputs.version_code }}
+          REQUESTED_VERSION_NAME: ${{ steps.request.outputs.version_name }}
+        run: |
+          set -eu -o pipefail
+          APK="$RUNNER_TEMP/Printly-for-Shops-2.0.1.apk"
+          trap 'rm -f -- "$APK"' EXIT
+          ../../scripts/create-native-draft-review.sh "$APK" sha256-evidence.txt

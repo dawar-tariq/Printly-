@@ -150,6 +150,10 @@ jobs:
             assert.equal(data.api_version, 1);
             assert.equal(data.supabase_url, 'https://lgfqetnfazawglwllymb.supabase.co');
             assert.ok(typeof data.supabase_anon_key === 'string' && data.supabase_anon_key.length > 0, 'public sign-in key must be present');
+            const auth = await fetch(`${data.supabase_url}/auth/v1/settings`, {
+              headers: { apikey: data.supabase_anon_key }, redirect: 'error', signal: AbortSignal.timeout(30000),
+            });
+            assert.ok(auth.ok, 'public sign-in key must work with production Auth');
             const experience = await get('/api/native/v1/experience');
             assert.equal(experience.status, 200, 'native experience must be available');
             notCached(experience);
@@ -170,6 +174,14 @@ jobs:
             assert.equal(destination.origin, site);
             assert.equal(destination.pathname, '/login');
             assert.equal(destination.searchParams.get('next'), '/shop/app');
-            console.log('PASS: production native config, isolation, anonymous gateway and shop-download guards.');
+            const root = await get('/');
+            assert.equal(root.status, 200, 'canonical homepage must be available');
+            assert.ok((await root.text()).includes(`${site}/brand/printly-share.png`), 'site metadata must use the canonical production origin');
+            const legacy = await fetch('https://printly-steel-three.vercel.app/s/p-demo1?legacy_check=1', {
+              redirect: 'manual', signal: AbortSignal.timeout(30000),
+            });
+            assert.equal(legacy.status, 307, 'old origin must redirect');
+            assert.equal(legacy.headers.get('location'), `${site}/s/p-demo1?legacy_check=1`, 'redirect must preserve the shop path and query');
+            console.log('PASS: production Auth/config, isolation, private gateway and download guards, canonical metadata and legacy redirect.');
           })().catch(error => { console.error(error); process.exitCode = 1; });
           NODE
