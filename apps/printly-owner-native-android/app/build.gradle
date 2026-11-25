@@ -44,7 +44,7 @@ android {
         // still needs the verified release key and an upgrade test.
         versionName '2.0.1'
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
-        buildConfigField 'String', 'SITE_ORIGIN', '"https://printly-steel-three.vercel.app"'
+        buildConfigField 'String', 'SITE_ORIGIN', '"https://printly0.vercel.app"'
         buildConfigField 'String', 'SUPABASE_HOST', '"lgfqetnfazawglwllymb.supabase.co"'
         buildConfigField 'boolean', 'ISOLATED_TEST_MODE', 'false'
     }

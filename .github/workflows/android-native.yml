@@ -102,7 +102,9 @@ jobs:
             unzip -p "$QA" 'classes*.dex' > "$RUNNER_TEMP/native-qa.dex"
             grep -aqF 'https://printly-native-test.vercel.app' "$RUNNER_TEMP/native-qa.dex"
             grep -aqF 'rahfmpsdbwbktlobntkm.supabase.co' "$RUNNER_TEMP/native-qa.dex"
-            if grep -aqF 'printly-steel-three.vercel.app' "$RUNNER_TEMP/native-qa.dex" || grep -aqF 'lgfqetnfazawglwllymb.supabase.co' "$RUNNER_TEMP/native-qa.dex"; then echo 'Production host found in QA DEX.' >&2; exit 1; fi
+            for productionHost in 'printly-steel-three.vercel.app' 'printly0.vercel.app' 'printly-shop.vercel.app' 'lgfqetnfazawglwllymb.supabase.co'; do
+              if grep -aqF "$productionHost" "$RUNNER_TEMP/native-qa.dex"; then echo 'Production host found in QA DEX.' >&2; exit 1; fi
+            done
           ) > "$RUNNER_TEMP/native-qa-check.log" 2>&1
           result=$?
           tail -n 160 "$RUNNER_TEMP/native-qa-check.log"
@@ -137,7 +139,14 @@ jobs:
           test -n "$CONFIG"
           grep -F 'ISOLATED_TEST_MODE = false' "$CONFIG"
           grep -F 'DEMO_MODE = false' "$CONFIG"
+          grep -F 'https://printly0.vercel.app' "$CONFIG"
           grep -F 'lgfqetnfazawglwllymb.supabase.co' "$CONFIG"
+          unzip -p "$APK" 'classes*.dex' > "$RUNNER_TEMP/native-release.dex"
+          grep -aqF 'https://printly0.vercel.app' "$RUNNER_TEMP/native-release.dex"
+          grep -aqF 'lgfqetnfazawglwllymb.supabase.co' "$RUNNER_TEMP/native-release.dex"
+          if grep -aqF 'https://printly-native-test.vercel.app' "$RUNNER_TEMP/native-release.dex" || grep -aqF 'rahfmpsdbwbktlobntkm.supabase.co' "$RUNNER_TEMP/native-release.dex"; then
+            echo 'Staging host found in production DEX.' >&2; exit 1
+          fi
       - name: Exercise native review signing with a disposable key
         working-directory: apps/printly-owner-native-android
         shell: bash
