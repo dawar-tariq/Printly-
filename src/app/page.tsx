@@ -30,6 +30,22 @@ const features = [
 ];
 
 export default function HomePage() {
+  // Marketing copy for the real service describes real payments. Do not show
+  // it on the isolated rehearsal, where only synthetic data may be used.
+  if (process.env.PRINTLY_ISOLATED_TEST === '1') return <main id="main-content" className="min-h-screen bg-[#f8f6f1] px-5 py-12 sm:py-20">
+    <div className="mx-auto max-w-2xl rounded-3xl border border-orange-200 bg-white p-7 shadow-sm sm:p-10">
+      <p className="text-xs font-extrabold uppercase tracking-widest text-orange-800">Printly · isolated phone test</p>
+      <h1 className="mt-4 text-3xl font-extrabold tracking-tight text-neutral-900 sm:text-4xl">Test with synthetic data only.</h1>
+      <p className="mt-4 text-base leading-7 text-neutral-700">This is a separate rehearsal site, not a real shop. Use only test accounts, made-up customer details and synthetic files.</p>
+      <p role="status" className="mt-5 rounded-xl bg-amber-50 p-4 text-sm font-bold leading-6 text-amber-950">Never send money. Payment links and QR codes are disabled in the test interface, but this is not a payment sandbox.</p>
+      <div className="mt-7 flex flex-wrap gap-3">
+        <Link href="/s/p-demo1" className="btn btn-primary min-h-11 px-5">Open test shop <ArrowRight size={17} /></Link>
+        <Link href="/login" className="btn btn-ghost min-h-11 px-5">Owner test sign in</Link>
+        <Link href="/admin/login" className="btn btn-ghost min-h-11 px-5">Admin test sign in</Link>
+      </div>
+      <p className="mt-6 text-xs leading-5 text-neutral-600">Do not use real shop credentials, customer information, payment IDs or files. Dropbox import is disabled for this rehearsal.</p>
+    </div>
+  </main>;
   return <PublicShell>
     <main id="main-content">
       {/* Hero */}

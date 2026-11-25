@@ -5,7 +5,20 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 vi.mock('next/link', () => ({ default: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => <a href={href} {...props}>{children}</a> }));
 import HomePage from './page';
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.unstubAllEnvs(); });
+
+it('replaces real-payment marketing with an isolated synthetic-data landing page', () => {
+  vi.stubEnv('PRINTLY_ISOLATED_TEST', '1');
+  render(<HomePage />);
+  expect(screen.getByRole('heading', { name: 'Test with synthetic data only.' })).toBeTruthy();
+  expect(screen.getByText(/Never send money/)).toBeTruthy();
+  expect(screen.getByText(/Dropbox import is disabled/)).toBeTruthy();
+  expect(screen.queryByText(/demo shop has real checkout options/i)).toBeNull();
+  expect(screen.queryByText(/pay the shop directly/i)).toBeNull();
+  expect(screen.getByRole('link', { name: 'Open test shop' }).getAttribute('href')).toBe('/s/p-demo1');
+  expect(screen.getByRole('link', { name: 'Owner test sign in' }).getAttribute('href')).toBe('/login');
+  expect(screen.getByRole('link', { name: 'Admin test sign in' }).getAttribute('href')).toBe('/admin/login');
+});
 
 it('offers shop sign-in without exposing an admin portal in the public navigation', () => {
   render(<HomePage />);

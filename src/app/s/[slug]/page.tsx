@@ -20,6 +20,7 @@ const SERVICE_LABEL: Record<string, string> = {
 };
 
 export default async function ShopLandingPage({ params }: { params: Promise<{ slug: string }> }) {
+  const isolatedTest = process.env.PRINTLY_ISOLATED_TEST === '1';
   const { slug } = await params;
   const supabase = await createServerSupabase();
   const { data: shop, error } = await findPublicShop(supabase, slug);
@@ -53,7 +54,7 @@ export default async function ShopLandingPage({ params }: { params: Promise<{ sl
     <div className="min-h-screen">
       <header className="max-w-lg mx-auto px-4 h-14 flex items-center justify-between">
         <Logo />
-        <span className="chip bg-neutral-100 text-neutral-600"><ShieldCheck size={12} /> Verified shop</span>
+        <span className="chip bg-neutral-100 text-neutral-600"><ShieldCheck size={12} /> {isolatedTest ? 'Test shop' : 'Verified shop'}</span>
       </header>
 
       <main className="max-w-lg mx-auto px-4 pb-24">
@@ -64,7 +65,7 @@ export default async function ShopLandingPage({ params }: { params: Promise<{ sl
               <h1 className="break-words [overflow-wrap:anywhere] text-2xl font-extrabold tracking-tight">{shop.name}</h1>
               <p className="mt-1 text-xs font-semibold text-neutral-500">Shop code <span className="font-mono">{shop.short_code}</span></p>
               <p className="mt-1 flex items-start gap-1.5 text-sm text-neutral-500"><MapPin size={14} className="mt-1 shrink-0" /><span className="break-words [overflow-wrap:anywhere]">{shop.address}{shop.city ? `, ${shop.city}` : ''}</span></p>
-              {shop.phone && <a href={`tel:${shop.phone.replace(/[^\d+]/g, '')}`} className="mt-1 flex items-center gap-1.5 break-all text-sm font-semibold text-orange-800 hover:underline"><Phone size={14} className="shrink-0" />{shop.phone}</a>}
+              {shop.phone && (isolatedTest ? <p className="mt-1 text-sm font-semibold text-neutral-600">Test contact only — do not call.</p> : <a href={`tel:${shop.phone.replace(/[^\d+]/g, '')}`} className="mt-1 flex items-center gap-1.5 break-all text-sm font-semibold text-orange-800 hover:underline"><Phone size={14} className="shrink-0" />{shop.phone}</a>)}
               <p className="mt-1 text-sm text-neutral-500 flex items-center gap-1.5"><Clock size={14} className="shrink-0" />Estimated ready time: ~{shop.eta_minutes} min</p>
             </div>
             <div className="text-right shrink-0">
@@ -110,7 +111,7 @@ export default async function ShopLandingPage({ params }: { params: Promise<{ sl
           <p>Already started checkout? Return in the same tab, or use your saved tracking link.</p>
           <Link href={`/s/${encodeURIComponent(slug)}/order`} className="mt-2 inline-block font-bold text-orange-800 underline">Return to a previous checkout</Link>
         </div>}
-        <p className="mt-3 text-center text-xs text-neutral-400">No app needed · Pay the shop directly on UPI · Collect with your token</p>
+        <p className="mt-3 text-center text-xs text-neutral-400">{isolatedTest ? 'Synthetic test orders only · Never send money' : 'No app needed · Pay the shop directly on UPI · Collect with your token'}</p>
       </main>
     </div>
   );

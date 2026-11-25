@@ -1,5 +1,7 @@
-# Temporary read-only check of the explicitly isolated test site. No Supabase
-# keys, account credentials, customer data or real payments are used by CI.
+# Temporary check of the explicitly isolated test site. It makes one
+# credential-free login-gate request, consuming one short-lived staging rate
+# limit attempt; no account credentials, customer data or payments are used.
+# The site's public client key is checked in memory and never printed.
 name: Verify isolated native test site
 
 on:
@@ -104,7 +106,25 @@ jobs:
           print('PASS: native presentation includes the test notice')
 
           get('/api/shop/app-release', expected=401)
-          print('PASS: anonymous release metadata is not available')
+          headers, _ = get('/api/native/v1/shop/me', expected=401)
+          if 'no-store' not in headers.get('Cache-Control', '').lower() or 'authorization' not in headers.get('Vary', '').lower():
+              raise SystemExit('Native shop gateway: missing private-response headers')
+          print('PASS: anonymous release metadata and native shop data are not available')
+
+          # This intentionally consumes one short-lived staging rate-limit
+          # attempt. It contains no credentials and never calls Supabase login.
+          path = '/api/auth/login-attempt'
+          request = urllib.request.Request(site + path, data=b'', method='POST', headers={'User-Agent': 'Printly-isolated-smoke/1', 'Cache-Control': 'no-cache'})
+          try:
+              with opener.open(request, timeout=20) as response:
+                  status = response.status
+          except urllib.error.HTTPError as error:
+              status = error.code
+          except Exception:
+              raise SystemExit(f'{path}: request failed; check connectivity or Vercel protection')
+          if status != 200:
+              raise SystemExit(f'{path}: expected HTTP 200, got HTTP {status}; staging sign-in gate is not ready')
+          print('PASS: credential-free staging sign-in gate')
           PY
           result=$?
           cat "$RUNNER_TEMP/isolated-smoke.log"
