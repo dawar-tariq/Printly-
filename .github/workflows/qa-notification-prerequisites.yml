@@ -1,0 +1,54 @@
+# Temporary, isolated QA-only prerequisite check. Never prints secret values.
+name: Check isolated QA notification prerequisites
+
+on:
+  push:
+    paths:
+      - '.github/workflows/qa-notification-prerequisites.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  prerequisites:
+    if: github.repository == 'dawar-tariq/Printly-' && github.ref == 'refs/heads/arena/309fdf51-printly'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Check QA environment and private dispatcher key
+        env:
+          QA_WORKER_SECRET: ${{ secrets.PRINTLY_QA_CRON_E54FF1CB5D3D }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          const site = 'https://printly-native-test.vercel.app';
+          const expectedDb = 'https://rahfmpsdbwbktlobntkm.supabase.co';
+          const secret = process.env.QA_WORKER_SECRET || '';
+          const fail = (message) => { console.error(message); process.exit(1); };
+          if (!/^[A-Za-z0-9_-]{32,128}$/.test(secret)) fail('QA worker secret is missing or invalid in GitHub Actions.');
+          try {
+            const response = await fetch(`${site}/api/native/v1/test-environment`, { redirect: 'error', signal: AbortSignal.timeout(15000) });
+            const result = await response.json();
+            if (!response.ok || result.isolated_test !== true || result.supabase_url !== expectedDb || result.public_auth_check !== 'ok' || result.server_database_read !== 'ok') fail('QA isolation check failed.');
+          } catch { fail('Could not confirm isolated QA environment.'); }
+          const end = Date.now() + 5 * 60 * 1000;
+          while (Date.now() < end) {
+            try {
+              const response = await fetch(`${site}/api/cron/native-order-push`, {
+                method: 'POST', headers: { Authorization: `Bearer ${secret}` }, redirect: 'error', signal: AbortSignal.timeout(15000),
+              });
+              if (response.status === 503) {
+                const result = await response.json();
+                if (result.error?.message === 'Notification worker is not configured.') {
+                  console.log('PASS: isolated QA, matching private dispatcher key, and disabled worker.');
+                  process.exit(0);
+                }
+                fail('Unexpected QA worker configuration response.');
+              }
+              if (response.status !== 401) fail(`Unexpected QA worker status ${response.status}.`);
+            } catch { fail('Could not reach the QA worker securely.'); }
+            await new Promise((resolve) => setTimeout(resolve, 5000));
+          }
+          fail('QA worker key did not match after the disabled test deployment.');
+          NODE
