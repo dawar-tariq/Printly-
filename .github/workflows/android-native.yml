@@ -1,0 +1,90 @@
+name: Native Android demo and checks
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'apps/printly-owner-native-android/**'
+      - '.github/workflows/android-native.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Android platform
+        shell: bash
+        run: |
+          set +o pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+          status=${PIPESTATUS[1]}
+          set -o pipefail
+          test "$status" -eq 0
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Build demo and run local tests
+        working-directory: apps/printly-owner-native-android
+        run: ./gradlew --no-daemon testDebugUnitTest assembleDebug assembleDebugAndroidTest --stacktrace
+      - name: Inspect compiled demo package
+        working-directory: apps/printly-owner-native-android
+        shell: bash
+        run: |
+          set -eu -o pipefail
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest print "$APK" > "$RUNNER_TEMP/native-demo-manifest.xml"
+          python3 check-manifest.py "$RUNNER_TEMP/native-demo-manifest.xml" io.github.dawartariq.printly.owner.native.debug
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$APK"
+          sha256sum "$APK"
+          if grep -R -E 'android\.webkit|TrustedWebActivity|androidbrowserhelper' app/src/main/java; then
+            echo 'A browser-wrapper dependency was found in native source.' >&2; exit 1
+          fi
+      - name: Refuse release without signing configuration
+        working-directory: apps/printly-owner-native-android
+        shell: bash
+        run: |
+          if ./gradlew --no-daemon assembleRelease > "$RUNNER_TEMP/unsigned-native.log" 2>&1; then
+            echo 'Unsigned release unexpectedly succeeded.' >&2; exit 1
+          fi
+          grep -F 'Release signing is not configured' "$RUNNER_TEMP/unsigned-native.log"
+      - name: Compile live variant with a disposable CI key (never published)
+        working-directory: apps/printly-owner-native-android
+        shell: bash
+        run: |
+          set -eu -o pipefail
+          KEY="$RUNNER_TEMP/native-disposable.p12"
+          trap 'rm -f "$KEY"' EXIT
+          keytool -genkeypair -noprompt -keystore "$KEY" -storetype PKCS12 -storepass ci-test-only -keypass ci-test-only -alias ci-test -keyalg RSA -keysize 2048 -validity 1 -dname 'CN=Disposable CI Test'
+          PRINTLY_ANDROID_KEYSTORE_PATH="$KEY" PRINTLY_ANDROID_KEYSTORE_PASSWORD=ci-test-only PRINTLY_ANDROID_KEYSTORE_TYPE=PKCS12 PRINTLY_ANDROID_KEY_ALIAS=ci-test PRINTLY_ANDROID_KEY_PASSWORD=ci-test-only ./gradlew --no-daemon assembleRelease
+          APK=app/build/outputs/apk/release/app-release.apk
+          "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest print "$APK" > "$RUNNER_TEMP/native-release-manifest.xml"
+          python3 check-manifest.py "$RUNNER_TEMP/native-release-manifest.xml" io.github.dawartariq.printly.owner
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$APK"
+      - name: Enable emulator acceleration
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Exercise synthetic shop on an offline Android emulator
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 31
+          target: google_apis
+          arch: x86_64
+          working-directory: apps/printly-owner-native-android
+          script: adb shell svc wifi disable && adb shell svc data disable && ./gradlew --no-daemon connectedDebugAndroidTest --stacktrace
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: printly-native-DEMO-synthetic-data-NOT-FOR-RELEASE
+          path: apps/printly-owner-native-android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7

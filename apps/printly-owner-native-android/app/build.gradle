@@ -1,0 +1,93 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+    id 'org.jetbrains.kotlin.plugin.compose'
+}
+
+android {
+    namespace 'io.github.dawartariq.printly.owner.nativeapp'
+    compileSdk 36
+
+    defaultConfig {
+        // Same release identity as the installed owner app. A future signed
+        // release must be reviewed and use the independently verified key.
+        applicationId 'io.github.dawartariq.printly.owner'
+        minSdk 24
+        targetSdk 36
+        versionCode 3
+        versionName '2.0.0-native-review'
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+        buildConfigField 'String', 'SITE_ORIGIN', '"https://printly-steel-three.vercel.app"'
+        buildConfigField 'String', 'SUPABASE_HOST', '"lgfqetnfazawglwllymb.supabase.co"'
+    }
+
+    def storePath = System.getenv('PRINTLY_ANDROID_KEYSTORE_PATH')
+    def storePasswordValue = System.getenv('PRINTLY_ANDROID_KEYSTORE_PASSWORD')
+    def storeTypeValue = System.getenv('PRINTLY_ANDROID_KEYSTORE_TYPE')
+    def keyAliasValue = System.getenv('PRINTLY_ANDROID_KEY_ALIAS')
+    def keyPasswordValue = System.getenv('PRINTLY_ANDROID_KEY_PASSWORD')
+    if (storeTypeValue && !(storeTypeValue in ['JKS', 'PKCS12'])) {
+        throw new GradleException('PRINTLY_ANDROID_KEYSTORE_TYPE must be JKS or PKCS12.')
+    }
+    def releaseSigningReady = [storePath, storePasswordValue, keyAliasValue, keyPasswordValue].every { it != null && !it.isEmpty() }
+    signingConfigs {
+        if (releaseSigningReady) {
+            release {
+                storeFile file(storePath)
+                storePassword storePasswordValue
+                if (storeTypeValue) storeType storeTypeValue
+                keyAlias keyAliasValue
+                keyPassword keyPasswordValue
+            }
+        }
+    }
+    buildTypes {
+        // A debug install is visibly synthetic, uses no live shop data, and
+        // cannot overwrite the installed release because its package differs.
+        debug {
+            applicationIdSuffix '.native.debug'
+            versionNameSuffix '-demo'
+            buildConfigField 'boolean', 'DEMO_MODE', 'true'
+        }
+        release {
+            minifyEnabled false
+            buildConfigField 'boolean', 'DEMO_MODE', 'false'
+            if (releaseSigningReady) signingConfig signingConfigs.release
+        }
+    }
+    gradle.taskGraph.whenReady { graph ->
+        if (!releaseSigningReady && graph.allTasks.any { it.path.startsWith(':app:') && it.name in ['assembleRelease', 'bundleRelease', 'packageRelease'] }) {
+            throw new GradleException('Release signing is not configured. A signed review needs explicit approval and the verified release key.')
+        }
+    }
+    buildFeatures { compose true; buildConfig true }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+        coreLibraryDesugaringEnabled true
+    }
+    kotlinOptions { jvmTarget = '17' }
+    packaging { resources { excludes += '/META-INF/{AL2.0,LGPL2.1}' } }
+}
+
+dependencies {
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'
+    implementation platform('androidx.compose:compose-bom:2024.12.01')
+    implementation 'androidx.activity:activity-compose:1.10.0'
+    implementation 'androidx.core:core-ktx:1.15.0'
+    implementation 'androidx.lifecycle:lifecycle-runtime-compose:2.8.7'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7'
+    implementation 'androidx.compose.ui:ui'
+    implementation 'androidx.compose.ui:ui-tooling-preview'
+    implementation 'androidx.compose.material3:material3'
+    implementation 'androidx.compose.material:material-icons-extended'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0'
+    debugImplementation 'androidx.compose.ui:ui-tooling'
+    debugImplementation 'androidx.compose.ui:ui-test-manifest'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
+    androidTestImplementation platform('androidx.compose:compose-bom:2024.12.01')
+    androidTestImplementation 'androidx.compose.ui:ui-test-junit4'
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+}
