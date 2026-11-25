@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({
-  authorized: true, failWrite: false,
+  authorized: true, failWrite: false, stockCountOverride: null as number | null,
   stock: { id: '11111111-1111-4111-8111-111111111111', shop_id: 'shop', name: 'Paper', category: 'paper', qty: 10, unit: 'sheets', low_stock_threshold: 3 } as Record<string, unknown> | null,
   rate: { id: '22222222-2222-4222-8222-222222222222', shop_id: 'shop', service: 'print', paper_size: 'A4', color: 'bw', sides: 'single', paper_gsm: 80, option: null, unit: 'page', price_paise: 200 } as Record<string, unknown> | null,
 }));
@@ -27,7 +27,9 @@ vi.mock('@/lib/supabase', () => {
       if (this.operation !== 'read' && state.failWrite) return { data: null, error: { code: 'TIMEOUT' }, count: null };
       if (matches && this.operation === 'update' && row) Object.assign(row, this.patch);
       if (matches && this.operation === 'delete') { if (this.table === 'inventory_items') state.stock = null; else state.rate = null; }
-      return { data: single ? (matches ? { ...row } : null) : (matches ? [{ ...row }] : []), error: null, count: matches ? 1 : 0 };
+      const count = this.table === 'inventory_items' && !single && state.stockCountOverride !== null
+        ? state.stockCountOverride : matches ? 1 : 0;
+      return { data: single ? (matches ? { ...row } : null) : (matches ? [{ ...row }] : []), error: null, count };
     }
     maybeSingle() { return Promise.resolve(this.result(true)); }
     then(resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) { return Promise.resolve(this.result(false)).then(resolve, reject); }
@@ -44,12 +46,28 @@ const req = (body: unknown, method = 'PATCH') => new Request('https://printly.te
 const expectedItem = () => ({ name: 'Paper', category: 'paper', qty: 10, unit: 'sheets', low_stock_threshold: 3 });
 const expectedRate = () => ({ service: 'print', paper_size: 'A4', color: 'bw', sides: 'single', paper_gsm: 80, option: null, unit: 'page', price_paise: 200 });
 beforeEach(() => {
-  state.authorized = true; state.failWrite = false;
+  state.authorized = true; state.failWrite = false; state.stockCountOverride = null;
   state.stock = { id: itemId, shop_id: 'shop', ...expectedItem() };
   state.rate = { id: rateId, shop_id: 'shop', ...expectedRate() };
 });
 
 describe('native safe edits', () => {
+  it('fails closed if an inventory list is truncated or too large', async () => {
+    const request = () => new Request('https://printly.test/api/native/v1/shop/inventory');
+    const complete = await inventory.GET(request());
+    expect(complete.status).toBe(200);
+    expect((await complete.json()).items).toHaveLength(1);
+    state.stockCountOverride = 2;
+    const truncated = await inventory.GET(request());
+    expect(truncated.status).toBe(503);
+    expect((await truncated.json()).error.code).toBe('inventory_incomplete');
+    state.stockCountOverride = 1001;
+    const oversized = await inventory.GET(request());
+    expect(oversized.status).toBe(503);
+    expect((await oversized.json()).error.code).toBe('inventory_too_large');
+    state.authorized = false;
+    expect((await inventory.GET(request())).status).toBe(403);
+  });
   it('only permits one concurrent stock edit from the same snapshot', async () => {
     const results = await Promise.all([
       inventory.PATCH(req({ expected: expectedItem(), set_qty: 11 }), context(itemId)),

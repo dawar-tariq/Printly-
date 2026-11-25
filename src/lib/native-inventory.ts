@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { z } from 'zod';
-import { assertStaffOfShop, jsonError, jsonOk } from '@/lib/api';
+import { assertStaffOfShop, getStaffContext, jsonError, jsonOk } from '@/lib/api';
 import { createAdminSupabase } from '@/lib/supabase';
 import { readJsonBody } from '@/lib/request-body';
 
@@ -19,6 +19,23 @@ const updateInput = z.object({
 }).strict().refine((value) => value.set_qty !== undefined || value.name !== undefined || value.unit !== undefined || value.low_stock_threshold !== undefined);
 const deleteInput = z.object({ expected: expectedItem }).strict();
 type Context = { params: Promise<{ id: string }> };
+
+/** Never present a truncated PostgREST inventory as the complete list. */
+export async function GET(request: Request) {
+  const staff = await getStaffContext();
+  if (!staff || staff.isAdmin || !staff.shopIds.length) return jsonError(403, 'forbidden', 'Shop sign-in required.');
+  const shopId = new URL(request.url).searchParams.get('shop_id') ?? staff.shopIds[0];
+  if (!staff.shopIds.includes(shopId)) return jsonError(403, 'forbidden', 'Not your shop.');
+  const { data, count, error } = await createAdminSupabase().from('inventory_items')
+    .select('id, shop_id, name, category, qty, unit, low_stock_threshold, created_at', { count: 'exact' })
+    .eq('shop_id', shopId).order('category').order('name').order('id').limit(1000);
+  if (error || count === null || !Number.isSafeInteger(count) || count < 0 || !Array.isArray(data)) {
+    return jsonError(503, 'inventory_unavailable', 'Could not load the complete inventory. Please retry.');
+  }
+  if (count > 1000) return jsonError(503, 'inventory_too_large', 'This inventory is too large for the app to load safely. Contact Printly support.');
+  if (data.length !== count) return jsonError(503, 'inventory_incomplete', 'Could not load the complete inventory. Please retry.');
+  return jsonOk({ items: data }, { headers: { 'Cache-Control': 'private, no-store' } });
+}
 
 /** Compare the item the operator saw in the same atomic update. */
 export async function PATCH(request: Request, context: Context) {

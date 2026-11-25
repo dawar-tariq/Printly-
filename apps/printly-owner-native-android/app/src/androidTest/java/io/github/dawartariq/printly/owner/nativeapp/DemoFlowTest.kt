@@ -5,9 +5,12 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.printToString
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -20,8 +23,15 @@ import org.junit.runner.RunWith
 class DemoFlowTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
-    private fun waitFor(text: String) = compose.waitUntil(15_000) {
-        compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
+    private fun waitFor(text: String) {
+        try {
+            compose.waitUntil(15_000) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
+        } catch (failure: Throwable) {
+            // This is a synthetic-data-only test. Include the visible UI tree so
+            // CI failures remain diagnosable even if log downloads fail.
+            val tree = try { compose.onAllNodes(isRoot()).printToString(maxDepth = 7).take(9000) } catch (_: Throwable) { "UI tree unavailable" }
+            throw AssertionError("Timed out waiting for '$text'.\n$tree", failure)
+        }
     }
 
     @Test fun nativeShopNavigationAndExplicitPaymentReview() {
@@ -37,7 +47,8 @@ class DemoFlowTest {
         waitFor("Neha R.")
         compose.onNodeWithText("Neha R.").performClick()
         waitFor("Review UPI transfer")
-        compose.onNodeWithText("Review UPI transfer").performClick()
+        compose.onNodeWithText("Review UPI transfer").performScrollTo().performClick()
+        waitFor("Confirm payment")
         compose.onNodeWithText("Confirm payment").assertIsNotEnabled()
         compose.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.ToggleableState))[0].performClick()
         compose.onNodeWithText("Confirm payment").performClick()

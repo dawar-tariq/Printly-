@@ -17,7 +17,7 @@ import * as settings from '@/app/api/shop/settings/route';
 import * as rates from '@/lib/native-rate-card';
 import * as subscription from '@/app/api/shop/subscription/route';
 import * as subscriptionStatus from '@/app/api/shop/subscription/status/route';
-import * as recovery from '@/app/api/shop/recovery/route';
+import * as recovery from '@/lib/native-recovery';
 import * as availability from '@/app/api/shop/availability/route';
 import * as qr from '@/app/api/shop/qr/route';
 import * as standee from '@/app/api/shop/standee/route';
@@ -37,7 +37,7 @@ function endpoint(method: string, p: string[]): Handler | null {
     if (method === 'GET' && key === 'me') return () => me.GET();
     if (method === 'POST' && key === 'board') return board.POST;
     if (method === 'GET' && key === 'orders') return orders.GET;
-    if (method === 'GET' && key === 'inventory') return inventory.GET;
+    if (method === 'GET' && key === 'inventory') return inventoryItem.GET;
     if (method === 'POST' && key === 'inventory') return inventory.POST;
     if (method === 'GET' && key === 'reports') return reports.GET;
     if (method === 'PUT' && key === 'settings') return settings.PUT;

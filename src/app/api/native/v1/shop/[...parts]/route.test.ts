@@ -25,12 +25,13 @@ vi.mock('@/lib/supabase', () => {
     { id: fixture.draftB, shop_id: fixture.shopB, status: 'draft', payment_method: 'cod', payment_status: 'pending', customer_name: 'B' },
   ];
   class Query {
-    table: string; filters: Record<string, unknown> = {}; selection = ''; operation = 'read'; payload: unknown;
+    table: string; filters: Record<string, unknown> = {}; selection = ''; operation = 'read'; payload: unknown; orFilter = '';
     constructor(table: string) { this.table = table; }
     select(selection: string) { this.selection = selection; return this; }
     eq(key: string, value: unknown) { this.filters[key] = value; return this; }
     in(key: string, values: unknown[]) { this.filters[key] = values; return this; }
-    order() { return this; } range() { return this; } limit() { return this; } or() { return this; }
+    order() { return this; } range() { return this; } limit() { return this; }
+    or(filter: string) { this.orFilter = filter; return this; }
     update(payload: unknown) { this.operation = 'update'; this.payload = payload; return this; }
     insert(payload: unknown) { this.operation = 'insert'; this.payload = payload; return this; }
     result(single: boolean) {
@@ -48,6 +49,9 @@ vi.mock('@/lib/supabase', () => {
       if (this.table === 'order_files') rows = [{ id: fixture.fileA, order_id: fixture.orderA, shop_id: fixture.shopA, storage_path: 'x/file.pdf', original_name: 'file.pdf' }];
       for (const [key, value] of Object.entries(this.filters)) {
         rows = rows.filter((row) => Array.isArray(value) ? value.includes(row[key]) : row[key] === value);
+      }
+      if (this.table === 'orders' && this.orFilter === 'status.in.(queued,printing,ready),and(status.eq.draft,payment_method.eq.upi)') {
+        rows = rows.filter((row) => ['queued', 'printing', 'ready'].includes(String(row.status)) || (row.status === 'draft' && row.payment_method === 'upi'));
       }
       if (this.table === 'shop_services' || this.table === 'shop_onboarding' || this.table === 'order_items' || this.table === 'order_status_events' || this.table === 'payments') rows = [];
       if (this.operation === 'update' && rows[0]) rows = [{ ...rows[0], ...(this.payload as object) }];
@@ -114,6 +118,7 @@ describe('native bearer gateway', () => {
   it('allows only eligible recovery for an expired member and rejects cross-shop access', async () => {
     const list = await GET(request('recovery', 'tokenB'), context('recovery'));
     expect(list.status).toBe(200);
+    expect((await list.json()).orders.map((entry: { id: string }) => entry.id)).toEqual([fixture.orderB]);
     const own = `orders/${fixture.orderB}`;
     expect((await GET(request(own, 'tokenB'), context(own))).status).toBe(200);
     const unpaidDraft = `orders/${fixture.draftB}`;
