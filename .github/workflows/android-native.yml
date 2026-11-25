@@ -33,7 +33,19 @@ jobs:
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
       - name: Build demo and run local tests
         working-directory: apps/printly-owner-native-android
-        run: ./gradlew --no-daemon testDebugUnitTest assembleDebug assembleDebugAndroidTest --stacktrace
+        shell: bash
+        run: |
+          set +e
+          ./gradlew --no-daemon testDebugUnitTest assembleDebug assembleDebugAndroidTest --stacktrace > "$RUNNER_TEMP/native-build.log" 2>&1
+          result=$?
+          tail -n 300 "$RUNNER_TEMP/native-build.log"
+          if [ "$result" -ne 0 ]; then
+            (grep -E '(^e: |^e: file:|^FAILURE:|^\* What went wrong|^> |^   > |^Caused by:|error:| FAILED)' "$RUNNER_TEMP/native-build.log" || true) | head -50 | while IFS= read -r line; do
+              line=${line//'%'/'%25'}; line=${line//$'\r'/'%0D'}; line=${line//$'\n'/'%0A'}
+              echo "::error title=Native Android build::$line"
+            done
+          fi
+          exit "$result"
       - name: Inspect compiled demo package
         working-directory: apps/printly-owner-native-android
         shell: bash
