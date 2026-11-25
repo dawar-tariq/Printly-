@@ -94,7 +94,7 @@ jobs:
           target: google_apis
           arch: x86_64
           working-directory: apps/printly-owner-native-android
-          script: adb shell svc wifi disable && adb shell svc data disable && ./gradlew --no-daemon connectedDebugAndroidTest --stacktrace
+          script: bash ci-emulator-check.sh
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: printly-native-DEMO-synthetic-data-NOT-FOR-RELEASE

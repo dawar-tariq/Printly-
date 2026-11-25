@@ -6,13 +6,18 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import okio.BufferedSink
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.net.URI
-import java.net.URL
-import java.util.UUID
-import javax.net.ssl.HttpsURLConnection
+import java.util.concurrent.TimeUnit
 
 /** No business mutation is retried automatically: a lost response can hide a successful write. */
 class AppError(val code: String, override val message: String, val httpStatus: Int = 0) : Exception(message)
@@ -32,7 +37,7 @@ interface OwnerApi {
 }
 
 private data class PublicConfig(val authOrigin: String, val anonKey: String)
-private data class HttpResult(val status: Int, val bytes: ByteArray, val location: String?) {
+internal data class HttpResult(val status: Int, val bytes: ByteArray, val location: String?) {
     fun json(): JSONObject = try { JSONObject(bytes.toString(Charsets.UTF_8)) }
         catch (_: Exception) { throw AppError("invalid_response", "Could not read the server response. Please try again.") }
 }
@@ -211,59 +216,71 @@ private fun serverError(response: HttpResult): AppError {
     return AppError(code, text, response.status)
 }
 
-private suspend fun http(
+// Android's HttpURLConnection does not reliably support PATCH. OkHttp supports
+// it directly; redirect following and connection retries stay explicitly off.
+internal val secureHttpClient: OkHttpClient = OkHttpClient.Builder()
+    .followRedirects(false)
+    .followSslRedirects(false)
+    .retryOnConnectionFailure(false)
+    .connectTimeout(15, TimeUnit.SECONDS)
+    .readTimeout(25, TimeUnit.SECONDS)
+    .writeTimeout(25, TimeUnit.SECONDS)
+    .build()
+
+/** Also prevents OkHttp's HTTP 503 Retry-After: 0 / 421 follow-up for writes. */
+private class OneShotBody(private val body: RequestBody) : RequestBody() {
+    override fun contentType() = body.contentType()
+    override fun contentLength() = body.contentLength()
+    override fun writeTo(sink: BufferedSink) = body.writeTo(sink)
+    override fun isOneShot() = true
+}
+
+internal suspend fun http(
     address: String, method: String, body: JSONObject? = null, token: String? = null,
     apiKey: String? = null, maxBytes: Int = 2 * 1024 * 1024, photo: ProofPhoto? = null,
+    client: OkHttpClient = secureHttpClient,
 ): HttpResult = withContext(Dispatchers.IO) {
-    var connection: HttpsURLConnection? = null
     try {
-        val url = URL(address)
-        if (url.protocol != "https") throw AppError("connection", "A secure connection is required.")
-        val conn = url.openConnection() as HttpsURLConnection
-        connection = conn
-        conn.requestMethod = method
-        conn.instanceFollowRedirects = false
-        conn.connectTimeout = 15_000
-        conn.readTimeout = 25_000
-        conn.setRequestProperty("Accept", "application/json")
-        conn.setRequestProperty("Cache-Control", "no-store")
-        token?.let { conn.setRequestProperty("Authorization", "Bearer $it") }
-        apiKey?.let { conn.setRequestProperty("apikey", it) }
-        if (body != null) {
-            val bytes = body.toString().toByteArray(Charsets.UTF_8)
-            if (bytes.size > 128 * 1024) throw AppError("validation", "The request is too large.")
-            conn.doOutput = true
-            if (photo == null) {
-                conn.setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                conn.setFixedLengthStreamingMode(bytes.size)
-                conn.outputStream.use { it.write(bytes) }
+        val uri = URI(address)
+        if (uri.scheme != "https" || uri.host.isNullOrBlank() || uri.userInfo != null || uri.fragment != null) {
+            throw AppError("connection", "A secure connection is required.")
+        }
+        if (method !in listOf("GET", "POST", "PUT", "PATCH", "DELETE") || (method == "GET" && body != null) || (photo != null && body == null)) {
+            throw AppError("validation", "Invalid app request.")
+        }
+        val payload = body?.toString()?.toByteArray(Charsets.UTF_8)
+        if (payload != null && payload.size > 128 * 1024) throw AppError("validation", "The request is too large.")
+        val requestBody = if (method == "GET") null else {
+            val content = if (photo == null) {
+                (payload ?: ByteArray(0)).toRequestBody(if (payload == null) null else "application/json; charset=utf-8".toMediaType())
             } else {
-                // Fixed, locally generated headers; do not interpolate a provider's filename.
-                val boundary = "Printly${UUID.randomUUID().toString().replace("-", "")}"
-                val prefix = "--$boundary\r\nContent-Disposition: form-data; name=\"payload\"\r\nContent-Type: application/json; charset=utf-8\r\n\r\n".toByteArray()
-                val middle = "\r\n--$boundary\r\nContent-Disposition: form-data; name=\"proof\"; filename=\"shop-photo\"\r\nContent-Type: ${photo.mime}\r\n\r\n".toByteArray()
-                val suffix = "\r\n--$boundary--\r\n".toByteArray()
-                conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
-                conn.setFixedLengthStreamingMode(prefix.size + bytes.size + middle.size + photo.bytes.size + suffix.size)
-                conn.outputStream.use { output -> output.write(prefix); output.write(bytes); output.write(middle); output.write(photo.bytes); output.write(suffix) }
+                // Filename and media type are constrained locally, never supplied as headers by a file provider.
+                MultipartBody.Builder().setType(MultipartBody.FORM)
+                    .addFormDataPart("payload", null, requireNotNull(payload).toRequestBody("application/json; charset=utf-8".toMediaType()))
+                    .addFormDataPart("proof", "shop-photo", photo.bytes.toRequestBody(photo.mime.toMediaType()))
+                    .build()
             }
+            OneShotBody(content)
         }
-        val status = conn.responseCode
-        val stream = if (status >= 400) conn.errorStream else conn.inputStream
-        val result = ByteArrayOutputStream()
-        stream?.use { input ->
-            val buffer = ByteArray(8192)
-            while (true) {
-                val count = input.read(buffer)
-                if (count < 0) break
-                if (result.size() + count > maxBytes) throw AppError("response_too_large", "The response was too large to open safely.")
-                result.write(buffer, 0, count)
+        val request = Request.Builder().url(address).method(method, requestBody)
+            .header("Accept", "application/json").header("Cache-Control", "no-store")
+            .apply { token?.let { header("Authorization", "Bearer $it") }; apiKey?.let { header("apikey", it) } }
+            .build()
+        client.newCall(request).execute().use { response ->
+            val result = ByteArrayOutputStream()
+            response.body?.byteStream()?.use { input ->
+                val buffer = ByteArray(8192)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    if (result.size() + count > maxBytes) throw AppError("response_too_large", "The response was too large to open safely.")
+                    result.write(buffer, 0, count)
+                }
             }
+            HttpResult(response.code, result.toByteArray(), response.header("Location"))
         }
-        HttpResult(status, result.toByteArray(), conn.getHeaderField("Location"))
     } catch (error: AppError) { throw error }
     catch (error: CancellationException) { throw error }
     catch (_: IOException) { throw AppError("network", "Connection interrupted. Refresh before retrying any change.") }
     catch (_: Exception) { throw AppError("network", "Could not reach Printly securely. Please try again.") }
-    finally { connection?.disconnect() }
 }

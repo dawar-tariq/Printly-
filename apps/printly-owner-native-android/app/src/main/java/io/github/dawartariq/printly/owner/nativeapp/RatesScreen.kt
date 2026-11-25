@@ -26,14 +26,16 @@ private val rateFields = listOf("service", "paper_size", "color", "sides", "pape
     var error by remember { mutableStateOf("") }
     var notice by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(true) }
+    var canEdit by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     suspend fun load(clearError: Boolean = true) {
-        loading = true
+        loading = true; canEdit = false
         try {
             val result = api.request("GET", "rate-card")
             if (result.optJSONArray("rows") == null) throw AppError("invalid_response", "Could not load the complete rate card.")
-            data = result; if (clearError) error = ""
-        } catch (e: Exception) { error = safeError(e) }
+            data = result; canEdit = clearError
+            if (clearError) error = ""
+        } catch (e: Exception) { canEdit = false; error = safeError(e) }
         finally { loading = false }
     }
     LaunchedEffect(api) { load() }
@@ -42,11 +44,11 @@ private val rateFields = listOf("service", "paper_size", "color", "sides", "pape
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) { Heading("Rate card", "Update the price of an existing service.") }
-                IconButton(enabled = !busy, onClick = { scope.launch { load() } }) { Icon(Icons.Default.Refresh, "Refresh rate card", tint = Orange) }
+                IconButton(enabled = !busy && !loading, onClick = { scope.launch { load() } }) { Icon(Icons.Default.Refresh, "Refresh rate card", tint = Orange) }
             }
         }
         item { InfoBanner("Changes affect future quotes. Adding or removing rates and editing their options is not available in this native build yet. Coordinate with anyone editing rates on another device.") }
-        if (error.isNotBlank()) item { ErrorBanner(error) }
+        if (error.isNotBlank()) item { ErrorBanner(if (!canEdit && data != null) "$error Refresh before changing a price." else error) }
         if (notice.isNotBlank()) item { InfoBanner(notice) }
         if (loading && data == null) item { LoadingPanel() }
         if (!loading && data != null && rows.isEmpty()) item { SurfaceCard(Modifier.fillMaxWidth()) { Text("No rates found. Adding rates is not yet available in this app.", color = Muted) } }
@@ -63,7 +65,7 @@ private val rateFields = listOf("service", "paper_size", "color", "sides", "pape
                     val price = row.optLong("price_paise", -1)
                     Text(if (price >= 0) money(price) else "—", fontWeight = FontWeight.ExtraBold)
                 }
-                TextButton(enabled = !busy && isUuid(row.text("id")) && row.optLong("price_paise", -1) in 0..1_000_000, onClick = {
+                TextButton(enabled = !busy && canEdit && isUuid(row.text("id")) && row.optLong("price_paise", -1) in 0..1_000_000, onClick = {
                     selected = row; input = paiseInput(row.getLong("price_paise"))
                 }, modifier = Modifier.align(Alignment.End)) { Text("Edit price") }
             }

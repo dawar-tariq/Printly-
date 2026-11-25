@@ -156,6 +156,9 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
     var detailId by remember { mutableStateOf("") }
     var detailParent by remember { mutableStateOf(Screen.ORDERS) }
     var me by remember { mutableStateOf<JSONObject?>(null) }
+    // Persist freshness across navigation: an uncertain settings write must not
+    // become editable again merely by leaving and reopening the screen.
+    var meFresh by remember { mutableStateOf(false) }
     var subscription by remember { mutableStateOf<JSONObject?>(null) }
     var accessLoading by remember { mutableStateOf(true) }
     var accessError by remember { mutableStateOf("") }
@@ -163,11 +166,17 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
     var refreshKey by remember { mutableIntStateOf(0) }
 
     suspend fun loadAccess() {
-        accessLoading = true; accessError = ""
+        accessLoading = true; accessError = ""; meFresh = false
         try {
             val billing = api.request("GET", "subscription")
             subscription = billing
-            try { me = api.request("GET", "me"); restricted = false }
+            try {
+                val fresh = api.request("GET", "me")
+                if (fresh.optJSONObject("shop") == null || fresh.optJSONArray("services") == null || fresh.opt("is_owner") !is Boolean) {
+                    throw AppError("invalid_response", "Could not verify the complete shop settings.")
+                }
+                me = fresh; meFresh = true; restricted = false
+            }
             catch (e: AppError) {
                 if (e.httpStatus == 403) { me = null; restricted = true; screen = Screen.RECOVERY }
                 else throw e
@@ -237,13 +246,15 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
                     SecondaryButton("Sign out", { scope.launch { onSignedOut(api.signOut()) } }, Modifier.fillMaxWidth())
                 }
                 else -> when (screen) {
-                    Screen.HOME -> HomeScreen(api, me, { screen = it }, { refreshKey++ })
+                    Screen.HOME -> HomeScreen(api, me, meFresh, { screen = it }, { meFresh = false }, { refreshKey++ })
                     Screen.ORDERS -> OrdersScreen(api, onOpen = { detailId = it; detailParent = Screen.ORDERS; screen = Screen.DETAIL })
                     Screen.INVENTORY -> InventoryScreen(api)
                     Screen.REPORTS -> ReportsScreen(api)
                     Screen.MORE -> MoreScreen(restricted, onOpen = { screen = it }, onSignOut = { scope.launch { onSignedOut(api.signOut()) } })
                     Screen.DETAIL -> OrderDetailScreen(api, detailId, onBack = { screen = detailParent })
-                    Screen.PROFILE -> ProfileScreen(api, me, onSaved = { updated -> me = updated })
+                    Screen.PROFILE -> ProfileScreen(api, me, meFresh,
+                        onInvalidated = { meFresh = false }, onSaved = { updated -> me = updated; meFresh = true },
+                        onRefreshAccess = { refreshKey++ })
                     Screen.RATES -> RatesScreen(api)
                     Screen.SUBSCRIPTION -> SubscriptionScreen(api, subscription, onUpdated = { updated -> subscription = updated }, onRecheckAccess = { refreshKey++ })
                     Screen.RECOVERY -> RecoveryScreen(api, onOpen = { detailId = it; detailParent = Screen.RECOVERY; screen = Screen.DETAIL })

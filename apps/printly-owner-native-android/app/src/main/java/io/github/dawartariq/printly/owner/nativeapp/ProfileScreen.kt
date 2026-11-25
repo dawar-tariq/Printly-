@@ -25,7 +25,10 @@ import java.io.ByteArrayOutputStream
 
 private val serviceNames = listOf("print", "photocopy", "scan", "bind", "laminate")
 
-@Composable fun ProfileScreen(api: OwnerApi, me: JSONObject?, onSaved: (JSONObject) -> Unit) {
+@Composable fun ProfileScreen(
+    api: OwnerApi, me: JSONObject?, meFresh: Boolean, onInvalidated: () -> Unit,
+    onSaved: (JSONObject) -> Unit, onRefreshAccess: () -> Unit,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val profile = me
@@ -62,13 +65,20 @@ private val serviceNames = listOf("print", "photocopy", "scan", "bind", "laminat
     val onboarding = profile.optJSONObject("onboarding")
     val proofRequired = onboarding?.optBoolean("duplicate_name", false) == true && shop.text("kyc_status") != "approved"
     val isOwner = profile.optBoolean("is_owner", false)
+    val canEdit = meFresh && !busy
 
     suspend fun refreshAfterSave(message: String) {
         notice = message
-        try { onSaved(api.request("GET", "me")) }
-        catch (_: Exception) { error = "Saved, but the latest shop details could not be loaded. Refresh before making another change." }
+        try {
+            val fresh = api.request("GET", "me")
+            if (fresh.optJSONObject("shop") == null || fresh.optJSONArray("services") == null || fresh.opt("is_owner") !is Boolean) {
+                throw AppError("invalid_response", "Could not verify the complete shop settings.")
+            }
+            onSaved(fresh)
+        } catch (_: Exception) { error = "Saved, but the latest shop details could not be loaded. Refresh before making another change." }
     }
     suspend fun save() {
+        if (!canEdit) return
         val minutes = eta.toIntOrNull()
         val basisPoints = rupeesToPaise(surcharge)
         if (name.trim().length !in 2..80 || address.length > 200 || city.length > 80 || phone.length > 16 || gstin.length > 20 || upi.length > 80 ||
@@ -92,18 +102,22 @@ private val serviceNames = listOf("print", "photocopy", "scan", "bind", "laminat
         }
         if (changes.length() > 0) body.put("services", changes)
         if (body.length() == 0 && photo == null) { notice = "No changes to save."; return }
-        busy = true; error = ""; notice = ""
+        busy = true; error = ""; notice = ""; onInvalidated()
         try {
             val response = api.requestWithProof("PUT", "settings", body, photo)
             photo = null
             refreshAfterSave(if (response.optBoolean("duplicate_name", false)) "Name submitted for review. Your shop is paused until the proof is approved." else "Shop settings saved.")
-        } catch (e: Exception) { error = safeError(e) + " Check your current details before retrying." }
+        } catch (e: Exception) { photo = null; error = safeError(e) + " Check your current details before retrying." }
         finally { busy = false }
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Heading("Shop settings", "Keep your customer-facing details up to date.")
         if (error.isNotBlank()) ErrorBanner(error)
         if (notice.isNotBlank()) InfoBanner(notice)
+        if (!meFresh) {
+            InfoBanner("The last settings may be out of date. Refresh and review the current values before making another change.")
+            SecondaryButton("Refresh shop settings", onRefreshAccess, Modifier.fillMaxWidth(), enabled = !busy)
+        }
         if (proofRequired) {
             SurfaceCard(Modifier.fillMaxWidth()) {
                 Text("Duplicate-name proof", fontWeight = FontWeight.ExtraBold)
@@ -112,37 +126,37 @@ private val serviceNames = listOf("print", "photocopy", "scan", "bind", "laminat
                 onboarding?.text("review_note")?.takeIf { it.isNotBlank() }?.let { Text("Review note: $it", color = OrangeDark, style = MaterialTheme.typography.bodySmall) }
                 if (isOwner) {
                     Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(claimGstin, { claimGstin = it.take(20) }, label = { Text("GSTIN (or choose a photo)") }, enabled = !busy, singleLine = true, modifier = Modifier.fillMaxWidth())
-                    TextButton(enabled = !busy, onClick = { selectingClaim = true; picker.launch("image/*") }) { Text(if (claimPhoto == null) "Choose shop photo" else "Change selected photo") }
+                    OutlinedTextField(claimGstin, { claimGstin = it.take(20) }, label = { Text("GSTIN (or choose a photo)") }, enabled = canEdit, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    TextButton(enabled = canEdit, onClick = { selectingClaim = true; picker.launch("image/*") }) { Text(if (claimPhoto == null) "Choose shop photo" else "Change selected photo") }
                     if (claimPhoto != null) Text("Photo selected · up to 3 MB", color = Green, style = MaterialTheme.typography.bodySmall)
                     SecondaryButton("Submit proof for review", {
                         scope.launch {
-                            busy = true; error = ""; notice = ""
+                            busy = true; error = ""; notice = ""; onInvalidated()
                             try {
                                 api.requestWithProof("POST", "name-proof", JSONObject().put("gstin", claimGstin.trim()), claimPhoto)
                                 claimPhoto = null; refreshAfterSave("Proof submitted. Your shop remains paused until reviewed.")
-                            } catch (e: Exception) { error = safeError(e) + " Check its status before retrying." }
+                            } catch (e: Exception) { claimPhoto = null; error = safeError(e) + " Check its status before retrying." }
                             finally { busy = false }
                         }
-                    }, Modifier.fillMaxWidth(), enabled = !busy && (claimGstin.isNotBlank() || claimPhoto != null))
+                    }, Modifier.fillMaxWidth(), enabled = canEdit && (claimGstin.isNotBlank() || claimPhoto != null))
                 } else Text("Only the shop owner can submit proof.", color = Muted, style = MaterialTheme.typography.bodySmall)
             }
         }
         SurfaceCard(Modifier.fillMaxWidth()) {
             Text("Shop profile", fontWeight = FontWeight.ExtraBold)
             Spacer(Modifier.height(8.dp))
-            ProfileField(name, { name = it.take(80) }, "Shop name", !busy)
-            ProfileField(address, { address = it.take(200) }, "Address", !busy)
-            ProfileField(city, { city = it.take(80) }, "City", !busy)
-            ProfileField(phone, { phone = it.take(16) }, "Phone", !busy, KeyboardType.Phone)
-            ProfileField(gstin, { gstin = it.take(20) }, "GSTIN (optional)", !busy)
-            ProfileField(upi, { upi = it.take(80) }, "Your UPI ID (customer payments)", !busy)
-            ProfileField(eta, { eta = it.take(4) }, "Default ETA in minutes", !busy, KeyboardType.Number)
-            ProfileField(surcharge, { surcharge = it.take(5) }, "Rush surcharge (%)", !busy, KeyboardType.Decimal)
+            ProfileField(name, { name = it.take(80) }, "Shop name", canEdit)
+            ProfileField(address, { address = it.take(200) }, "Address", canEdit)
+            ProfileField(city, { city = it.take(80) }, "City", canEdit)
+            ProfileField(phone, { phone = it.take(16) }, "Phone", canEdit, KeyboardType.Phone)
+            ProfileField(gstin, { gstin = it.take(20) }, "GSTIN (optional)", canEdit)
+            ProfileField(upi, { upi = it.take(80) }, "Your UPI ID (customer payments)", canEdit)
+            ProfileField(eta, { eta = it.take(4) }, "Default ETA in minutes", canEdit, KeyboardType.Number)
+            ProfileField(surcharge, { surcharge = it.take(5) }, "Rush surcharge (%)", canEdit, KeyboardType.Decimal)
             Spacer(Modifier.height(8.dp))
             Text("Optional name proof", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodySmall)
             Text("If the new name matches another shop, include a GSTIN or photo for review. Only choose a photo you are comfortable sharing, including any metadata.", color = Muted, style = MaterialTheme.typography.bodySmall)
-            TextButton(enabled = !busy, onClick = { selectingClaim = false; picker.launch("image/*") }) { Text(if (photo == null) "Choose shop photo" else "Change selected photo") }
+            TextButton(enabled = canEdit, onClick = { selectingClaim = false; picker.launch("image/*") }) { Text(if (photo == null) "Choose shop photo" else "Change selected photo") }
             if (photo != null) Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Photo selected", color = Green, style = MaterialTheme.typography.bodySmall)
                 TextButton(enabled = !busy, onClick = { photo = null }) { Text("Remove") }
@@ -153,13 +167,13 @@ private val serviceNames = listOf("print", "photocopy", "scan", "bind", "laminat
             serviceNames.forEach { service ->
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(service.replaceFirstChar { it.uppercase() })
-                    Switch(checked = serviceState[service] ?: false, onCheckedChange = { serviceState[service] = it }, enabled = !busy)
+                    Switch(checked = serviceState[service] ?: false, onCheckedChange = { serviceState[service] = it }, enabled = canEdit)
                 }
             }
         }
         PrimaryButton(if (busy) "Saving…" else "Save settings", {
             if (upi.trim() != shop.text("upi_id")) confirmUpi = true else scope.launch { save() }
-        }, Modifier.fillMaxWidth(), enabled = !busy)
+        }, Modifier.fillMaxWidth(), enabled = canEdit)
         Spacer(Modifier.height(16.dp))
     }
     if (confirmUpi) AlertDialog(onDismissRequest = { confirmUpi = false }, title = { Text("Change the receiving UPI ID?") },

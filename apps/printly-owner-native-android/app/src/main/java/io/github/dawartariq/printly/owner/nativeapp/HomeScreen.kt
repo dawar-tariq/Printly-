@@ -21,7 +21,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
-@Composable fun HomeScreen(api: OwnerApi, me: JSONObject?, open: (Screen) -> Unit, reloadAccess: () -> Unit) {
+@Composable fun HomeScreen(api: OwnerApi, me: JSONObject?, meFresh: Boolean, open: (Screen) -> Unit, invalidateAccess: () -> Unit, reloadAccess: () -> Unit) {
     val scope = rememberCoroutineScope()
     var snapshot by remember { mutableStateOf<JSONObject?>(null) }
     var loading by remember { mutableStateOf(true) }
@@ -62,9 +62,13 @@ import org.json.JSONObject
                     Spacer(Modifier.height(4.dp))
                     Text("Approval and subscription still apply.", color = Muted, style = MaterialTheme.typography.bodySmall)
                 }
-                Switch(checked = isOpen, onCheckedChange = { if (owner && !busy) confirmAvailability = true }, enabled = owner && !busy)
+                Switch(checked = isOpen, onCheckedChange = { if (owner && !busy && meFresh) confirmAvailability = true }, enabled = owner && !busy && meFresh)
             }
             if (!owner) Text("Only the shop owner can change availability.", color = Muted, style = MaterialTheme.typography.labelSmall)
+            if (!meFresh) {
+                Text("This status may be out of date. Refresh before changing it.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                TextButton(enabled = !busy, onClick = reloadAccess) { Text("Refresh shop status") }
+            }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text("Today’s work", fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, color = Ink)
@@ -104,7 +108,7 @@ import org.json.JSONObject
         text = { Text(if (isOpen) "Customers cannot start new orders while your shop is closed. Existing orders remain available." else "Your shop can accept new orders when approval and subscription requirements are met.") },
         confirmButton = { TextButton(enabled = !busy, onClick = {
             scope.launch {
-                busy = true; error = ""
+                busy = true; error = ""; invalidateAccess()
                 try { api.request("PUT", "availability", JSONObject().put("is_open", !isOpen)); confirmAvailability = false; reloadAccess() }
                 catch (e: Exception) { error = safeError(e); confirmAvailability = false }
                 finally { busy = false }
