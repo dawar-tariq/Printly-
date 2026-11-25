@@ -1,5 +1,6 @@
-# Temporary staged synthetic-only test. No APK, FCM credentials or production
-# services are used. The operator removes the fixture after the job completes.
+# Temporary staged synthetic-only test, including two-way foreign-shop RLS.
+# No APK, FCM credentials or production services are used. The operator
+# removes the marked fixtures after the job completes.
 name: Verify staged native Realtime
 
 on:
@@ -112,7 +113,7 @@ jobs:
           set -euo pipefail
           for i in $(seq 1 300); do
             if [ -f "$PRINTLY_STAGING_PROBE_DIR/failed" ]; then cat "$PRINTLY_STAGING_PROBE_DIR/failed"; exit 1; fi
-            if [ -f "$PRINTLY_STAGING_PROBE_DIR/passed" ]; then echo 'PASS: synthetic owner update, tracking hint, and anonymous isolation.'; exit 0; fi
+            if [ -f "$PRINTLY_STAGING_PROBE_DIR/passed" ]; then echo 'PASS: two synthetic owners, cross-shop and anonymous isolation, and tracking hint.'; exit 0; fi
             if ! kill -0 "$(cat "$PRINTLY_STAGING_PROBE_DIR/pid")" 2>/dev/null; then echo 'Synthetic listener stopped.'; exit 1; fi
             sleep 1
           done
