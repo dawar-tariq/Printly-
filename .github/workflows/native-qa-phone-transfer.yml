@@ -1,0 +1,166 @@
+# Temporary, staging-only phone-test transport. The runner uses no production
+# signing or FCM credentials and creates no release or unencrypted APK artifact.
+# An encrypted, unreferenced Git blob is used only because the workspace cannot
+# reach the Actions artifact host; the operator alone holds the decryption key.
+name: Build isolated native QA first-open permission phone test
+
+on:
+  push:
+    paths:
+      - '.github/workflows/native-qa-phone-transfer.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-qa:
+    name: Build isolated QA APK
+    if: github.repository == 'dawar-tariq/Printly-' && github.ref == 'refs/heads/arena/309fdf51-printly'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    # The one-time token creates an encrypted Git blob only; no ref is changed.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: c453cb05201a377f47ec7ca2bb0e5226b23d9a55
+          persist-credentials: false
+      - name: Check the isolated test site and pinned source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 'c453cb05201a377f47ec7ca2bb0e5226b23d9a55'
+          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --connect-timeout 15 --max-time 30 'https://printly-native-test.vercel.app/api/native/v1/test-environment' > "$RUNNER_TEMP/qa-isolation.json"
+          node - "$RUNNER_TEMP/qa-isolation.json" <<'NODE'
+          const fs = require('fs');
+          const d = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+          if (d.isolated_test !== true || d.supabase_url !== 'https://rahfmpsdbwbktlobntkm.supabase.co' || d.public_auth_check !== 'ok' || d.server_database_read !== 'ok') throw Error('Isolated test environment did not pass');
+          console.log('Isolated test diagnostic passed.');
+          NODE
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Android platform
+        shell: bash
+        run: |
+          set +o pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+          result=${PIPESTATUS[1]}
+          set -o pipefail
+          test "$result" -eq 0
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Build and verify isolated QA package
+        id: package
+        working-directory: apps/printly-owner-native-android
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRANSFER_CERT: |
+            -----BEGIN CERTIFICATE-----
+            MIIEMzCCApugAwIBAgIUVdHe5Shgc3GjsrNgI1fSPfn3ffUwDQYJKoZIhvcNAQEL
+            BQAwKTEnMCUGA1UEAwweUHJpbnRseSBmaXJzdC1vcGVuIFFBIHRyYW5zZmVyMB4X
+            DTI2MTEyNTIwNDQyNVoXDTI2MTEyNzIwNDQyNVowKTEnMCUGA1UEAwweUHJpbnRs
+            eSBmaXJzdC1vcGVuIFFBIHRyYW5zZmVyMIIBojANBgkqhkiG9w0BAQEFAAOCAY8A
+            MIIBigKCAYEArpOXkZU7VCgngUU65+DlV2OjfTnUzHxP3ir2RaUoqJErUBfOIxTB
+            veAI9mJ/5+K1IkiAxCYcooUvXA7TJDMd9YpUEBdwLR2muuGoyBGEXz1Kkf2hRXjG
+            FqpVSQ+I7C8CKSK7twG4j3z9IwpW/GGU6kHUOJsRAWqmDlY4jh9runEcMfzsbgFc
+            xIvCeSHPv3Krgarb3agsKZY4hmFflwuswXFltm5z5Yddq2i7zT4Ch2FskWtzEafa
+            M2m+szyRW4cZDxxoXtBcV02dYFP1S+t0qzni5QP9dipkyZ8d4trWJKv3R6N7PGT6
+            E4MilTgk1TJkniTxpyX4l6gxfcUzJqSqclZRI5XtqaQFu2jbYmpHMyE0zuluAkz+
+            DGZk9dz8bh9B6eYAdFofIpidXfeffwlYoMdFR2zZIB9/BFmfBozuh4BBnotsBEwy
+            zAQxgznZuCejyFO5E08ctmPHM9k1DKG+wFzMkfhMCrjJxS62rOVKXIVE8T7OqLkD
+            olDNTY7VkqvxAgMBAAGjUzBRMB0GA1UdDgQWBBSsOSirvS1Ab8htca62Y4m83Ms9
+            VTAfBgNVHSMEGDAWgBSsOSirvS1Ab8htca62Y4m83Ms9VTAPBgNVHRMBAf8EBTAD
+            AQH/MA0GCSqGSIb3DQEBCwUAA4IBgQAbtuHdKlrOOTbIuuHuAM19UOdV5wY32yQq
+            iE9uXxAJ0xCwJE6ZHiexLa5h/CaMpSMHJx6Vb9aE6UIk4JFv0s1MKevrHF//IXqn
+            GSSBs7jxb/S0tzhRoL3AcBmMvBxepfNagUXDBkHPpPN9Bd5ZL59Io5YtWbXfQbj8
+            dtqpRYFdvMcw1K6MMlGHtTNFKk1QzVgp1FJhC543nTcWKwX1LEfG6EmUh5NQk1Pc
+            Rc6hlpWej0D4hDC9batkIF9cPzDm7sUb6cZahvEoLR+2afI/fSbdshdkUGOgqxR8
+            FUy05pj/J/imGc7ImzZdFedK+5K/0iAa9o9N/aiPPnRtEC9R2aIsSoFF+cKNw++Q
+            7gOWSGzJyFcVz4t+E99/eZCgUEGcno4gqrSVVptCBJhad/fdPHGQQ1Z3SsT+ACRD
+            Q2E5LdkinHEIIy+aub0aUP4cVWDe2DauqtMoKghM7LU7OQw54ar6UX48HDJ9g3M2
+            FJTWuRwowREGIJ5nwIxouZC7ner0m6U=
+            -----END CERTIFICATE-----
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 'c453cb05201a377f47ec7ca2bb0e5226b23d9a55'
+          if ! ./gradlew --no-daemon testQaUnitTest assembleQa '-PprintlyQaSiteOrigin=https://printly-native-test.vercel.app' > "$RUNNER_TEMP/qa-phone-build.log" 2>&1; then
+            tail -n 150 "$RUNNER_TEMP/qa-phone-build.log"; exit 1
+          fi
+          tail -n 35 "$RUNNER_TEMP/qa-phone-build.log"
+          QA=app/build/outputs/apk/qa/app-qa.apk
+          test -s "$QA"
+          analyzer="$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer"
+          test "$("$analyzer" manifest application-id "$QA")" = 'io.github.dawartariq.printly.owner.native.qa'
+          test "$("$analyzer" manifest version-code "$QA")" = '4'
+          test "$("$analyzer" manifest version-name "$QA")" = '2.0.1-isolated-test'
+          "$analyzer" manifest print "$QA" > "$RUNNER_TEMP/qa-phone-manifest.xml"
+          python3 check-manifest.py "$RUNNER_TEMP/qa-phone-manifest.xml" io.github.dawartariq.printly.owner.native.qa
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$QA" > "$RUNNER_TEMP/qa-phone-badging.txt"
+          grep -F "application-label:'Printly Isolated Test'" "$RUNNER_TEMP/qa-phone-badging.txt"
+          grep -F 'application-debuggable' "$RUNNER_TEMP/qa-phone-badging.txt"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump --values resources "$QA" > "$RUNNER_TEMP/qa-phone-resources.txt"
+          firebase_values() {
+            python3 -c 'import json,sys; j=json.load(open(sys.argv[1])); c=next(x for x in j["client"] if x["client_info"]["android_client_info"]["package_name"] == sys.argv[2]); print(j["project_info"]["project_id"], j["project_info"]["project_number"], c["client_info"]["mobilesdk_app_id"], c["api_key"][0]["current_key"], sep="\n")' "$1" "$2"
+          }
+          mapfile -t qa_values < <(firebase_values app/src/qa/google-services.json io.github.dawartariq.printly.owner.native.qa)
+          mapfile -t live_values < <(firebase_values app/src/release/google-services.json io.github.dawartariq.printly.owner)
+          test "${#qa_values[@]}" -eq 4 && test "${#live_values[@]}" -eq 4
+          test "${qa_values[0]}" = 'printly-notifications-qa'
+          for value in "${qa_values[@]}"; do test -n "$value" && grep -qF "$value" "$RUNNER_TEMP/qa-phone-resources.txt"; done
+          for value in "${live_values[@]}"; do
+            if grep -qF "$value" "$RUNNER_TEMP/qa-phone-resources.txt"; then echo 'Production Firebase identity found in QA resources.' >&2; exit 1; fi
+          done
+          for name in google_app_id google_api_key gcm_defaultSenderId project_id; do grep -qF "string/$name" "$RUNNER_TEMP/qa-phone-resources.txt"; done
+          DEX="$RUNNER_TEMP/qa-phone.dex"
+          unzip -p "$QA" 'classes*.dex' > "$DEX"
+          grep -aqF 'https://printly-native-test.vercel.app' "$DEX"
+          grep -aqF 'rahfmpsdbwbktlobntkm.supabase.co' "$DEX"
+          grep -aqF 'Lcom/google/firebase/messaging/FirebaseMessaging;' "$DEX"
+          grep -aqF 'Lio/github/dawartariq/printly/owner/nativeapp/NativeMessagingService;' "$DEX"
+          grep -aqF 'native_notification_permission_prompt' "$DEX"
+          grep -aqF 'first_open_handled' "$DEX"
+          for production_host in 'printly-steel-three.vercel.app' 'printly0.vercel.app' 'printly-shop.vercel.app' 'lgfqetnfazawglwllymb.supabase.co'; do
+            if grep -aqF "$production_host" "$DEX"; then echo 'Production host found in QA package.' >&2; exit 1; fi
+          done
+          if grep -aqE 'sb_secret_[A-Za-z0-9_-]{16,}' "$DEX"; then echo 'Secret-like Supabase key found in QA package.' >&2; exit 1; fi
+          signature=$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$QA")
+          printf '%s\n' "$signature" | grep -Fx 'Number of signers: 1'
+          cert256=$(printf '%s\n' "$signature" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
+          cert1=$(printf '%s\n' "$signature" | sed -n 's/^Signer #1 certificate SHA-1 digest: //p')
+          printf '%s\n' "$cert256" | grep -Eq '^[a-f0-9]{64}$'
+          printf '%s\n' "$cert1" | grep -Eq '^[a-f0-9]{40}$'
+          apksha=$(sha256sum "$QA" | cut -d' ' -f1)
+          mkdir -p "$RUNNER_TEMP/printly-qa-transfer"
+          printf '%s\n' "$TRANSFER_CERT" > "$RUNNER_TEMP/printly-qa-transfer/receiver.pem"
+          openssl cms -encrypt -aes256 -binary -in "$QA" -outform DER -out "$RUNNER_TEMP/printly-qa-transfer/package.cms" "$RUNNER_TEMP/printly-qa-transfer/receiver.pem"
+          encrypted="$RUNNER_TEMP/printly-qa-transfer/package.cms"
+          ciphersha=$(sha256sum "$encrypted" | cut -d' ' -f1)
+          blobsha=$(git hash-object "$encrypted")
+          python3 - "$encrypted" "$RUNNER_TEMP/printly-qa-transfer/blob.json" <<'PY'
+          import base64, json, sys
+          with open(sys.argv[1], 'rb') as source, open(sys.argv[2], 'w', encoding='utf-8') as target:
+              json.dump({'encoding': 'base64', 'content': base64.b64encode(source.read()).decode('ascii')}, target)
+          PY
+          api_sha=$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/blobs" --input "$RUNNER_TEMP/printly-qa-transfer/blob.json" --jq .sha)
+          test "$api_sha" = "$blobsha"
+          printf 'apk_sha=%s\ncert_sha256=%s\ncert_sha1=%s\ncipher_sha=%s\nblob_sha=%s\n' "$apksha" "$cert256" "$cert1" "$ciphersha" "$blobsha" >> "$GITHUB_OUTPUT"
+          echo 'PASS: isolated QA build, Firebase resources, native package and disposable signature verified.'
+      - name: "QA APK SHA256 ${{ steps.package.outputs.apk_sha }}"
+        run: ':'
+      - name: "QA certificate SHA256 ${{ steps.package.outputs.cert_sha256 }}"
+        run: ':'
+      - name: "QA certificate SHA1 ${{ steps.package.outputs.cert_sha1 }}"
+        run: ':'
+      - name: "Encrypted QA SHA256 ${{ steps.package.outputs.cipher_sha }}"
+        run: ':'
+      - name: "Encrypted QA Git blob ${{ steps.package.outputs.blob_sha }}"
+        run: ':'
+      - name: Discard temporary QA build
+        if: always()
+        shell: bash
+        run: |
+          rm -rf -- "$RUNNER_TEMP/printly-qa-transfer"
+          rm -rf -- "$GITHUB_WORKSPACE/apps/printly-owner-native-android/app/build/outputs/apk/qa"
