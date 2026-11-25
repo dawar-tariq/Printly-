@@ -6,9 +6,11 @@ const fixture = vi.hoisted(() => ({
   orderA: '33333333-3333-4333-8333-333333333333', orderB: '44444444-4444-4444-8444-444444444444',
   draftB: '55555555-5555-4555-8555-555555555555', fileA: '66666666-6666-4666-8666-666666666666',
   cookieCalls: 0, tokenCalls: [] as string[], rpcCalls: [] as Array<{ name: string; args: Record<string, unknown> }>,
+  pushConfigured: true, pushRateAllowed: true,
 }));
 
 vi.mock('@/lib/supabase-client', () => ({ SUPABASE_URL: 'https://example.supabase.co', SUPABASE_ANON: 'public-anon' }));
+vi.mock('@/lib/native-push-server', () => ({ nativePushConfig: () => fixture.pushConfigured ? { cronSecret: 'configured' } : null }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({ auth: { getUser: async (token: string) => {
   fixture.tokenCalls.push(token);
   // Force overlap so request-local identity must survive asynchronous work.
@@ -66,6 +68,7 @@ vi.mock('@/lib/supabase', () => {
     rpc: async (name: string, args: Record<string, unknown>) => {
       fixture.rpcCalls.push({ name, args });
       if (name === 'decide_shop_upi_payment_checked') return { data: args.p_acknowledge_duplicate ? { outcome: 'confirmed' } : { outcome: 'possible_duplicate', duplicate_count: 1, duplicates: [] }, error: null };
+      if (name === 'consume_public_rate_limit') return { data: { allowed: fixture.pushRateAllowed, retry_after: 60 }, error: null };
       return { data: null, error: null };
     },
     storage: { from: () => ({ createSignedUrl: async () => ({ data: { signedUrl: 'https://example.supabase.co/storage/v1/object/sign/order-files/x/file.pdf?token=short' }, error: null }) }) },
@@ -76,7 +79,7 @@ vi.mock('@/lib/supabase', () => {
   };
 });
 
-import { GET, POST } from './route';
+import { DELETE, GET, POST } from './route';
 
 function request(path: string, token: string | null, method = 'GET', body?: unknown) {
   const headers: Record<string, string> = { cookie: 'untrusted-browser-cookie=present' };
@@ -87,7 +90,7 @@ function request(path: string, token: string | null, method = 'GET', body?: unkn
 // Construct params explicitly; the HTTP router normally supplies decoded path segments.
 function context(path: string) { return { params: Promise.resolve({ parts: path.split('?')[0].split('/') }) }; }
 
-beforeEach(() => { fixture.cookieCalls = 0; fixture.tokenCalls = []; fixture.rpcCalls = []; });
+beforeEach(() => { fixture.cookieCalls = 0; fixture.tokenCalls = []; fixture.rpcCalls = []; fixture.pushConfigured = true; fixture.pushRateAllowed = true; });
 
 describe('native bearer gateway', () => {
   it('rejects missing, malformed and invalid tokens without falling back to cookies', async () => {
@@ -143,6 +146,31 @@ describe('native bearer gateway', () => {
     expect(ok.status).toBe(302); expect(ok.headers.get('location')).toContain('/storage/v1/object/sign/order-files/');
     expect(ok.headers.get('cache-control')).toContain('no-store');
     expect((await GET(request(path, 'tokenB'), context(path))).status).toBe(403);
+  });
+  it('registers notifications only for the verified member and lets that account disable them', async () => {
+    vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'server-only-test-key');
+    try {
+      const path = 'push-device';
+      const binding = '77777777-7777-4777-8777-777777777777';
+      const body = { shop_id: fixture.shopA, binding_id: binding, fid: 'A'.repeat(22) };
+      expect((await POST(request(path, null, 'POST', body), context(path))).status).toBe(401);
+      expect((await POST(request(path, 'tokenA', 'POST', { ...body, user_id: fixture.userB }), context(path))).status).toBe(422);
+      expect((await POST(request(path, 'tokenB', 'POST', body), context(path))).status).toBe(403);
+      expect(fixture.rpcCalls.some((call) => call.name === 'register_native_push_device')).toBe(false);
+      fixture.pushRateAllowed = false;
+      expect((await POST(request(path, 'tokenA', 'POST', body), context(path))).status).toBe(429);
+      fixture.pushRateAllowed = true;
+      expect((await POST(request(path, 'tokenA', 'POST', body), context(path))).status).toBe(200);
+      expect(fixture.rpcCalls.find((call) => call.name === 'register_native_push_device')?.args).toEqual({
+        p_user: fixture.userA, p_shop: fixture.shopA, p_binding: binding, p_fid: 'A'.repeat(22),
+      });
+      fixture.pushConfigured = false;
+      expect((await POST(request(path, 'tokenA', 'POST', body), context(path))).status).toBe(503);
+      const removed = await DELETE(request(path, 'tokenA', 'DELETE', { binding_id: binding }), context(path));
+      expect(removed.status).toBe(200);
+      expect(fixture.rpcCalls.find((call) => call.name === 'unregister_native_push_device')?.args).toEqual({ p_user: fixture.userA, p_binding: binding });
+      expect(removed.headers.get('cache-control')).toContain('no-store');
+    } finally { vi.unstubAllEnvs(); }
   });
   it('does not dispatch arbitrary paths or methods', async () => {
     expect((await GET(request('admin', 'tokenA'), context('admin'))).status).toBe(404);

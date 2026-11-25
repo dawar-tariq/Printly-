@@ -14,7 +14,7 @@ class MainActivity : ComponentActivity() {
         // The app uses a light cream header even when the device is in dark
         // mode, so status-bar icons must remain dark and legible on that header.
         enableEdgeToEdge(statusBarStyle = SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT))
-        val api: OwnerApi = if (BuildConfig.DEMO_MODE) DemoOwnerApi() else LiveOwnerApi(applicationContext)
+        val api: OwnerApi = if (BuildConfig.DEMO_MODE) DemoOwnerApi() else OwnerApiProvider.live(applicationContext)
         setContent { PrintlyTheme { PrintlyApp(api) } }
     }
 }

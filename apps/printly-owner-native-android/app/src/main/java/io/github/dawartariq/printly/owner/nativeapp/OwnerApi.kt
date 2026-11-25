@@ -3,6 +3,7 @@ package io.github.dawartariq.printly.owner.nativeapp
 import android.content.Context
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.sync.Mutex
@@ -31,7 +32,7 @@ interface OwnerApi {
     val isDemo: Boolean
     suspend fun restore(): Boolean
     suspend fun signIn(email: String, password: String)
-    /** True means the remote revocation was confirmed. Local credentials are removed either way. */
+    /** True means remote session and notification revocation were confirmed. Local access is removed either way. */
     suspend fun signOut(): Boolean
     suspend fun request(method: String, path: String, body: JSONObject? = null): JSONObject
     suspend fun requestWithProof(method: String, path: String, body: JSONObject, photo: ProofPhoto?): JSONObject
@@ -51,13 +52,15 @@ internal data class HttpResult(val status: Int, val bytes: ByteArray, val locati
 /** Native HTTPS client. The service-role key is never present in this app. */
 class LiveOwnerApi(context: Context) : OwnerApi {
     override val isDemo = false
-    private val store = SessionStore(context.applicationContext)
+    private val appContext = context.applicationContext
+    private val store = SessionStore(appContext)
     private val lock = Mutex()
     private var session: Session? = null
     private var config: PublicConfig? = null
 
     override suspend fun restore(): Boolean = lock.withLock {
         session = try { store.load() } catch (_: Exception) { store.clear(); null }
+        if (session == null) NativePush.sessionExpired(appContext)
         session != null
     }
 
@@ -112,7 +115,7 @@ class LiveOwnerApi(context: Context) : OwnerApi {
         val response = http("${cfg.authOrigin}/auth/v1/token?grant_type=refresh_token", "POST",
             JSONObject().put("refresh_token", current.refreshToken), apiKey = cfg.anonKey)
         if (response.status == 400 || response.status == 401) {
-            store.clear(); session = null
+            store.clear(); session = null; NativePush.sessionExpired(appContext)
             throw AppError("session_expired", "Your session expired. Please sign in again.", 401)
         }
         if (response.status !in 200..299) throw AppError("refresh", "Could not refresh your session. Check your connection.", response.status)
@@ -120,31 +123,38 @@ class LiveOwnerApi(context: Context) : OwnerApi {
         try { store.save(next) } catch (_: Exception) {
             // A rotated refresh token that could not be persisted must not be
             // silently replaced with an older token on the next app launch.
-            store.clear(); session = null
+            store.clear(); session = null; NativePush.sessionExpired(appContext)
             throw AppError("secure_storage", "Could not save your refreshed session securely. Please sign in again.")
         }
         session = next
         next
     }
 
-    override suspend fun signOut(): Boolean = lock.withLock {
-        val current = session
-        var confirmed = current == null
-        if (current != null) {
-            confirmed = try {
-                val cfg = publicConfig()
-                val response = http("${cfg.authOrigin}/auth/v1/logout?scope=local", "POST", token = current.accessToken, apiKey = cfg.anonKey)
-                response.status in 200..299
-            } catch (_: Exception) { false }
+    override suspend fun signOut(): Boolean = withContext(NonCancellable) {
+        // Stop local display immediately, then attempt server removal before
+        // discarding the bearer. A failed remote removal never keeps the user
+        // signed in; the local message gate also rejects in-flight old alerts.
+        // Finish local cleanup even if the activity is recreated mid-sign-out.
+        val pushConfirmed = NativePush.beforeSignOut(appContext, this)
+        lock.withLock {
+            val current = session
+            var confirmed = current == null
+            if (current != null) {
+                confirmed = try {
+                    val cfg = publicConfig()
+                    val response = http("${cfg.authOrigin}/auth/v1/logout?scope=local", "POST", token = current.accessToken, apiKey = cfg.anonKey)
+                    response.status in 200..299
+                } catch (_: Exception) { false }
+            }
+            store.clear(); session = null
+            confirmed && pushConfirmed
         }
-        store.clear(); session = null
-        confirmed
     }
 
     private suspend fun rejectIfUnauthorized(response: HttpResult, access: String) {
         if (response.status == 401) lock.withLock {
             // Don't erase a newer session if a concurrent request finished late.
-            if (session?.accessToken == access) { store.clear(); session = null }
+            if (session?.accessToken == access) { store.clear(); session = null; NativePush.sessionExpired(appContext) }
         }
     }
 

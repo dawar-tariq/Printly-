@@ -235,6 +235,7 @@ import java.util.Date
         }
         MenuCard("Subscription", "Manage your Printly access", Icons.Default.CreditCard) { onOpen(Screen.SUBSCRIPTION) }
         MenuCard("Open orders", "Recover or look up an existing order", Icons.Default.Assignment) { onOpen(Screen.RECOVERY) }
+        if (NativePush.available) MenuCard("Order notifications", "Manage alerts on this phone", Icons.Default.Notifications) { onOpen(Screen.NOTIFICATIONS) }
         // Updates are user-initiated in the browser; never download or execute
         // packages in the app, and never put a session token in the URL.
         if (!isDemo && !BuildConfig.ISOLATED_TEST_MODE) {

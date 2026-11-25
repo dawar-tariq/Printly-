@@ -10,6 +10,7 @@ beforeAll(async () => {
   await db.exec(`
     create role anon; create role authenticated;
     create schema realtime;
+    create publication supabase_realtime;
     create table public.orders (
       id uuid primary key, status text, payment_status text, payment_method text, token text,
       eta_minutes int, ready_at timestamptz, collected_at timestamptz, notes text
@@ -24,6 +25,10 @@ beforeAll(async () => {
 afterAll(async () => { await db.close(); });
 
 describe('order tracking invalidations', () => {
+  it('adds orders to the existing Realtime publication itself', async () => {
+    const result = await db.query("select tablename from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename='orders'");
+    expect(result.rows).toEqual([{ tablename: 'orders' }]);
+  });
   it('sends an empty event on a hashed topic only when tracking fields actually change', async () => {
     await db.query("update public.orders set notes='not tracking data' where id=$1", [id]);
     await db.query("update public.orders set status='queued' where id=$1", [id]);

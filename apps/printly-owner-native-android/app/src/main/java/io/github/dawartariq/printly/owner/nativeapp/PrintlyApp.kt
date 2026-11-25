@@ -36,7 +36,7 @@ import kotlinx.coroutines.supervisorScope
 import org.json.JSONObject
 
 private enum class Phase { STARTING, INTRO, LOGIN, WORKSPACE }
-enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RATES, SUBSCRIPTION, RECOVERY, QR }
+enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RATES, SUBSCRIPTION, RECOVERY, QR, NOTIFICATIONS }
 
 @Composable fun PrintlyApp(api: OwnerApi) {
     val context = LocalContext.current
@@ -67,7 +67,7 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
             Phase.LOGIN -> LoginScreen(api, loginNotice) { loginNotice = ""; phase = Phase.WORKSPACE }
             Phase.WORKSPACE -> Workspace(workspaceApi) { confirmed ->
                 hadSession = false
-                loginNotice = if (confirmed) "Signed out on this device." else "Signed out locally, but server sign-out could not be confirmed. Keep this device private."
+                loginNotice = if (confirmed) "Signed out on this device." else "Signed out and notifications are off on this phone, but server removal could not be confirmed. Keep this device private."
                 phase = Phase.LOGIN
             }
         }
@@ -179,6 +179,7 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
 }
 
 @Composable private fun Workspace(api: OwnerApi, onSignedOut: (Boolean) -> Unit) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var screen by remember { mutableStateOf(Screen.HOME) }
     var detailId by remember { mutableStateOf("") }
@@ -234,6 +235,12 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
         } finally { billingRequest.cancel(); meRequest.cancel(); accessLoading = false }
     }
     LaunchedEffect(api, refreshKey) { loadAccess() }
+    val notificationShopId = if (meFresh) me?.optJSONObject("shop")?.optString("id", "")?.takeIf { it.isNotBlank() } else null
+    LaunchedEffect(api, lifecycle, notificationShopId) {
+        if (NativePush.available) lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            NativePush.refresh(context, api, notificationShopId)
+        }
+    }
     val main = setOf(Screen.HOME, Screen.ORDERS, Screen.INVENTORY, Screen.REPORTS, Screen.MORE)
     BackHandler(enabled = screen !in main && !accessLoading) {
         screen = if (screen == Screen.DETAIL) detailParent else if (restricted) Screen.RECOVERY else Screen.MORE
@@ -242,6 +249,7 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
         Screen.HOME -> "Home"; Screen.ORDERS -> "Orders"; Screen.INVENTORY -> "Inventory"; Screen.REPORTS -> "Reports"
         Screen.MORE -> "More"; Screen.DETAIL -> "Order details"; Screen.PROFILE -> "Shop settings"; Screen.RATES -> "Rate card"
         Screen.SUBSCRIPTION -> "Subscription"; Screen.RECOVERY -> "Open orders"; Screen.QR -> "Your shop QR"
+        Screen.NOTIFICATIONS -> "Notifications"
     }
     Scaffold(
         containerColor = Cream,
@@ -309,6 +317,7 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
                     Screen.SUBSCRIPTION -> SubscriptionScreen(api, subscription, onUpdated = { updated -> subscription = updated }, onRecheckAccess = { refreshKey++ })
                     Screen.RECOVERY -> RecoveryScreen(api, onOpen = { detailId = it; detailParent = Screen.RECOVERY; screen = Screen.DETAIL })
                     Screen.QR -> QrScreen(api, me)
+                    Screen.NOTIFICATIONS -> NativePush.Settings(api, notificationShopId)
                 }
             }
         }

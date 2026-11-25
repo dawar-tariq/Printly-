@@ -87,6 +87,8 @@ jobs:
             QA=app/build/outputs/apk/qa/app-qa.apk
             "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest print "$QA" > "$RUNNER_TEMP/native-qa-manifest.xml"
             python3 check-manifest.py "$RUNNER_TEMP/native-qa-manifest.xml" io.github.dawartariq.printly.owner.native.qa
+            "$ANDROID_HOME/build-tools/36.0.0/aapt" dump --values resources "$QA" > "$RUNNER_TEMP/native-qa-resources.txt"
+            if grep -qF 'printly-5c247' "$RUNNER_TEMP/native-qa-resources.txt"; then echo 'Production Firebase project found in QA resources.' >&2; exit 1; fi
             test "$("$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest version-code "$QA")" = '4'
             test "$("$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest version-name "$QA")" = '2.0.1-isolated-test'
             "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$QA" > "$RUNNER_TEMP/native-qa-badging.txt"
@@ -137,6 +139,9 @@ jobs:
           APK=app/build/outputs/apk/release/app-release.apk
           "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest print "$APK" > "$RUNNER_TEMP/native-release-manifest.xml"
           python3 check-manifest.py "$RUNNER_TEMP/native-release-manifest.xml" io.github.dawartariq.printly.owner
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump --values resources "$APK" > "$RUNNER_TEMP/native-release-resources.txt"
+          grep -qF 'printly-5c247' "$RUNNER_TEMP/native-release-resources.txt"
+          grep -qF 'google_app_id' "$RUNNER_TEMP/native-release-resources.txt"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$APK"
           CONFIG=$(find app/build/generated -name BuildConfig.java -path '*/release/*' -print -quit)
           test -n "$CONFIG"

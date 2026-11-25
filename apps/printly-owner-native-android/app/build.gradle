@@ -29,6 +29,21 @@ try {
 } catch (Exception ignored) { /* The QA task guard below fails closed. */ }
 def qaAuthHost = 'rahfmpsdbwbktlobntkm.supabase.co'
 
+// This is the public Android client configuration, not a service-account key.
+// Only the production variant receives Firebase resources/dependencies; the
+// demo and isolated QA package do not impersonate the production Firebase app.
+def firebase = new groovy.json.JsonSlurper().parse(file('src/release/google-services.json'))
+def firebaseClient = firebase.client?.find { it.client_info?.android_client_info?.package_name == 'io.github.dawartariq.printly.owner' }
+def fcmAppId = firebaseClient?.client_info?.mobilesdk_app_id
+def fcmApiKey = firebaseClient?.api_key?.getAt(0)?.current_key
+def fcmSender = firebase.project_info?.project_number
+def fcmProject = firebase.project_info?.project_id
+if (fcmProject != 'printly-5c247' || !(fcmAppId instanceof String && fcmAppId ==~ /1:[0-9]+:android:[0-9a-f]+/) ||
+    !(fcmApiKey instanceof String && fcmApiKey ==~ /AIza[A-Za-z0-9_-]{35}/) || !(fcmSender instanceof String && fcmSender ==~ /[0-9]+/) ||
+    !fcmAppId.startsWith("1:${fcmSender}:android:")) {
+    throw new GradleException('The production Firebase Android client configuration is missing or does not match this app.')
+}
+
 android {
     namespace 'io.github.dawartariq.printly.owner.nativeapp'
     compileSdk 36
@@ -80,6 +95,12 @@ android {
         release {
             minifyEnabled false
             buildConfigField 'boolean', 'DEMO_MODE', 'false'
+            // Equivalent to the Firebase Android plugin's public resource values;
+            // keeping them in the release source set avoids fake QA clients.
+            resValue 'string', 'google_app_id', fcmAppId
+            resValue 'string', 'google_api_key', fcmApiKey
+            resValue 'string', 'gcm_defaultSenderId', fcmSender
+            resValue 'string', 'project_id', fcmProject
             if (releaseSigningReady) signingConfig signingConfigs.release
         }
         // Different package, visible test label, debug key and staging Auth host.
@@ -94,6 +115,11 @@ android {
             buildConfigField 'String', 'SITE_ORIGIN', '"' + (qaOrigin ?: 'https://invalid.invalid') + '"'
             buildConfigField 'String', 'SUPABASE_HOST', '"' + qaAuthHost + '"'
         }
+    }
+    // A small no-push implementation is shared by demo and isolated QA.
+    sourceSets {
+        debug.java.srcDir 'src/nonProduction/java'
+        qa.java.srcDir 'src/nonProduction/java'
     }
     gradle.taskGraph.whenReady { graph ->
         if (!releaseSigningReady && graph.allTasks.any { it.path.startsWith(':app:') && it.name in ['assembleRelease', 'bundleRelease', 'packageRelease'] }) {
@@ -127,6 +153,9 @@ dependencies {
     implementation 'androidx.compose.material:material-icons-extended'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0'
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    releaseImplementation platform('com.google.firebase:firebase-bom:35.2.0')
+    releaseImplementation 'com.google.firebase:firebase-messaging'
+    releaseImplementation 'androidx.work:work-runtime-ktx:2.10.1'
     debugImplementation 'androidx.compose.ui:ui-tooling'
     debugImplementation 'androidx.compose.ui:ui-test-manifest'
     testImplementation 'junit:junit:4.13.2'

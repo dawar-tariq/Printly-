@@ -25,4 +25,20 @@ if any('androidbrowserhelper' in a.get(ANDROID + 'name', '').lower() for a in ac
 provider = [p for p in app.findall('provider') if p.get(ANDROID + 'name') == 'androidx.core.content.FileProvider']
 if len(provider) != 1 or provider[0].get(ANDROID + 'exported') != 'false':
     raise SystemExit('The file provider must be internal.')
-print('Native launcher, package, privacy flags and internal file provider verified.')
+services = [s for s in app.findall('service') if s.get(ANDROID + 'name', '').endswith('.NativeMessagingService')]
+permissions = {p.get(ANDROID + 'name') for p in root.findall('uses-permission')}
+metadata = {m.get(ANDROID + 'name'): m.get(ANDROID + 'value') for m in app.findall('meta-data')}
+production = sys.argv[2] == 'io.github.dawartariq.printly.owner'
+if production:
+    if 'android.permission.POST_NOTIFICATIONS' not in permissions or len(services) != 1 or services[0].get(ANDROID + 'exported') != 'false':
+        raise SystemExit('Production notifications need permission and one internal messaging service.')
+    if metadata.get('firebase_messaging_auto_init_enabled') != 'false' or metadata.get('firebase_messaging_installation_id_enabled') != 'true':
+        raise SystemExit('Firebase auto-init must default off and FID registration must be enabled.')
+    if not any(p.get(ANDROID + 'name') == 'com.google.firebase.provider.FirebaseInitProvider' and p.get(ANDROID + 'exported') == 'false' for p in app.findall('provider')):
+        raise SystemExit('Production Firebase must have its internal initializer.')
+    if not any(a.get(ANDROID + 'name') == 'com.google.firebase.MESSAGING_EVENT' for f in services[0].findall('intent-filter') for a in f.findall('action')):
+        raise SystemExit('Missing FCM messaging event handler.')
+else:
+    if services or 'android.permission.POST_NOTIFICATIONS' in permissions or any('firebase' in p.get(ANDROID + 'name', '').lower() for p in app.findall('provider')):
+        raise SystemExit('Demo and isolated QA must not include production Firebase or push permissions.')
+print('Native launcher, privacy flags, file provider and variant-specific push manifest verified.')

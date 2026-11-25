@@ -1,0 +1,61 @@
+// Synthetic-only native FCM registration/outbox exercise. No Google network
+// request is made: CI uses a fake RSA identity, and never starts a scheduler.
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+
+export async function testNativePushLocal({ admin, ownerAuth, otherAuth, ownerToken, otherToken, shop, otherShop, otherUser, call, guardNonce }) {
+  assert.equal(process.env.PRINTLY_DISPOSABLE_NATIVE_TEST, '1');
+  assert.match(guardNonce || '', /^[a-f0-9]{64}$/);
+  const guard = await admin.from('native_integration_guard').select('nonce').single();
+  assert(!guard.error && guard.data?.nonce === guardNonce, 'refusing push writes without a matching disposable stack guard');
+  const checked = (result, label) => {
+    if (result.error) throw new Error(`${label} failed (${result.error.code || result.error.status || 'error'})`);
+    return result.data;
+  };
+  const bindingA = randomUUID(), bindingB = randomUUID(), bindingC = randomUUID();
+  const fidA = 'A'.repeat(22), fidB = 'B'.repeat(22);
+  const register = (token, shopId, binding, fid) => call('push-device', { method: 'POST', token, body: { shop_id: shopId, binding_id: binding, fid } });
+  const remove = (token, binding) => call('push-device', { method: 'DELETE', token, body: { binding_id: binding } });
+  assert.equal((await register(undefined, shop, bindingA, fidA)).status, 401);
+  assert.equal((await register(otherToken, shop, bindingA, fidA)).status, 403);
+  assert.equal((await register(ownerToken, shop, bindingA, 'bad')).status, 422);
+  assert.equal((await register(ownerToken, shop, bindingA, fidA)).status, 200);
+  assert.equal((await register(otherToken, otherShop, bindingB, fidB)).status, 200);
+  assert.equal((await remove(otherToken, bindingA)).status, 200); // idempotent, cannot remove another user
+  for (const client of [ownerAuth, otherAuth]) {
+    const table = await client.from('native_push_devices').select('*');
+    const worker = await client.rpc('claim_native_push_deliveries', { p_limit: 10 });
+    assert(table.error && worker.error, 'app clients must not read devices or run the worker');
+  }
+  const ids = [randomUUID(), randomUUID(), randomUUID(), randomUUID(), randomUUID()];
+  async function insert(id, shopId) {
+    checked(await admin.from('orders').insert({ id, shop_id: shopId, status: 'queued', payment_method: 'cod', payment_status: 'cod_pending', customer_name: 'Private synthetic customer' }), 'insert local order');
+  }
+  const claim = async () => checked(await admin.rpc('claim_native_push_deliveries', { p_limit: 10 }), 'claim local push');
+  await insert(ids[0], shop); await insert(ids[1], otherShop);
+  const first = await claim();
+  assert.equal(first.length, 2);
+  assert(first.some((row) => row.binding_id === bindingA && row.fid === fidA && row.kind === 'order'));
+  assert(first.some((row) => row.binding_id === bindingB && row.fid === fidB && row.kind === 'order'));
+  assert(!JSON.stringify(first).includes('Private synthetic customer') && !JSON.stringify(first).includes(ids[0]));
+  assert.equal((await claim()).length, 0, 'leased work cannot be claimed twice');
+  const a = first.find((row) => row.binding_id === bindingA);
+  const b = first.find((row) => row.binding_id === bindingB);
+  assert.equal(checked(await admin.rpc('finish_native_push_delivery', { p_id: a.delivery_id, p_lease: randomUUID(), p_outcome: 'sent' }), 'stale lease'), false);
+  assert.equal(checked(await admin.rpc('finish_native_push_delivery', { p_id: a.delivery_id, p_lease: a.lease_token, p_outcome: 'sent' }), 'finish local push'), true);
+  assert.equal(checked(await admin.rpc('finish_native_push_delivery', { p_id: b.delivery_id, p_lease: b.lease_token, p_outcome: 'gone' }), 'remove unregistered local device'), true);
+  assert.equal((await remove(ownerToken, bindingA)).status, 200);
+  await insert(ids[2], shop);
+  assert.equal((await claim()).length, 0, 'signed-out phone receives no new delivery');
+  // Reusing an installation for another account must discard its old queue.
+  assert.equal((await register(ownerToken, shop, bindingA, fidA)).status, 200);
+  await insert(ids[3], shop);
+  assert.equal((await register(otherToken, otherShop, bindingC, fidA)).status, 200);
+  assert.equal((await claim()).length, 0, 'old account queue must not transfer with a phone');
+  checked(await admin.from('shop_staff').delete().eq('shop_id', otherShop).eq('user_id', otherUser), 'remove local membership');
+  await insert(ids[4], otherShop);
+  assert.equal((await claim()).length, 0, 'membership removal revokes the device');
+  checked(await admin.from('shop_staff').insert({ shop_id: otherShop, user_id: otherUser, role: 'owner' }), 'restore local membership');
+  checked(await admin.from('orders').delete().in('id', ids), 'remove synthetic orders');
+  console.log('PASS: native FCM registration, shop isolation, private outbox, lease, sign-out and membership removal (no Firebase send)');
+}

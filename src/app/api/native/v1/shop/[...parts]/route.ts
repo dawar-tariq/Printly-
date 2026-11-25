@@ -18,6 +18,7 @@ import * as rates from '@/lib/native-rate-card';
 import * as subscription from '@/app/api/shop/subscription/route';
 import * as subscriptionStatus from '@/app/api/shop/subscription/status/route';
 import * as recovery from '@/lib/native-recovery';
+import * as pushDevice from '@/lib/native-push-device';
 import * as availability from '@/app/api/shop/availability/route';
 import * as qr from '@/app/api/shop/qr/route';
 import * as standee from '@/app/api/shop/standee/route';
@@ -45,6 +46,8 @@ function endpoint(method: string, p: string[]): Handler | null {
     if (method === 'GET' && key === 'subscription') return subscription.GET;
     if (method === 'POST' && key === 'subscription') return subscription.POST;
     if (method === 'GET' && key === 'recovery') return recovery.GET;
+    if (method === 'POST' && key === 'push-device') return pushDevice.POST;
+    if (method === 'DELETE' && key === 'push-device') return pushDevice.DELETE;
     if (method === 'PUT' && key === 'availability') return availability.PUT;
     if (method === 'GET' && key === 'qr') return qr.GET;
     if (method === 'GET' && key === 'standee') return standee.GET;

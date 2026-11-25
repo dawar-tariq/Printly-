@@ -4,8 +4,10 @@
 -- Existing polling remains the fallback if Realtime is unavailable.
 do $$
 begin
-  if exists (select 1 from pg_publication where pubname = 'supabase_realtime')
-    and not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime'
+  if not exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
+    raise exception 'supabase_realtime publication is required for order updates';
+  end if;
+  if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime'
       and schemaname = 'public' and tablename = 'orders') then
     alter publication supabase_realtime add table public.orders;
   end if;

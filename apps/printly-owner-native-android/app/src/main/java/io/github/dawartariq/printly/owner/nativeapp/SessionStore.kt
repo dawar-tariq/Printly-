@@ -54,6 +54,9 @@ class SessionStore(context: Context) {
         return Session(access, refresh, expiry)
     }
 
+    /** Used only as an additional local gate before displaying a generic alert. */
+    fun hasSession(): Boolean = prefs.contains("session")
+
     @Synchronized fun clear() {
         prefs.edit().remove("session").commit()
         try { KeyStore.getInstance("AndroidKeyStore").apply { load(null); deleteEntry(alias) } } catch (_: Exception) { /* local ciphertext was removed */ }
