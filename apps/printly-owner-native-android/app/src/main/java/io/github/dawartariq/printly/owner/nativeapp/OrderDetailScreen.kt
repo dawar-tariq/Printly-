@@ -14,7 +14,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
@@ -27,7 +29,9 @@ import java.util.UUID
 
 @Composable fun OrderDetailScreen(api: OwnerApi, id: String, onBack: () -> Unit) {
     val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
+    var copiedId by remember(id) { mutableStateOf(false) }
     var detail by remember(id) { mutableStateOf<JSONObject?>(null) }
     var loading by remember(id) { mutableStateOf(true) }
     var fresh by remember(id) { mutableStateOf(false) }
@@ -80,6 +84,15 @@ import java.util.UUID
         if (notice.isNotBlank()) InfoBanner(notice)
         if (loading && detail == null) LoadingPanel()
         if (order != null) {
+            SurfaceCard(Modifier.fillMaxWidth()) {
+                SectionLabel("ORDER ID")
+                Spacer(Modifier.height(5.dp))
+                Text(id, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Share only with the customer or shop.", Modifier.weight(1f), color = Muted, style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = { clipboard.setText(AnnotatedString(id)); copiedId = true }) { Text(if (copiedId) "Copied" else "Copy ID") }
+                }
+            }
             SurfaceCard(Modifier.fillMaxWidth()) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Column { SectionLabel("CUSTOMER"); Spacer(Modifier.height(6.dp)); Text(order.text("customer_name", "Customer").ifBlank { "Customer" }, fontWeight = FontWeight.ExtraBold); if (order.text("customer_phone").isNotBlank()) Text(order.text("customer_phone"), color = Muted) }

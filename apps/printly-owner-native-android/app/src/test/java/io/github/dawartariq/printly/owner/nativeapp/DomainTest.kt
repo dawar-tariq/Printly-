@@ -70,6 +70,18 @@ class DomainTest {
         assertEquals(15, parseOwnerExperience(JSONObject().put("schema", 1).put("board_refresh_seconds", "10"))!!.boardRefreshSeconds)
     }
 
+    @Test fun orderLookupUsesTheFullIdAndNeverNeedsToOpenThePastedUrl() {
+        val id = "11111111-1111-4111-8111-111111111111"
+        assertEquals(id, orderIdFromLookup(id.uppercase()))
+        assertEquals(id, orderIdFromLookup("https://printly.example/track/$id/?ref=1"))
+        assertEquals(id, orderIdFromLookup("$id#section"))
+        assertNull(orderIdFromLookup("11111111"))
+        assertNull(orderIdFromLookup("not an order"))
+        assertEquals("Payment to review", orderStatusLabel(JSONObject("""{"status":"draft","payment_method":"upi","payment_status":"submitted"}""")))
+        assertEquals("Awaiting payment", orderStatusLabel(JSONObject("""{"status":"draft","payment_method":"upi","payment_status":"pending"}""")))
+        assertEquals("New", orderStatusLabel(JSONObject("""{"status":"queued"}""")))
+    }
+
     @Test fun imageDetectionUsesSignatures() {
         assertEquals("image/jpeg", detectImageMime(byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0xff.toByte())))
         assertEquals("image/png", detectImageMime(byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)))

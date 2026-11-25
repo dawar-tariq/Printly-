@@ -7,6 +7,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.printToString
 import androidx.compose.ui.test.performClick
@@ -41,6 +42,11 @@ class DemoFlowTest {
         compose.onNodeWithText("Open sample shop").performClick()
         waitFor("Hello, Bright Paper Studio.")
         compose.onNodeWithText("DEMO · SAMPLE DATA ONLY").assertIsDisplayed()
+        waitFor("Aisha K.")
+        compose.onNodeWithText("Aisha K.").performScrollTo().performClick()
+        waitFor("ORDER ID")
+        compose.onNodeWithText("11111111-1111-4111-8111-111111111111").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithContentDescription("Back").performClick()
         compose.onNodeWithText("Orders").performClick()
         waitFor("Payment review (1)")
         compose.onNodeWithText("Payment review (1)").performClick()

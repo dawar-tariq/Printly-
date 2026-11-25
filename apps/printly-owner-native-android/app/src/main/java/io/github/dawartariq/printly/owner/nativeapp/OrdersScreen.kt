@@ -24,7 +24,7 @@ import java.util.Date
 
 @Composable fun OrdersScreen(api: OwnerApi, shopId: String, refreshSeconds: Int, onOpen: (String) -> Unit) {
     val scope = rememberCoroutineScope()
-    var currentLane by remember { mutableStateOf("queued") }
+    var currentLane by remember { mutableStateOf("all") }
     var searchInput by remember { mutableStateOf("") }
     var search by remember { mutableStateOf("") }
     var pages by remember { mutableStateOf(lanes.associateWith { 1 }) }
@@ -53,11 +53,17 @@ import java.util.Date
     }
     BoardRefreshEffect(api, shopId, refreshSeconds, pages to search) { load() }
     DisposableEffect(Unit) { onDispose { sequence++ } }
-    val lane = snapshot?.optJSONObject("lanes")?.optJSONObject(currentLane)
-    val orders = lane?.array("orders") ?: emptyList()
+    val laneData = snapshot?.optJSONObject("lanes")
+    val lane = laneData?.optJSONObject(currentLane)
+    // A concurrent status move can appear in two independently fetched lanes;
+    // show it once, and let the next refresh settle the board.
+    val orders = if (currentLane == "all") lanes.flatMap { laneData?.optJSONObject(it)?.array("orders") ?: emptyList() }
+        .distinctBy { it.text("id") }.sortedByDescending { it.text("created_at") }
+        else lane?.array("orders") ?: emptyList()
     val pagination = lane?.optJSONObject("pagination")
     val page = pagination?.optInt("page", 1) ?: 1
     val totalPages = pagination?.optInt("pages", 1) ?: 1
+    val filters = listOf("all") + lanes
     Column(Modifier.fillMaxSize().padding(horizontal = 18.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Column(Modifier.weight(1f)) { Heading("Order board", "The latest work for your shop.") }
@@ -66,18 +72,26 @@ import java.util.Date
         lastUpdated?.let { Text("Checked ${DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(it))} · refreshes while open", color = Muted, style = MaterialTheme.typography.bodySmall) }
         Spacer(Modifier.height(12.dp))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-            OutlinedTextField(searchInput, { searchInput = it }, label = { Text("Search name, phone or token") }, singleLine = true, modifier = Modifier.weight(1f),
+            OutlinedTextField(searchInput, { searchInput = it.take(2048) }, label = { Text("Name, phone, token or order ID") }, singleLine = true, modifier = Modifier.weight(1f),
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) }, shape = RoundedCornerShape(15.dp))
-            SecondaryButton("Search", { search = searchInput.trim(); pages = lanes.associateWith { 1 } })
+            SecondaryButton("Search", {
+                val id = orderIdFromLookup(searchInput)
+                if (id != null) onOpen(id) else { search = searchInput.trim(); pages = lanes.associateWith { 1 } }
+            })
         }
         Spacer(Modifier.height(12.dp))
-        ScrollableTabRow(selectedTabIndex = lanes.indexOf(currentLane), edgePadding = 0.dp, containerColor = Cream, contentColor = OrangeDark,
+        ScrollableTabRow(selectedTabIndex = filters.indexOf(currentLane), edgePadding = 0.dp, containerColor = Cream, contentColor = OrangeDark,
             divider = {}) {
-            lanes.forEach { value ->
-                val count = snapshot?.optJSONObject("lanes")?.optJSONObject(value)?.optJSONObject("pagination")?.optInt("count")
-                Tab(selected = currentLane == value, onClick = { currentLane = value }, text = { Text("${laneTitle(value)}${count?.let { " ($it)" } ?: ""}", fontSize = 12.sp, fontWeight = FontWeight.Bold) })
+            filters.forEach { value ->
+                val count = if (value == "all" && laneData != null) lanes.sumOf { laneData.optJSONObject(it)?.optJSONObject("pagination")?.optInt("count") ?: 0 }
+                    else laneData?.optJSONObject(value)?.optJSONObject("pagination")?.optInt("count")
+                Tab(selected = currentLane == value, onClick = { currentLane = value }, text = { Text("${if (value == "all") "All" else laneTitle(value)}${count?.let { " ($it)" } ?: ""}", fontSize = 12.sp, fontWeight = FontWeight.Bold) })
             }
         }
+        if (currentLane == "all" && laneData != null && lanes.any { value ->
+            val entry = laneData.optJSONObject(value)
+            (entry?.optJSONObject("pagination")?.optInt("count") ?: 0) > (entry?.array("orders")?.size ?: 0)
+        }) Text("Showing one page per status. Choose a status to see more, or browse all open orders on Home.", color = Muted, style = MaterialTheme.typography.bodySmall)
         Spacer(Modifier.height(10.dp))
         if (error.isNotBlank()) { ErrorBanner(if (snapshot != null) "$error The last board may be out of date." else error); Spacer(Modifier.height(8.dp)) }
         if (loading && snapshot == null) LoadingPanel("Loading orders…")
@@ -110,7 +124,11 @@ import java.util.Date
                 Spacer(Modifier.height(4.dp))
                 Text(order.text("customer_name", "Customer").ifBlank { "Customer" }, color = Ink, style = MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.height(5.dp))
-                Text("${laneTitle(order.text("status"))} · ${order.text("payment_method", "payment").uppercase()}", color = Muted, style = MaterialTheme.typography.bodySmall)
+                Text("${orderStatusLabel(order)} · ${order.text("payment_method", "payment").uppercase()}", color = Muted, style = MaterialTheme.typography.bodySmall)
+                if (isUuid(order.text("id"))) {
+                    Spacer(Modifier.height(5.dp))
+                    Text("Order ID: ${order.text("id")}", color = Muted, style = MaterialTheme.typography.labelSmall)
+                }
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text(money(order.optLong("total_paise", 0)), fontWeight = FontWeight.ExtraBold, color = Ink)
@@ -149,8 +167,8 @@ import java.util.Date
                 OutlinedTextField(lookup, { lookup = it }, label = { Text("Order ID or tracking link") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(10.dp))
                 SecondaryButton("Open order", {
-                    val id = lookup.trim().substringBefore('?').trimEnd('/').substringAfterLast('/')
-                    if (isUuid(id)) { error = ""; onOpen(id) } else error = "Enter a valid order ID or tracking link."
+                    val id = orderIdFromLookup(lookup)
+                    if (id != null) { error = ""; onOpen(id) } else error = "Enter a valid order ID or tracking link."
                 }, Modifier.fillMaxWidth())
             }
         }

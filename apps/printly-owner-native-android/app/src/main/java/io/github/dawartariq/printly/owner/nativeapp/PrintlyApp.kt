@@ -126,11 +126,12 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
 
 @Composable fun BrandWordmark() {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Image(painterResource(R.drawable.owner_icon), contentDescription = null, modifier = Modifier.size(34.dp))
-        Spacer(Modifier.width(8.dp))
-        Text("printly", fontSize = 23.sp, fontWeight = FontWeight.Black, letterSpacing = (-1).sp, color = Ink)
-        Spacer(Modifier.width(5.dp))
-        Text("FOR SHOPS", fontSize = 9.sp, color = OrangeDark, fontWeight = FontWeight.ExtraBold, letterSpacing = .7.sp)
+        Image(painterResource(R.drawable.owner_icon), contentDescription = null, modifier = Modifier.size(38.dp))
+        Spacer(Modifier.width(9.dp))
+        Column(verticalArrangement = Arrangement.Center) {
+            Text("printly", fontSize = 21.sp, lineHeight = 22.sp, fontWeight = FontWeight.Black, letterSpacing = (-.8).sp, color = Ink)
+            Text("FOR SHOPS", fontSize = 9.sp, lineHeight = 10.sp, color = OrangeDark, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp)
+        }
     }
 }
 
@@ -292,7 +293,9 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
                     SecondaryButton("Sign out", { scope.launch { onSignedOut(api.signOut()) } }, Modifier.fillMaxWidth())
                 }
                 else -> when (screen) {
-                    Screen.HOME -> HomeScreen(api, me, meFresh, experience, { screen = it }, { meFresh = false }, { refreshKey++ })
+                    Screen.HOME -> HomeScreen(api, me, meFresh, experience, { screen = it },
+                        openOrder = { detailId = it; detailParent = Screen.HOME; screen = Screen.DETAIL },
+                        invalidateAccess = { meFresh = false }, reloadAccess = { refreshKey++ })
                     Screen.ORDERS -> OrdersScreen(api, me?.optJSONObject("shop")?.optString("id", "") ?: "", experience.boardRefreshSeconds,
                         onOpen = { detailId = it; detailParent = Screen.ORDERS; screen = Screen.DETAIL })
                     Screen.INVENTORY -> InventoryScreen(api)

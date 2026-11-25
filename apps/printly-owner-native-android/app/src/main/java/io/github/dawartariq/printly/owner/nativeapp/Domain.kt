@@ -45,6 +45,24 @@ fun JSONObject.text(key: String, fallback: String = "") = if (isNull(key)) fallb
 fun JSONArray.objects(): List<JSONObject> = (0 until length()).mapNotNull { optJSONObject(it) }
 fun JSONObject.array(key: String): List<JSONObject> = optJSONArray(key)?.objects() ?: emptyList()
 fun isUuid(value: String): Boolean = try { UUID.fromString(value).toString().equals(value, ignoreCase = true) } catch (_: Exception) { false }
+
+/** Extract only the identifier; never open or send credentials to a pasted URL. */
+fun orderIdFromLookup(value: String): String? {
+    val candidate = value.trim().substringBefore('?').substringBefore('#').trimEnd('/').substringAfterLast('/')
+    return candidate.takeIf(::isUuid)?.lowercase(Locale.ROOT)
+}
+
+fun orderStatusLabel(order: JSONObject): String {
+    val status = order.text("status")
+    if (status == "draft" && order.text("payment_method") == "upi") return when (order.text("payment_status")) {
+        "submitted" -> "Payment to review"
+        "pending" -> "Awaiting payment"
+        "rejected" -> "Payment not confirmed"
+        else -> "Payment review"
+    }
+    return laneTitle(status)
+}
+
 fun subscriptionActive(value: JSONObject?): Boolean {
     if (value == null) return false
     if (value.optBoolean("is_permanent", false)) return true
