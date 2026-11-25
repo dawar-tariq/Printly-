@@ -3,7 +3,7 @@ package io.github.dawartariq.printly.owner.nativeapp
 import android.content.Context
 import androidx.compose.runtime.Composable
 
-/** Demo and isolated QA have no production Firebase identity or push sender. */
+/** The synthetic demo has no Firebase identity or push sender. */
 internal object NativePush {
     val available = false
     fun sessionChange(context: Context, expectedSession: String? = null, change: () -> Unit): LocalPushStop {

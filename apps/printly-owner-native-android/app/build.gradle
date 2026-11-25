@@ -4,49 +4,55 @@ plugins {
     id 'org.jetbrains.kotlin.plugin.compose'
 }
 
-// An isolated test build is separate from both the demo and real owner app.
-// Its Auth host is pinned to the existing staging project. The test website
-// origin is public configuration, not a credential, and must be independently
-// verified to use that project before any synthetic account is used.
+// The isolated build has one dedicated website and staging Auth host. A new
+// hostname must not silently point this QA package at a different backend.
+// The website's server-side isolation still needs independent verification.
 def qaOriginInput = providers.gradleProperty('printlyQaSiteOrigin').orElse('').get()
-def qaOrigin = null
-try {
-    def uri = new URI(qaOriginInput)
-    def host = uri.host ?: ''
-    def productionHosts = [
-        'printly-steel-three.vercel.app',
-        'printly0.vercel.app',
-        'printly-shop.vercel.app',
-        'printly-dawartariq14-5237s-projects.vercel.app',
-        'printly-git-arena-309fdf51-printly-dawartariq14-5237s-projects.vercel.app',
-    ]
-    def dnsName = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/
-    if (uri.scheme == 'https' && uri.userInfo == null && uri.port == -1 &&
-        uri.rawPath == '' && uri.rawQuery == null && uri.rawFragment == null &&
-        qaOriginInput == "https://${host}" && (host ==~ dnsName) && !(host ==~ /[0-9.]+/) && !productionHosts.contains(host)) {
-        qaOrigin = qaOriginInput
-    }
-} catch (Exception ignored) { /* The QA task guard below fails closed. */ }
+def qaOrigin = qaOriginInput == 'https://printly-native-test.vercel.app' ? qaOriginInput : null
 def qaAuthHost = 'rahfmpsdbwbktlobntkm.supabase.co'
 
-// This is the public Android client configuration, not a service-account key.
-// Only the production variant receives Firebase resources/dependencies; the
-// demo and isolated QA package do not impersonate the production Firebase app.
-def firebase = new groovy.json.JsonSlurper().parse(file('src/release/google-services.json'))
-def firebaseClient = firebase.client?.find { it.client_info?.android_client_info?.package_name == 'io.github.dawartariq.printly.owner' }
-def fcmAppId = firebaseClient?.client_info?.mobilesdk_app_id
-def fcmApiKey = firebaseClient?.api_key?.getAt(0)?.current_key
-def fcmSender = firebase.project_info?.project_number
-def fcmProject = firebase.project_info?.project_id
-if (fcmProject != 'printly-5c247' || !(fcmAppId instanceof String && fcmAppId ==~ /1:[0-9]+:android:[0-9a-f]+/) ||
-    !(fcmApiKey instanceof String && fcmApiKey ==~ /AIza[A-Za-z0-9_-]{35}/) || !(fcmSender instanceof String && fcmSender ==~ /[0-9]+/) ||
-    !fcmAppId.startsWith("1:${fcmSender}:android:")) {
-    throw new GradleException('The production Firebase Android client configuration is missing or does not match this app.')
+// These files contain public Android client configuration, not credentials for
+// sending messages. Reject private service-account fields even if accidentally
+// placed anywhere in a client file. Never print the parsed contents on error.
+def privateFirebaseFields = ['private_key', 'private_key_id', 'client_email', 'client_secret'] as Set
+def hasPrivateFirebaseFields
+hasPrivateFirebaseFields = { value ->
+    if (value instanceof Map) return value.any { key, child -> privateFirebaseFields.contains(key.toString().toLowerCase(Locale.ROOT)) || hasPrivateFirebaseFields(child) }
+    if (value instanceof Collection) return value.any { child -> hasPrivateFirebaseFields(child) }
+    return false
 }
+def readFirebaseClient = { String path, String expectedProject, String expectedPackage ->
+    try {
+        def firebase = new groovy.json.JsonSlurper().parse(file(path))
+        if (!(firebase instanceof Map) || hasPrivateFirebaseFields(firebase) || firebase.type == 'service_account' || !(firebase.client instanceof List)) return null
+        def matches = firebase.client.findAll { it?.client_info?.android_client_info?.package_name == expectedPackage }
+        if (matches.size() != 1) return null
+        def appId = matches[0].client_info?.mobilesdk_app_id
+        def apiKey = matches[0].api_key?.getAt(0)?.current_key
+        def sender = firebase.project_info?.project_number
+        def project = firebase.project_info?.project_id
+        if (project != expectedProject || !(appId instanceof String && appId ==~ /1:[0-9]+:android:[0-9a-f]+/) ||
+            !(apiKey instanceof String && apiKey ==~ /AIza[A-Za-z0-9_-]{35}/) || !(sender instanceof String && sender ==~ /[0-9]+/) ||
+            !appId.startsWith("1:${sender}:android:")) return null
+        return [appId: appId, apiKey: apiKey, sender: sender, project: project]
+    } catch (Exception ignored) { return null }
+}
+def releaseFirebase = readFirebaseClient('src/release/google-services.json', 'printly-5c247', 'io.github.dawartariq.printly.owner')
+if (!releaseFirebase) throw new GradleException('The production Firebase Android client configuration is missing or does not match this app.')
+// The demo and release do not depend on a valid QA client file. QA tasks fail
+// closed below if that file is missing, private, or for the wrong project/app.
+def qaFirebase = readFirebaseClient('src/qa/google-services.json', 'printly-notifications-qa', 'io.github.dawartariq.printly.owner.native.qa')
+if (qaFirebase && (qaFirebase.sender == releaseFirebase.sender || qaFirebase.appId == releaseFirebase.appId || qaFirebase.apiKey == releaseFirebase.apiKey)) qaFirebase = null
+
+// CI may run an offline QA-specific instrumentation test. Never target a
+// production-signed build with this switch.
+def instrumentationBuildType = providers.gradleProperty('printlyInstrumentationBuildType').orElse('debug').get()
+if (!(instrumentationBuildType in ['debug', 'qa'])) throw new GradleException('Instrumentation is allowed only for debug or isolated QA.')
 
 android {
     namespace 'io.github.dawartariq.printly.owner.nativeapp'
     compileSdk 36
+    testBuildType instrumentationBuildType
 
     defaultConfig {
         // Same release identity as the installed owner app. A future signed
@@ -95,12 +101,11 @@ android {
         release {
             minifyEnabled false
             buildConfigField 'boolean', 'DEMO_MODE', 'false'
-            // Equivalent to the Firebase Android plugin's public resource values;
-            // keeping them in the release source set avoids fake QA clients.
-            resValue 'string', 'google_app_id', fcmAppId
-            resValue 'string', 'google_api_key', fcmApiKey
-            resValue 'string', 'gcm_defaultSenderId', fcmSender
-            resValue 'string', 'project_id', fcmProject
+            // Equivalent to the Firebase plugin's public resource values.
+            resValue 'string', 'google_app_id', releaseFirebase.appId
+            resValue 'string', 'google_api_key', releaseFirebase.apiKey
+            resValue 'string', 'gcm_defaultSenderId', releaseFirebase.sender
+            resValue 'string', 'project_id', releaseFirebase.project
             if (releaseSigningReady) signingConfig signingConfigs.release
         }
         // Different package, visible test label, debug key and staging Auth host.
@@ -114,19 +119,35 @@ android {
             buildConfigField 'boolean', 'ISOLATED_TEST_MODE', 'true'
             buildConfigField 'String', 'SITE_ORIGIN', '"' + (qaOrigin ?: 'https://invalid.invalid') + '"'
             buildConfigField 'String', 'SUPABASE_HOST', '"' + qaAuthHost + '"'
+            if (qaFirebase) {
+                resValue 'string', 'google_app_id', qaFirebase.appId
+                resValue 'string', 'google_api_key', qaFirebase.apiKey
+                resValue 'string', 'gcm_defaultSenderId', qaFirebase.sender
+                resValue 'string', 'project_id', qaFirebase.project
+            }
         }
     }
-    // A small no-push implementation is shared by demo and isolated QA.
+    // The demo has no Firebase. QA and release share the push implementation,
+    // icon and privacy-preserving manifest, but receive separate client values.
     sourceSets {
         debug.java.srcDir 'src/nonProduction/java'
-        qa.java.srcDir 'src/nonProduction/java'
+        release.java.srcDir 'src/push/java'
+        qa.java.srcDir 'src/push/java'
+        release.res.srcDir 'src/push/res'
+        qa.res.srcDir 'src/push/res'
+        release.manifest.srcFile 'src/push/AndroidManifest.xml'
+        qa.manifest.srcFile 'src/push/AndroidManifest.xml'
     }
     gradle.taskGraph.whenReady { graph ->
         if (!releaseSigningReady && graph.allTasks.any { it.path.startsWith(':app:') && it.name in ['assembleRelease', 'bundleRelease', 'packageRelease'] }) {
             throw new GradleException('Release signing is not configured. A signed review needs explicit approval and the verified release key.')
         }
-        if (!qaOrigin && graph.allTasks.any { it.path.startsWith(':app:') && it.name.toLowerCase(Locale.ROOT).contains('qa') }) {
-            throw new GradleException('The isolated QA build needs -PprintlyQaSiteOrigin=<verified test-only HTTPS origin>; known production hosts are forbidden.')
+        def qaTaskRequested = graph.allTasks.any { it.path.startsWith(':app:') && it.name.toLowerCase(Locale.ROOT).contains('qa') }
+        if (qaTaskRequested && !qaOrigin) {
+            throw new GradleException('The isolated QA build needs -PprintlyQaSiteOrigin=https://printly-native-test.vercel.app; all other origins are forbidden.')
+        }
+        if (qaTaskRequested && !qaFirebase) {
+            throw new GradleException('The isolated QA Firebase Android client configuration is missing or does not match the test project and package.')
         }
     }
     buildFeatures { compose true; buildConfig true }
@@ -156,6 +177,9 @@ dependencies {
     releaseImplementation platform('com.google.firebase:firebase-bom:35.2.0')
     releaseImplementation 'com.google.firebase:firebase-messaging'
     releaseImplementation 'androidx.work:work-runtime-ktx:2.10.1'
+    qaImplementation platform('com.google.firebase:firebase-bom:35.2.0')
+    qaImplementation 'com.google.firebase:firebase-messaging'
+    qaImplementation 'androidx.work:work-runtime-ktx:2.10.1'
     debugImplementation 'androidx.compose.ui:ui-tooling'
     debugImplementation 'androidx.compose.ui:ui-test-manifest'
     testImplementation 'junit:junit:4.13.2'

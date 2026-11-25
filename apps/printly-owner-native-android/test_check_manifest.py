@@ -9,16 +9,17 @@ from pathlib import Path
 CHECK = Path(__file__).with_name('check-manifest.py')
 PRODUCTION = 'io.github.dawartariq.printly.owner'
 QA = 'io.github.dawartariq.printly.owner.native.qa'
+DEMO = 'io.github.dawartariq.printly.owner.native.debug'
 
 
-def manifest(package, *, receiver_permission='com.google.android.c2dm.permission.SEND', fallback_priority='-500', extra_service='', push=True):
+def manifest(package, *, receiver_permission='com.google.android.c2dm.permission.SEND', fallback_priority='-500', extra_service='', auto_init='false', own_exported='false', push=True):
     permission = '<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>' if push else ''
     messaging = f'''
       <provider android:name="com.google.firebase.provider.FirebaseInitProvider" android:exported="false"/>
       <receiver android:name="com.google.firebase.iid.FirebaseInstanceIdReceiver" android:exported="true" android:permission="{receiver_permission}"/>
-      <meta-data android:name="firebase_messaging_auto_init_enabled" android:value="false"/>
+      <meta-data android:name="firebase_messaging_auto_init_enabled" android:value="{auto_init}"/>
       <meta-data android:name="firebase_messaging_installation_id_enabled" android:value="true"/>
-      <service android:name="io.github.dawartariq.printly.owner.nativeapp.NativeMessagingService" android:exported="false">
+      <service android:name="io.github.dawartariq.printly.owner.nativeapp.NativeMessagingService" android:exported="{own_exported}">
         <intent-filter><action android:name="com.google.firebase.MESSAGING_EVENT"/></intent-filter>
       </service>
       <service android:name="com.google.firebase.messaging.FirebaseMessagingService" android:exported="false">
@@ -43,19 +44,30 @@ class ManifestGuardTest(unittest.TestCase):
             result = subprocess.run([sys.executable, str(CHECK), str(path), package], capture_output=True, text=True)
             self.assertEqual(result.returncode == 0, expected, result.stdout + result.stderr)
 
-    def test_release_accepts_the_protected_receiver_and_lower_priority_fallback(self):
-        self.check_xml(manifest(PRODUCTION), PRODUCTION, True)
-        self.check_xml(manifest(PRODUCTION, fallback_priority='0xfffffe0c'), PRODUCTION, True)
+    def test_push_variants_accept_the_protected_receiver_and_lower_priority_fallback(self):
+        for package in (PRODUCTION, QA):
+            with self.subTest(package=package):
+                self.check_xml(manifest(package), package, True)
+                self.check_xml(manifest(package, fallback_priority='0xfffffe0c'), package, True)
 
-    def test_release_rejects_unprotected_receiver_and_competing_service(self):
-        self.check_xml(manifest(PRODUCTION, receiver_permission=''), PRODUCTION, False)
-        self.check_xml(manifest(PRODUCTION, fallback_priority='0'), PRODUCTION, False)
+    def test_push_variants_reject_missing_or_unsafe_messaging_components(self):
         rival = '''<service android:name="example.Rival" android:exported="false"><intent-filter android:priority="1"><action android:name="com.google.firebase.MESSAGING_EVENT"/></intent-filter></service>'''
-        self.check_xml(manifest(PRODUCTION, extra_service=rival), PRODUCTION, False)
+        for package in (PRODUCTION, QA):
+            with self.subTest(package=package):
+                self.check_xml(manifest(package, push=False), package, False)
+                self.check_xml(manifest(package, receiver_permission=''), package, False)
+                self.check_xml(manifest(package, fallback_priority='0'), package, False)
+                self.check_xml(manifest(package, extra_service=rival), package, False)
+                self.check_xml(manifest(package, auto_init='true'), package, False)
+                self.check_xml(manifest(package, own_exported='true'), package, False)
 
-    def test_qa_has_no_firebase_or_notification_permission(self):
-        self.check_xml(manifest(QA, push=False), QA, True)
-        self.check_xml(manifest(QA, push=True), QA, False)
+    def test_demo_has_no_firebase_or_notification_permission(self):
+        self.check_xml(manifest(DEMO, push=False), DEMO, True)
+        self.check_xml(manifest(DEMO, push=True), DEMO, False)
+
+    def test_unknown_package_is_not_accepted_as_a_demo(self):
+        package = 'io.github.dawartariq.printly.owner.native.unexpected'
+        self.check_xml(manifest(package, push=False), package, False)
 
 
 if __name__ == '__main__':

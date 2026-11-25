@@ -22,7 +22,7 @@ async function run(request: Request): Promise<Response> {
     if (claimed.error || !Array.isArray(claimed.data)) return jsonError(503, 'unavailable', 'Notification queue is unavailable.');
     const outcomes = await Promise.all((claimed.data as NativePushDelivery[]).map(async (delivery) => {
       let outcome: PushOutcome;
-      try { outcome = await sendNativePush(delivery, accessToken); } catch { outcome = 'retry'; }
+      try { outcome = await sendNativePush(delivery, accessToken, config.target); } catch { outcome = 'retry'; }
       try {
         const finished = await admin.rpc('finish_native_push_delivery', { p_id: delivery.delivery_id, p_lease: delivery.lease_token, p_outcome: outcome });
         // The database can turn an old UNREGISTERED result into a retry if
