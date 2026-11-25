@@ -8,8 +8,10 @@ import {
 import { formatPaiseExact, formatDateTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { lowBandwidth } from '@/lib/connection';
+import { subscribeTrackingUpdates } from '@/lib/track-realtime';
 import { useCustomerLanguage } from '@/lib/customer-language';
 import { CustomerLanguagePicker } from '@/components/CustomerLanguagePicker';
+import { OrderReference } from '@/components/OrderReference';
 import {
   Loader2, Printer, CheckCircle2, Package, Store, Star, AlertTriangle, Wallet, X, Hourglass,
 } from 'lucide-react';
@@ -19,6 +21,12 @@ interface Track {
   shop_name: string; shop_slug: string; shop_city: string; total_paise: number; eta_minutes: number | null;
   item_count: number; rush: boolean; created_at: string; ready_at: string | null; collected_at: string | null;
 }
+
+const AUTO_UPDATE = {
+  en: 'Updates automatically while this page is open.',
+  hi: 'यह पेज खुला रहने पर अपने-आप अपडेट होगा।',
+  ur: 'یہ صفحہ کھلا رہنے پر خود بخود اپ ڈیٹ ہوگا۔',
+} as const;
 
 const STEPS = [
   { key: 'queued', label: 'In queue', icon: Store },
@@ -82,15 +90,31 @@ export default function TrackPage() {
     setRating(0); setComment(''); setReviewed(false); setReviewError(null);
     setReportUtr(''); setReportMessage(null);
     setDisputeOpen(false); setDisputeType('other'); setDisputeText(''); setDisputeDone(false); setDisputeError(null);
-    // Do not keep polling in background tabs. Refresh immediately when the
-    // customer returns, and otherwise use a modest interval while visible.
+    // Broadcast is only a hint; the tracking API remains authoritative. Even
+    // forged/bursty hints cannot cause more than one extra fetch every 3s.
+    // Poll while visible so disconnected or unconfigured Realtime still works.
     const refreshIfVisible = () => { if (document.visibilityState !== 'hidden') void load(); };
+    let signalAt = Date.now();
+    let scheduled: number | undefined;
+    const signal = () => {
+      if (document.visibilityState === 'hidden' || terminal.current) return;
+      const wait = Math.max(0, 3_000 - (Date.now() - signalAt));
+      if (scheduled !== undefined) return;
+      scheduled = window.setTimeout(() => {
+        scheduled = undefined;
+        if (document.visibilityState !== 'hidden' && !terminal.current) { signalAt = Date.now(); void load(); }
+      }, wait);
+    };
     refreshIfVisible();
+    const stopRealtime = subscribeTrackingUpdates(id, signal);
     const timer = window.setInterval(() => {
       if (!terminal.current && document.visibilityState !== 'hidden') void load();
-    }, lowBandwidth() ? 60_000 : 30_000);
+    }, lowBandwidth() ? 60_000 : 15_000);
     document.addEventListener('visibilitychange', refreshIfVisible);
-    return () => { refreshSequence.current++; window.clearInterval(timer); document.removeEventListener('visibilitychange', refreshIfVisible); };
+    return () => {
+      refreshSequence.current++; stopRealtime(); window.clearInterval(timer); window.clearTimeout(scheduled);
+      document.removeEventListener('visibilitychange', refreshIfVisible);
+    };
   }, [load]);
 
   const submitReview = async () => {
@@ -217,6 +241,8 @@ export default function TrackPage() {
           )}
 
           <p className="mt-3 text-xs text-neutral-500">{t.saveTracking}</p>
+          <p className="mt-1 text-xs font-semibold text-orange-800">{AUTO_UPDATE[language]}</p>
+          <div className="mt-4"><OrderReference key={track.order_id} id={track.order_id} language={language} /></div>
 
           {/* payment state banners */}
           {checkoutUnconfirmed && <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-left text-xs text-amber-900">{t.checkoutUnconfirmedHelp}</div>}

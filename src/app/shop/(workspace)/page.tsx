@@ -151,12 +151,17 @@ export default function ShopBoardPage() {
     document.addEventListener('visibilitychange', refreshIfVisible);
     const supabase = createBrowserSupabase();
     let scheduled: number | undefined;
+    const onChange = () => {
+      if (document.visibilityState === 'hidden') return;
+      window.clearTimeout(scheduled);
+      scheduled = window.setTimeout(refreshIfVisible, 350);
+    };
+    // DELETE is deliberately excluded: Realtime cannot reliably filter or
+    // authorize deleted rows. The normal poll catches removals instead.
     const channel = supabase.channel(`shop-orders:${shopId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `shop_id=eq.${shopId}` }, () => {
-        if (document.visibilityState === 'hidden') return;
-        window.clearTimeout(scheduled);
-        scheduled = window.setTimeout(refreshIfVisible, 350);
-      }).subscribe();
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders', filter: `shop_id=eq.${shopId}` }, onChange)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders', filter: `shop_id=eq.${shopId}` }, onChange)
+      .subscribe((status) => { if (status === 'SUBSCRIBED') refreshIfVisible(); });
     return () => { window.clearInterval(timer); window.clearTimeout(scheduled); document.removeEventListener('visibilitychange', refreshIfVisible); supabase.removeChannel(channel); };
   }, [snapshot?.shop_id]);
 
@@ -191,7 +196,7 @@ export default function ShopBoardPage() {
     return <section className="flex min-h-72 flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-neutral-200/60">
       <div className="flex items-center justify-between border-b border-neutral-200 px-3 py-2.5"><h2 className="flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-widest text-neutral-600"><Icon size={14} />{title}<span className="rounded-full bg-white px-1.5 py-0.5 text-[10px]">{lane.pagination.count}</span></h2></div>
       <div className="flex-1 space-y-2 p-2">{lane.orders.map((o) => <div key={o.id} className="rounded-xl border border-neutral-200 bg-white p-3">
-        <div className="flex items-start justify-between gap-2"><Link href={`/shop/orders/${o.id}`} className="min-w-0 flex-1"><div className="flex items-center gap-2"><span className="text-2xl font-black text-neutral-900">{o.token ?? '—'}</span>{o.rush && <span className="chip bg-red-100 text-red-700"><Zap size={10} />RUSH</span>}</div><div className="mt-0.5 flex min-w-0 items-center gap-1 text-[11px] text-neutral-500"><User size={10} className="shrink-0" /><span className="min-w-0 truncate">{o.customer_name || 'Walk-in'} · {o.customer_phone}</span></div></Link><div className="shrink-0 text-right"><div className="text-sm font-extrabold tabular-nums">{formatPaise(o.total_paise)}</div><span className={cn('chip mt-0.5', o.payment_method === 'cod' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800')}>{o.payment_method === 'cod' ? 'COD' : 'UPI confirmed'}</span></div></div>
+        <div className="flex items-start justify-between gap-2"><Link href={`/shop/orders/${o.id}`} className="min-w-0 flex-1"><div className="flex items-center gap-2"><span className="text-2xl font-black text-neutral-900">{o.token ?? '—'}</span>{o.rush && <span className="chip bg-red-100 text-red-700"><Zap size={10} />RUSH</span>}</div><div className="mt-1 break-all text-[10px] font-semibold text-neutral-600">Order ID: {o.id}</div><div className="mt-0.5 flex min-w-0 items-center gap-1 text-[11px] text-neutral-500"><User size={10} className="shrink-0" /><span className="min-w-0 truncate">{o.customer_name || 'Walk-in'} · {o.customer_phone}</span></div></Link><div className="shrink-0 text-right"><div className="text-sm font-extrabold tabular-nums">{formatPaise(o.total_paise)}</div><span className={cn('chip mt-0.5', o.payment_method === 'cod' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800')}>{o.payment_method === 'cod' ? 'COD' : 'UPI confirmed'}</span></div></div>
         <div className="mt-2 flex items-center justify-between gap-2"><span className="flex items-center gap-1 text-[10px] text-neutral-400"><Clock size={10} />{timeAgo(o.created_at)} · {o.items?.[0]?.count ?? 0} items</span><div className="flex gap-1.5"><Link href={`/shop/orders/${o.id}`} className="btn btn-ghost h-8 px-2.5 text-[11px]">Details</Link>{action(o)}</div></div>
       </div>)}{lane.orders.length === 0 && <div className="py-8 text-center text-[11px] text-neutral-400">{search ? 'No matching orders on this page' : 'Nothing here'}</div>}</div>{pagination(name, lane)}
     </section>;
@@ -206,7 +211,7 @@ export default function ShopBoardPage() {
     {actionError && <div role="alert" className="mb-4 rounded-xl bg-red-50 p-3 text-sm text-red-800">{actionError}</div>}
     <div className="card mb-4 flex flex-wrap items-end gap-3 p-3">
       <label className="min-w-0 flex-1 basis-48 text-xs font-bold text-neutral-700">Search all open orders
-        <span className="relative mt-1 block"><Search size={15} className="absolute left-3 top-3 text-neutral-400" /><input value={searchInput} onChange={(event) => setSearchInput(event.target.value)} maxLength={80} className="input w-full pl-9 text-sm" placeholder="Token, customer, phone or UTR" /></span>
+        <span className="relative mt-1 block"><Search size={15} className="absolute left-3 top-3 text-neutral-400" /><input value={searchInput} onChange={(event) => setSearchInput(event.target.value)} maxLength={80} className="input w-full pl-9 text-sm" placeholder="Order ID, token, name, phone or UTR" /></span>
       </label>
       <button type="button" onClick={() => void toggleSound()} aria-pressed={soundEnabled} className="btn btn-ghost min-h-10 px-3 text-xs">{soundEnabled ? <Bell size={15} /> : <BellOff size={15} />}{soundEnabled ? 'Sound on' : 'Enable sound'}</button>
       <button type="button" onClick={() => void load()} className="btn btn-ghost min-h-10 px-3 text-xs"><RefreshCw size={15} />Refresh</button>
@@ -225,7 +230,7 @@ export default function ShopBoardPage() {
       <div className="flex items-center justify-between border-b border-amber-200 px-4 py-2.5"><h2 className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-widest text-amber-900"><AlertCircle size={14} />Payment confirmation ({confirm.pagination.count})</h2></div>
       <p className="px-4 pt-2 text-xs text-amber-900">A customer’s report or reference is not proof of payment. Verify the receiving account before confirming.</p>
       <div className="grid min-w-0 grid-cols-1 gap-2 p-2 md:grid-cols-2">{confirm.orders.map((o) => <div key={o.id} className="min-w-0 rounded-xl border border-amber-200 bg-white p-3">
-        <div className="flex items-start justify-between gap-2"><Link href={`/shop/orders/${o.id}`} className="min-w-0"><div className="text-[11px] font-bold text-neutral-500">ORDER #{o.id.slice(0, 8).toUpperCase()}</div><div className="truncate text-sm font-bold">{o.customer_name || 'Walk-in'} · {o.customer_phone}</div><div className="mt-0.5 text-[11px] text-neutral-500">{o.items?.[0]?.count ?? 0} item(s) · {timeAgo(o.created_at)}</div></Link><div className="shrink-0 text-right"><div className="flex items-center gap-0.5 text-base font-extrabold tabular-nums"><IndianRupee size={14} />{(o.total_paise / 100).toFixed(2)}</div><span className="chip mt-0.5 bg-amber-100 text-amber-800">UPI · unverified</span></div></div>
+        <div className="flex items-start justify-between gap-2"><Link href={`/shop/orders/${o.id}`} className="min-w-0"><div className="break-all text-[11px] font-bold text-neutral-600">Order ID: {o.id}</div><div className="truncate text-sm font-bold">{o.customer_name || 'Walk-in'} · {o.customer_phone}</div><div className="mt-0.5 text-[11px] text-neutral-500">{o.items?.[0]?.count ?? 0} item(s) · {timeAgo(o.created_at)}</div></Link><div className="shrink-0 text-right"><div className="flex items-center gap-0.5 text-base font-extrabold tabular-nums"><IndianRupee size={14} />{(o.total_paise / 100).toFixed(2)}</div><span className="chip mt-0.5 bg-amber-100 text-amber-800">UPI · unverified</span></div></div>
         <label className="mt-2 block text-xs text-neutral-600">UPI reference (optional)<input value={utrEdit[o.id] ?? o.utr ?? ''} onChange={(e) => setUtrEdit((m) => ({ ...m, [o.id]: e.target.value }))} maxLength={40} className="input mt-1 h-9 min-w-0 w-full font-mono text-xs" /></label>
         {o.payment_status === 'pending' && <p className="mt-2 text-xs text-amber-900">Waiting for the customer to report payment. Open the order to record their report if they contacted you.</p>}
         <div className="mt-2 flex items-center gap-2"><button disabled={busyId === o.id || o.payment_status !== 'submitted'} onClick={() => void confirmPayment(o, 'confirm')} className="btn btn-primary h-9 flex-1 px-4 text-xs">{busyId === o.id ? <Loader2 size={14} className="animate-spin" /> : <><CheckCircle2 size={14} />Payment received</>}</button><button disabled={busyId === o.id} onClick={() => void confirmPayment(o, 'reject')} className="btn btn-ghost h-9 px-3 text-xs text-red-700"><XCircle size={14} />Not received</button></div>

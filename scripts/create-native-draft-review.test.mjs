@@ -1,10 +1,14 @@
-import test from 'node:test';
+import { test as nodeTest } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+
+// Android CI runs this with Node before installing website dependencies;
+// the website suite also discovers it via Vitest. Use the invoking runner.
+const test = process.env.VITEST ? (await import('vitest')).test : nodeTest;
 
 const script = resolve('scripts/create-native-draft-review.sh');
 const commit = 'a'.repeat(40);

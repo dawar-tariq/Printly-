@@ -18,7 +18,7 @@ vi.mock('@/lib/api', async (original) => ({
   } : null,
 }));
 import { POST } from './route';
-import { boardSearch, startOfIndiaDay } from '@/lib/shop-board';
+import { boardOrderId, boardSearch, startOfIndiaDay } from '@/lib/shop-board';
 const req = (body: unknown) => new Request('https://printly.test/api/shop/board', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 beforeEach(() => { state.session = true; state.admin = false; state.shops = ['shop-1']; state.fail = -1; state.queries = []; });
 
@@ -44,6 +44,18 @@ describe('authenticated paginated board', () => {
     expect(boardSearch(' A-12),status.eq.confirmed%_ ')).toBe('A-12 status eq confirmed');
     expect(search).toContain('customer_phone.ilike.');
     expect(boardSearch('नमस्ते، اردو')).toBe('नमस्ते اردو');
+  });
+  it('finds an exact full order ID without weakening shop scoping or interpreting filter syntax', async () => {
+    const id = 'abcdefab-1234-4234-8234-abcdefabcdef';
+    const response = await POST(req({ search: `  ${id.toUpperCase()}  ` }));
+    expect(response.status).toBe(200);
+    for (const ops of state.queries.slice(0, 4)) {
+      expect(ops).toContainEqual(['eq', 'shop_id', 'shop-1']);
+      expect(ops).toContainEqual(['eq', 'id', id]);
+      expect(ops.some((op) => op[0] === 'or')).toBe(false);
+    }
+    expect(boardOrderId(`${id},status.eq.queued`)).toBeNull();
+    expect(boardOrderId(id.slice(0, 8))).toBeNull();
   });
   it('fails the entire snapshot when any lane or count is unavailable', async () => {
     state.fail = 2;

@@ -8,6 +8,7 @@ import {
   Package, IndianRupee, Zap, CheckCircle2, StickyNote, ListChecks, History, Eye,
 } from 'lucide-react';
 import { PrintFileDialog } from '@/components/PrintFileDialog';
+import { OrderReference } from '@/components/OrderReference';
 import { BrandArtwork } from '@/components/BrandArtwork';
 import { isPreviewable, isWord } from '@/lib/document-shared';
 import { formatPaiseExact, formatDateTime, timeAgo } from '@/lib/format';
@@ -111,7 +112,8 @@ export function ShopOrderDetail({ backHref = '/shop' }: { backHref?: string }) {
           {o.status === 'queued' && <button disabled={busy} onClick={() => { if (window.confirm('Cancel this order? Any payment or refund must be handled separately; cancelling does not send a refund.')) void act('cancelled'); }} className="btn btn-ghost min-h-10 px-3 text-xs text-red-700">Cancel order</button>}
         </div>
       </div>
-      <div className="hidden print:block"><div role="img" aria-label="Printly"><BrandArtwork className="mb-3 h-8 w-auto" /></div><h1 className="text-lg font-extrabold">Order {o.token ?? `#${o.id.slice(0, 8).toUpperCase()}`}</h1><p className="text-xs">{formatDateTime(o.created_at)} · {o.shops.name}</p></div>
+      <div className="hidden print:block"><div role="img" aria-label="Printly"><BrandArtwork className="mb-3 h-8 w-auto" /></div><h1 className="text-lg font-extrabold">Order {o.token ?? `#${o.id.slice(0, 8).toUpperCase()}`}</h1><p className="text-xs">{formatDateTime(o.created_at)} · {o.shops.name}</p><p className="break-all text-xs">Order ID: {o.id}</p></div>
+      <div className="no-print mt-3"><OrderReference key={o.id} id={o.id} /></div>
 
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mt-3">
         {/* left: files + items */}

@@ -1,6 +1,8 @@
 // Disposable LOCAL-ONLY Realtime/RLS exercise for the native Phoenix v2 wire
 // format. No production credentials or data may be passed to this helper.
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { createClient } from '@supabase/supabase-js';
 
 function localOrigin(value) {
   const url = new URL(value || '');
@@ -67,14 +69,31 @@ export async function testNativeRealtimeLocal({ supabaseUrl, anonKey, admin, own
   const owner = subscribe(origin, anonKey, ownerToken, shop);
   // An authenticated owner from another shop maliciously asks for this shop.
   const foreign = subscribe(origin, anonKey, otherToken, shop);
+  const customer = createClient(origin.toString(), anonKey, { auth: { persistSession: false, autoRefreshToken: false } });
+  const topic = `printly-track:${createHash('sha256').update(orderId.toLowerCase()).digest('hex')}`;
+  let customerReady = false; let unrelatedReady = false;
+  const signals = []; const unrelatedSignals = [];
+  const customerChannel = customer.channel(topic).on('broadcast', { event: 'changed' }, (message) => signals.push(message))
+    .subscribe((status) => { if (status === 'SUBSCRIBED') customerReady = true; });
+  const unrelatedChannel = customer.channel(`printly-track:${'a'.repeat(64)}`).on('broadcast', { event: 'changed' }, (message) => unrelatedSignals.push(message))
+    .subscribe((status) => { if (status === 'SUBSCRIBED') unrelatedReady = true; });
   try {
-    await until(() => owner.failed || foreign.failed || (owner.joined && owner.ready && foreign.joined && foreign.ready), 'subscriptions');
+    await until(() => owner.failed || foreign.failed || (owner.joined && owner.ready && foreign.joined && foreign.ready && customerReady && unrelatedReady), 'subscriptions');
     assert(!owner.failed && !foreign.failed, 'local Realtime subscription failed');
-    const update = await admin.from('orders').update({ notes: 'Synthetic local Realtime test' }).eq('id', orderId).eq('shop_id', shop);
+    const anonymousOrders = await customer.from('orders').select('id').eq('id', orderId);
+    assert(anonymousOrders.error || anonymousOrders.data?.length === 0, 'anonymous clients must not read order rows');
+    const update = await admin.from('orders').update({ notes: 'Synthetic local Realtime test', eta_minutes: 37 }).eq('id', orderId).eq('shop_id', shop);
     assert(!update.error, 'synthetic local order update failed');
     await until(() => owner.changes.some((event) => event?.type === 'UPDATE' && event?.record?.shop_id === shop), 'authorized update');
+    await until(() => signals.length > 0, 'customer tracking invalidation');
     await new Promise((resolve) => setTimeout(resolve, 1500));
     assert.equal(foreign.changes.length, 0, 'Realtime must not expose another shop’s order');
-    console.log('PASS: local Realtime native protocol, shop filter, authenticated update, cross-shop RLS');
-  } finally { owner.socket.close(); foreign.socket.close(); }
+    assert.equal(unrelatedSignals.length, 0, 'a different tracking topic must not receive the event');
+    assert.deepEqual(signals[0].payload, {}, 'customer broadcast must contain no order or customer data');
+    assert(!JSON.stringify(signals[0]).includes(orderId), 'tracking ID must not be sent in the event');
+    console.log('PASS: local owner Realtime and cross-shop RLS; anonymous tracking invalidation contains no data');
+  } finally {
+    owner.socket.close(); foreign.socket.close();
+    await customer.removeChannel(customerChannel); await customer.removeChannel(unrelatedChannel);
+  }
 }

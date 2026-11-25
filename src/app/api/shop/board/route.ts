@@ -1,6 +1,6 @@
 import { getStaffContext, jsonError, jsonOk } from '@/lib/api';
 import { readJsonBody } from '@/lib/request-body';
-import { boardSearch, startOfIndiaDay } from '@/lib/shop-board';
+import { boardOrderId, boardSearch, startOfIndiaDay } from '@/lib/shop-board';
 
 const PAGE_SIZE = 30;
 const LANES = ['confirm', 'queued', 'printing', 'ready'] as const;
@@ -21,7 +21,8 @@ export async function POST(req: Request) {
   const input = body as { pages?: Record<string, unknown>; search?: unknown; shop_id?: unknown };
   const shopId = typeof input.shop_id === 'string' ? input.shop_id : staff.shopIds[0];
   if (!staff.shopIds.includes(shopId)) return jsonError(403, 'forbidden', 'Not your shop');
-  const search = boardSearch(input.search);
+  const orderId = boardOrderId(input.search);
+  const search = orderId ? '' : boardSearch(input.search);
   const pages = input.pages && typeof input.pages === 'object' ? input.pages : {};
   const admin = staff.admin;
 
@@ -32,7 +33,10 @@ export async function POST(req: Request) {
       .eq('shop_id', shopId);
     if (lane === 'confirm') query = query.eq('status', 'draft').eq('payment_method', 'upi').in('payment_status', ['submitted', 'pending']);
     else query = query.eq('status', lane);
-    if (search) {
+    if (orderId) {
+      // A UUID remains scoped to the verified shop, including in the native API.
+      query = query.eq('id', orderId);
+    } else if (search) {
       // `search` cannot contain PostgREST punctuation or SQL wildcard syntax.
       query = query.or(`customer_name.ilike.%${search}%,customer_phone.ilike.%${search}%,token.ilike.%${search}%,utr.ilike.%${search}%`);
     }
