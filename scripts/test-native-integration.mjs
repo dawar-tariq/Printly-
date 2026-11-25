@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
+import { createServerClient } from '@supabase/ssr';
 import { testNativeRealtimeLocal } from './test-native-realtime-local.mjs';
 
 function localOrigin(value, label) {
@@ -81,6 +82,34 @@ const noAuth = await call('me', { headers: { Cookie: 'not-a-native-session=examp
 assert.equal(noAuth.status, 401);
 assert.equal((await call('me', { token: 'invalid.token' })).status, 401);
 ownerToken = await signIn(ownerAuth, 'demoshop@printly.test', 'demo1234');
+
+// The website download uses a browser cookie, not a native bearer token.
+// Authenticate only the local seeded shop, and never expose its cookie in logs.
+const releaseUrl = `${site}/api/shop/app-release`;
+const unauthenticatedRelease = await fetch(releaseUrl, { headers: { Authorization: `Bearer ${ownerToken}` }, redirect: 'manual' });
+assert.equal(unauthenticatedRelease.status, 401, 'a bearer token alone must not become a browser session');
+assert.match(unauthenticatedRelease.headers.get('cache-control') || '', /no-store/);
+const anonymousPage = await fetch(`${site}/shop/app`, { redirect: 'manual' });
+assert([302, 303, 307, 308].includes(anonymousPage.status), 'anonymous app page must redirect to sign-in');
+const cookieJar = new Map();
+const browserAuth = createServerClient(supabaseUrl, anonKey, {
+  cookies: {
+    getAll: () => [...cookieJar].map(([name, value]) => ({ name, value })),
+    setAll: (values) => { for (const { name, value } of values) cookieJar.set(name, value); },
+  },
+});
+await signIn(browserAuth, 'demoshop@printly.test', 'demo1234');
+assert(cookieJar.size > 0, 'local browser auth must produce session cookies');
+const cookie = [...cookieJar].map(([name, value]) => `${name}=${encodeURIComponent(value)}`).join('; ');
+const browserRelease = await fetch(releaseUrl, { headers: { Cookie: cookie }, redirect: 'manual' });
+assert.equal(browserRelease.status, 200, 'a local shop member can check release metadata');
+assert.match(browserRelease.headers.get('cache-control') || '', /no-store/);
+assert.deepEqual(await browserRelease.json(), { available: false }, 'no APK may be advertised without a complete HTTPS release configuration');
+const browserPage = await fetch(`${site}/shop/app`, { headers: { Cookie: cookie }, redirect: 'manual' });
+assert.equal(browserPage.status, 200, 'a local shop member can open the app page');
+assert.match(await browserPage.text(), /Android app/i);
+console.log('PASS: browser shop session, private release metadata, unpublished download and protected app page');
+
 const other = checked(await admin.auth.admin.createUser({
   email: 'native-other@printly.test', password: 'synthetic-local-only-password', email_confirm: true,
   user_metadata: { full_name: 'Other Test Owner' },

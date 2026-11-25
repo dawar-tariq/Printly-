@@ -6,6 +6,10 @@ on:
     paths:
       - 'src/app/api/native/**'
       - 'src/app/api/shop/**'
+      - 'src/app/shop/(billing)/app/**'
+      - 'src/app/shop/(billing)/layout.tsx'
+      - 'src/components/OwnerAppDownload.tsx'
+      - 'src/components/RestrictedShopShell.tsx'
       - 'src/lib/**'
       - 'src/middleware.ts'
       - 'supabase/migrations/**'

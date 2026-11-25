@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Logo } from '@/components/Logo';
 import { SignOutButton } from '@/components/SignOutButton';
-import { LayoutDashboard, Settings, Boxes, BarChart3, CreditCard, ExternalLink, Hourglass, PenLine, Ban, MessageCircle } from 'lucide-react';
+import { LayoutDashboard, Settings, Boxes, BarChart3, CreditCard, ExternalLink, Hourglass, PenLine, Ban, MessageCircle, Smartphone } from 'lucide-react';
 import { SubscriptionNotice } from '@/components/SubscriptionNotice';
 import { ShopAvailability } from '@/components/ShopAvailability';
 import type { ShopSubscription } from '@/lib/subscription';
@@ -17,6 +17,7 @@ const TABS = [
   { href: '/shop/reports', label: 'Reports', icon: BarChart3 },
   { href: '/shop/subscription', label: 'Subscription', icon: CreditCard },
   { href: '/shop/settings', label: 'Settings & QR', icon: Settings },
+  { href: '/shop/app', label: 'Android app', icon: Smartphone },
   { href: '/support', label: 'Support', icon: MessageCircle },
 ];
 

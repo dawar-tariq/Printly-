@@ -1,8 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import {
-  Loader2, Save, Plus, Trash2, QrCode, Download, CheckCircle2, Store, Wallet, Zap, Info, FileText,
+  Loader2, Save, Plus, Trash2, QrCode, Download, CheckCircle2, Store, Wallet, Zap, Info, FileText, Smartphone, ChevronRight,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { publicShopPath } from '@/lib/shop-identity';
@@ -171,6 +172,12 @@ export default function ShopSettingsPage() {
       {banner && <div role="alert" className="rounded-xl bg-red-50 border border-red-200 text-red-800 text-sm px-4 py-2">{banner}</div>}
       {notice && <div role="status" className="rounded-xl bg-green-50 border border-green-200 text-green-800 text-sm px-4 py-2">{notice}</div>}
       {savedAt && <div className="rounded-xl bg-green-50 border border-green-200 text-green-800 text-sm px-4 py-2 flex items-center gap-2"><CheckCircle2 size={15} />Saved at {savedAt}</div>}
+
+      <Link href="/shop/app" className="flex items-center gap-3 rounded-2xl border border-orange-200 bg-orange-50 p-4 hover:border-orange-400">
+        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-white text-orange-700"><Smartphone size={21} /></span>
+        <span className="min-w-0 flex-1"><strong className="block text-sm">Android app</strong><span className="mt-0.5 block text-xs text-neutral-600">Download and installation guide</span></span>
+        <ChevronRight size={18} className="text-orange-700" />
+      </Link>
 
       {/* QR block */}
       <section className="card p-5 flex flex-col sm:flex-row items-center gap-5">

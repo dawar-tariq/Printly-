@@ -5,6 +5,7 @@ This is a Kotlin/Jetpack Compose Android application. It is not a Trusted Web Ac
 ## Build variants
 
 - `debug`: package `io.github.dawartariq.printly.owner.native.debug`, labelled **Printly Native Demo**. It uses synthetic in-memory data, cannot access a real shop, and can be installed alongside the existing app. The demo is not a release and must not be used to make payments.
+- `qa`: package `io.github.dawartariq.printly.owner.native.qa`, labelled **Printly Isolated Test** and signed with a disposable debug key. It uses live network calls but is pinned to the existing staging Auth host. It requires an explicitly supplied, independently verified test-only HTTPS website and synthetic accounts; never distribute it to owners or use real shop data. A different website hostname alone does not prove its backend is isolated.
 - `release`: package `io.github.dawartariq.printly.owner`, version code 4. It is configured for the existing Printly origin and authentication project. It cannot function until the native backend is separately reviewed and deployed. It must be signed with the independently verified existing release key to replace the prior owner app; do not distribute a build signed with a disposable key. The signing guard requires `PRINTLY_ANDROID_KEYSTORE_PATH`, `PRINTLY_ANDROID_KEYSTORE_PASSWORD`, `PRINTLY_ANDROID_KEY_ALIAS`, `PRINTLY_ANDROID_KEY_PASSWORD`, and optionally `PRINTLY_ANDROID_KEYSTORE_TYPE` (`JKS` or `PKCS12`). Never commit credentials or keys.
 
 With JDK 17 and Android SDK 36 installed:
@@ -13,9 +14,14 @@ With JDK 17 and Android SDK 36 installed:
 cd apps/printly-owner-native-android
 ./gradlew testDebugUnitTest assembleDebug
 ./gradlew connectedDebugAndroidTest  # offline synthetic-data emulator
+# After an operator has verified an isolated website backed by the staging
+# Supabase project, use its exact public origin in place of the example:
+./gradlew assembleQa -PprintlyQaSiteOrigin=https://verified-test-only.example
 ```
 
-The native CI workflow builds and tests the demo, inspects the merged manifest, tests the unsigned-release guard, and compiles the live variant with a temporary CI-only key. The CI release APK is **not** uploaded. No real signing secrets or live customer data are used in this workflow.
+QA refuses missing, malformed and known production website origins. It checks the Auth host returned by the website against the staging project (`rahfmpsdbwbktlobntkm.supabase.co`) before sign-in. This is not a substitute for verifying the website's server-side environment or for reviewing staging data. The debug signing identity and separate package cannot establish compatibility with an installed production APK.
+
+The native CI workflow builds and tests the demo, inspects the merged manifest, tests the unsigned-release guard, and verifies the review signing path with a temporary CI-only key. The CI release APK is **not** uploaded. No real signing secrets or live customer data are used in this workflow. The separate protected native review workflow and the direct-download release gates are described in `docs/native-direct-distribution.md`.
 
 ## Current functionality
 

@@ -150,6 +150,10 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
             if (api.isDemo) {
                 InfoBanner("DEMO MODE · No real account, orders, inventory or payments are used.")
             } else {
+                if (BuildConfig.ISOLATED_TEST_MODE) {
+                    InfoBanner("ISOLATED TEST ONLY · Use synthetic test accounts and data, never a real shop.")
+                    Spacer(Modifier.height(12.dp))
+                }
                 OutlinedTextField(email, { email = it }, label = { Text("Email") }, singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email), modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(12.dp))
@@ -242,8 +246,8 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
         containerColor = Cream,
         topBar = {
             Column(Modifier.statusBarsPadding().fillMaxWidth()) {
-                if (api.isDemo) Box(Modifier.fillMaxWidth().background(OrangeDark).padding(vertical = 5.dp), contentAlignment = Alignment.Center) {
-                    Text("DEMO · SAMPLE DATA ONLY", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp)
+                if (api.isDemo || BuildConfig.ISOLATED_TEST_MODE) Box(Modifier.fillMaxWidth().background(OrangeDark).padding(vertical = 5.dp), contentAlignment = Alignment.Center) {
+                    Text(if (api.isDemo) "DEMO · SAMPLE DATA ONLY" else "ISOLATED TEST · SYNTHETIC DATA ONLY", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp)
                 }
                 Row(Modifier.fillMaxWidth().height(58.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (screen !in main) {
@@ -293,7 +297,7 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
                         onOpen = { detailId = it; detailParent = Screen.ORDERS; screen = Screen.DETAIL })
                     Screen.INVENTORY -> InventoryScreen(api)
                     Screen.REPORTS -> ReportsScreen(api)
-                    Screen.MORE -> MoreScreen(restricted, onOpen = { screen = it }, onSignOut = { scope.launch { onSignedOut(api.signOut()) } })
+                    Screen.MORE -> MoreScreen(restricted, api.isDemo, onOpen = { screen = it }, onSignOut = { scope.launch { onSignedOut(api.signOut()) } })
                     Screen.DETAIL -> OrderDetailScreen(api, detailId, onBack = { screen = detailParent })
                     Screen.PROFILE -> ProfileScreen(api, me, meFresh,
                         onInvalidated = { meFresh = false }, onSaved = { updated -> me = updated; meFresh = true },

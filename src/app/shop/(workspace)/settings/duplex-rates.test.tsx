@@ -33,6 +33,12 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe('shop duplex rate editor', () => {
+  it('offers the Android app download guide from settings', async () => {
+    render(<ShopSettingsPage />);
+    const link = await screen.findByRole('link', { name: /Android app/i });
+    expect(link.getAttribute('href')).toBe('/shop/app');
+  });
+
   it('only changes an existing duplex rate after the shop chooses a unit and saves', async () => {
     render(<ShopSettingsPage />);
     const unit = await screen.findByLabelText('Billing unit for print rate 2') as HTMLSelectElement;

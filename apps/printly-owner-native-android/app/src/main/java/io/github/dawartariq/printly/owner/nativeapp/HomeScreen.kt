@@ -15,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -146,8 +147,10 @@ import java.util.Date
     }
 }
 
-@Composable fun MoreScreen(restricted: Boolean, onOpen: (Screen) -> Unit, onSignOut: () -> Unit) {
+@Composable fun MoreScreen(restricted: Boolean, isDemo: Boolean, onOpen: (Screen) -> Unit, onSignOut: () -> Unit) {
     var confirm by remember { mutableStateOf(false) }
+    var updateError by remember { mutableStateOf(false) }
+    val uriHandler = LocalUriHandler.current
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Heading("Everything else", "Useful tools for your shop and account.")
         Spacer(Modifier.height(4.dp))
@@ -159,6 +162,16 @@ import java.util.Date
         }
         MenuCard("Subscription", "Manage your Printly access", Icons.Default.CreditCard) { onOpen(Screen.SUBSCRIPTION) }
         MenuCard("Open orders", "Recover or look up an existing order", Icons.Default.Assignment) { onOpen(Screen.RECOVERY) }
+        // Updates are user-initiated in the browser; never download or execute
+        // packages in the app, and never put a session token in the URL.
+        if (!isDemo && !BuildConfig.ISOLATED_TEST_MODE) {
+            MenuCard("Check for app updates", "Opens the Printly website; sign in there if asked", Icons.Default.SystemUpdate) {
+                updateError = false
+                try { uriHandler.openUri("${BuildConfig.SITE_ORIGIN}/shop/app") }
+                catch (_: Exception) { updateError = true }
+            }
+            if (updateError) ErrorBanner("Could not open a browser. Visit the Printly website to check for updates.")
+        }
         MenuCard("Sign out", "Remove this session from the phone", Icons.AutoMirrored.Filled.Logout) { confirm = true }
         Spacer(Modifier.height(16.dp))
     }

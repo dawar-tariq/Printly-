@@ -4,6 +4,29 @@ plugins {
     id 'org.jetbrains.kotlin.plugin.compose'
 }
 
+// An isolated test build is separate from both the demo and real owner app.
+// Its Auth host is pinned to the existing staging project. The test website
+// origin is public configuration, not a credential, and must be independently
+// verified to use that project before any synthetic account is used.
+def qaOriginInput = providers.gradleProperty('printlyQaSiteOrigin').orElse('').get()
+def qaOrigin = null
+try {
+    def uri = new URI(qaOriginInput)
+    def host = uri.host ?: ''
+    def productionHosts = [
+        'printly-steel-three.vercel.app',
+        'printly-dawartariq14-5237s-projects.vercel.app',
+        'printly-git-arena-309fdf51-printly-dawartariq14-5237s-projects.vercel.app',
+    ]
+    def dnsName = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/
+    if (uri.scheme == 'https' && uri.userInfo == null && uri.port == -1 &&
+        uri.rawPath == '' && uri.rawQuery == null && uri.rawFragment == null &&
+        qaOriginInput == "https://${host}" && (host ==~ dnsName) && !(host ==~ /[0-9.]+/) && !productionHosts.contains(host)) {
+        qaOrigin = qaOriginInput
+    }
+} catch (Exception ignored) { /* The QA task guard below fails closed. */ }
+def qaAuthHost = 'rahfmpsdbwbktlobntkm.supabase.co'
+
 android {
     namespace 'io.github.dawartariq.printly.owner.nativeapp'
     compileSdk 36
@@ -15,10 +38,13 @@ android {
         minSdk 24
         targetSdk 36
         versionCode 4
-        versionName '2.0.1-native-review'
+        // Code 4 is above the previous signed review (code 2). The final APK
+        // still needs the verified release key and an upgrade test.
+        versionName '2.0.1'
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
         buildConfigField 'String', 'SITE_ORIGIN', '"https://printly-steel-three.vercel.app"'
         buildConfigField 'String', 'SUPABASE_HOST', '"lgfqetnfazawglwllymb.supabase.co"'
+        buildConfigField 'boolean', 'ISOLATED_TEST_MODE', 'false'
     }
 
     def storePath = System.getenv('PRINTLY_ANDROID_KEYSTORE_PATH')
@@ -54,10 +80,25 @@ android {
             buildConfigField 'boolean', 'DEMO_MODE', 'false'
             if (releaseSigningReady) signingConfig signingConfigs.release
         }
+        // Different package, visible test label, debug key and staging Auth host.
+        // It can be installed alongside a real app and is never a release APK.
+        qa {
+            initWith debug
+            applicationIdSuffix = '.native.qa'
+            versionNameSuffix = '-isolated-test'
+            matchingFallbacks = ['debug']
+            buildConfigField 'boolean', 'DEMO_MODE', 'false'
+            buildConfigField 'boolean', 'ISOLATED_TEST_MODE', 'true'
+            buildConfigField 'String', 'SITE_ORIGIN', '"' + (qaOrigin ?: 'https://invalid.invalid') + '"'
+            buildConfigField 'String', 'SUPABASE_HOST', '"' + qaAuthHost + '"'
+        }
     }
     gradle.taskGraph.whenReady { graph ->
         if (!releaseSigningReady && graph.allTasks.any { it.path.startsWith(':app:') && it.name in ['assembleRelease', 'bundleRelease', 'packageRelease'] }) {
             throw new GradleException('Release signing is not configured. A signed review needs explicit approval and the verified release key.')
+        }
+        if (!qaOrigin && graph.allTasks.any { it.path.startsWith(':app:') && it.name.toLowerCase(Locale.ROOT).contains('qa') }) {
+            throw new GradleException('The isolated QA build needs -PprintlyQaSiteOrigin=<verified test-only HTTPS origin>; known production hosts are forbidden.')
         }
     }
     buildFeatures { compose true; buildConfig true }

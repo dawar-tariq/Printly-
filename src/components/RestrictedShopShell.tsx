@@ -22,7 +22,7 @@ export function RestrictedShopShell({ shopName, isOpen, active, subscription, wa
           <SignOutButton portal="shop" />
         </div>
         <nav aria-label="Subscription and recovery" className="mx-auto flex max-w-6xl gap-1 overflow-x-auto px-2 pb-1.5">
-          {[{ href: '/shop/subscription', label: 'Subscription' }, { href: '/shop/recovery', label: 'Open orders' }, { href: '/support', label: 'Support' }, ...(active && current.active ? [{ href: '/shop', label: 'Dashboard' }] : [])].map(({ href, label }) => (
+          {[{ href: '/shop/subscription', label: 'Subscription' }, { href: '/shop/recovery', label: 'Open orders' }, { href: '/shop/app', label: 'Android app' }, { href: '/support', label: 'Support' }, ...(active && current.active ? [{ href: '/shop', label: 'Dashboard' }] : [])].map(({ href, label }) => (
             <Link key={href} href={href} className={cn('whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold', pathname === href || pathname.startsWith(`${href}/`) ? 'bg-orange-600 text-white' : 'text-neutral-300 hover:bg-neutral-800')}>{label}</Link>
           ))}
         </nav>
