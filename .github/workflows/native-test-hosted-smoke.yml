@@ -107,9 +107,11 @@ jobs:
 
           get('/api/shop/app-release', expected=401)
           headers, _ = get('/api/native/v1/shop/me', expected=401)
-          gateway_no_store = 'no-store' in headers.get('Cache-Control', '').lower()
-          gateway_vary_auth = 'authorization' in headers.get('Vary', '').lower()
-          print(f'INFO: native gateway no-store={gateway_no_store}, varies-by-authorization={gateway_vary_auth}')
+          gateway_no_store = any('no-store' in value.lower() for value in headers.get_all('Cache-Control', []))
+          # HTTP allows several Vary fields; get() alone reads only the first.
+          vary = headers.get_all('Vary', [])
+          gateway_vary_auth = any('authorization' in value.lower() for value in vary)
+          print(f'INFO: native gateway no-store={gateway_no_store}, varies-by-authorization={gateway_vary_auth}, vary-fields={len(vary)}')
           print('PASS: anonymous release metadata and native shop data are not available')
 
           # This intentionally consumes one short-lived staging rate-limit
