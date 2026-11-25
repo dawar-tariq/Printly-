@@ -260,5 +260,13 @@ jobs:
           arch: x86_64
           working-directory: apps/printly-owner-native-android
           script: bash ci-emulator-check.sh
+      - name: Exercise first-open notification permission on an offline Android 13+ emulator
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          working-directory: apps/printly-owner-native-android
+          script: bash ci-notification-permission-check.sh
       # This check builds temporary demo/QA packages but uploads no APKs. A
       # phone-test artifact or production release requires a separate decision.
