@@ -28,6 +28,7 @@ jobs:
           set -euo pipefail
           npm install --prefix "$RUNNER_TEMP/printly-staging-probe-deps" --no-save --ignore-scripts --no-audit --no-fund @supabase/supabase-js@2.119.1
       - name: Start isolated synthetic listeners
+        id: listener
         shell: bash
         run: |
           set -euo pipefail
@@ -49,9 +50,34 @@ jobs:
             sleep 1
           done
           test -f "$PRINTLY_STAGING_PROBE_DIR/listening"
-          # Only this public key is published. The private key and all login
-          # material stay on the runner and are destroyed with the runner.
-          echo "::notice title=Staging probe public key::$(base64 -w 0 "$PRINTLY_STAGING_PROBE_DIR/public.asc")"
+          # Only the public key is exposed in the next step names. Private key
+          # and login material stay on the runner and are never printed.
+          public_key=$(base64 -w 0 "$PRINTLY_STAGING_PROBE_DIR/public.asc")
+          test "${#public_key}" -le 1800
+          for i in $(seq 1 10); do
+            offset=$(( (i - 1) * 180 ))
+            printf 'part%s=%s\n' "$i" "${public_key:offset:180}" >> "$GITHUB_OUTPUT"
+          done
+      - name: "Public key part 01 ${{ steps.listener.outputs.part1 }}"
+        run: ':'
+      - name: "Public key part 02 ${{ steps.listener.outputs.part2 }}"
+        run: ':'
+      - name: "Public key part 03 ${{ steps.listener.outputs.part3 }}"
+        run: ':'
+      - name: "Public key part 04 ${{ steps.listener.outputs.part4 }}"
+        run: ':'
+      - name: "Public key part 05 ${{ steps.listener.outputs.part5 }}"
+        run: ':'
+      - name: "Public key part 06 ${{ steps.listener.outputs.part6 }}"
+        run: ':'
+      - name: "Public key part 07 ${{ steps.listener.outputs.part7 }}"
+        run: ':'
+      - name: "Public key part 08 ${{ steps.listener.outputs.part8 }}"
+        run: ':'
+      - name: "Public key part 09 ${{ steps.listener.outputs.part9 }}"
+        run: ':'
+      - name: "Public key part 10 ${{ steps.listener.outputs.part10 }}"
+        run: ':'
       - name: Wait for synthetic owner subscription
         shell: bash
         run: |
