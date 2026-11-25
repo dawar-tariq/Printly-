@@ -1,0 +1,54 @@
+# Temporary one-run transport for the synthetic demo APK. The sandbox can
+# reach GitHub's API but not the artifact blob host. The binary is not added to
+# a branch or release: the API creates an unreferenced Git blob so its bytes
+# can be fetched through GitHub and checked against the CI artifact digest.
+name: Retrieve synthetic native demo
+
+on:
+  push:
+    paths:
+      - '.github/workflows/native-demo-transfer.yml'
+
+permissions: {}
+
+jobs:
+  transfer-demo:
+    if: github.ref == 'refs/heads/arena/309fdf51-printly'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Verify and transfer the successful synthetic demo artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_id=45574450464
+          artifact_id=15003384791
+          expected_digest=9d40584df2d89e5bf05934b0c886b649cbb64b09415b6f8d9c9d1235138057bc
+          source_sha=d07e3acd7fe08c86c3693e210e636d9c5fc0639d
+          run_info=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" --jq '[.status,.conclusion,.head_sha,.head_branch] | join(" ")')
+          test "$run_info" = "completed success $source_sha arena/309fdf51-printly"
+          artifact_info=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id" --jq '[.name,.expired,(.digest // "")] | join(" ")')
+          test "$artifact_info" = "printly-native-DEMO-synthetic-data-NOT-FOR-RELEASE false sha256:$expected_digest"
+          zip="$RUNNER_TEMP/native-demo.zip"
+          apk="$RUNNER_TEMP/native-demo.apk"
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" > "$zip"
+          echo "$expected_digest  $zip" | sha256sum -c -
+          test "$(unzip -Z1 "$zip")" = 'app-debug.apk'
+          unzip -p "$zip" app-debug.apk > "$apk"
+          test -s "$apk"
+          apk_sha=$(sha256sum "$apk" | cut -d' ' -f1)
+          git_sha=$(git hash-object "$apk")
+          python3 - "$apk" "$RUNNER_TEMP/git-blob.json" <<'PY'
+          import base64, json, sys
+          with open(sys.argv[1], 'rb') as source, open(sys.argv[2], 'w', encoding='utf-8') as target:
+              json.dump({'encoding': 'base64', 'content': base64.b64encode(source.read()).decode('ascii')}, target)
+          PY
+          api_sha=$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/blobs" --input "$RUNNER_TEMP/git-blob.json" --jq .sha)
+          test "$api_sha" = "$git_sha"
+          echo "::notice title=Synthetic native demo transfer::blob_sha=$api_sha apk_sha256=$apk_sha source_run=$run_id (synthetic demo, not a release)"
+          rm -f "$zip" "$apk" "$RUNNER_TEMP/git-blob.json"

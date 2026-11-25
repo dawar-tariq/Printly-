@@ -1,0 +1,113 @@
+name: Native owner gateway integration
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'src/app/api/native/**'
+      - 'src/app/api/shop/**'
+      - 'src/lib/**'
+      - 'src/middleware.ts'
+      - 'supabase/migrations/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'scripts/test-native-integration.mjs'
+      - '.github/workflows/native-backend-integration.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  disposable-supabase:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - uses: supabase/setup-cli@1dedf2c611547ede7232d26866dd3c56ab903bbb # v1.7.3
+        with:
+          version: 2.45.4
+      - name: Install website dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@10.15.1 --activate
+          pnpm install --frozen-lockfile
+      - name: Start disposable local Supabase
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/printly-native-integration"
+          cd "$RUNNER_TEMP/printly-native-integration"
+          supabase init
+          mkdir -p supabase/migrations
+          # The synthetic demo seed is migration 0003; the CLI's optional seed
+          # file is otherwise absent from this clean disposable project.
+          : > supabase/seed.sql
+          # Only tracked migrations present in this checked-out commit; never
+          # connect to a hosted project or include deferred worktree migrations.
+          cp "$GITHUB_WORKSPACE"/supabase/migrations/*.sql supabase/migrations/
+          set +e
+          supabase start --exclude studio,imgproxy,edge-runtime,logflare,vector,supavisor,mailpit,realtime,postgres-meta > "$RUNNER_TEMP/local-supabase.log" 2>&1
+          result=$?
+          set -e
+          if [ "$result" -ne 0 ]; then
+            python3 - "$RUNNER_TEMP/local-supabase.log" <<'PY'
+          import re, sys
+          lines = open(sys.argv[1], encoding='utf-8', errors='replace').read().splitlines()[-80:]
+          lines = ['[local configuration redacted]' if re.search(r'(?i)(key|secret|password|token|jwt)', line) else line for line in lines]
+          text = '\n'.join(lines)[-10000:].replace('%','%25').replace('\r','%0D').replace('\n','%0A')
+          print('::error title=Disposable Supabase startup::' + text)
+          PY
+            exit "$result"
+          fi
+          supabase status -o env > "$RUNNER_TEMP/local-supabase.env"
+      - name: Test the native gateway with real local Auth and database
+        shell: bash
+        run: |
+          set -euo pipefail
+          # These values come from the disposable local stack, never from a
+          # GitHub secret or a hosted project. The test enforces loopback too.
+          set -a
+          source "$RUNNER_TEMP/local-supabase.env"
+          set +a
+          case "$API_URL" in http://127.0.0.1:*|http://localhost:*) ;; *) echo 'Local Supabase URL required' >&2; exit 1;; esac
+          export NEXT_PUBLIC_SUPABASE_URL="$API_URL"
+          export NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON_KEY"
+          export SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY"
+          export NEXT_PUBLIC_SITE_URL='http://127.0.0.1:3000'
+          export PRINTLY_TEST_SITE_URL="$NEXT_PUBLIC_SITE_URL"
+          export PRINTLY_DISPOSABLE_NATIVE_TEST='1'
+          pnpm exec next dev --hostname 127.0.0.1 --port 3000 > "$RUNNER_TEMP/native-next.log" 2>&1 &
+          server=$!
+          trap 'kill "$server" 2>/dev/null || true' EXIT
+          set +e
+          node scripts/test-native-integration.mjs > "$RUNNER_TEMP/native-integration.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/native-integration.log"
+          if [ "$result" -ne 0 ]; then
+            python3 - "$RUNNER_TEMP/native-integration.log" "$RUNNER_TEMP/native-next.log" <<'PY'
+          import re, sys
+          chunks = []
+          for path in sys.argv[1:]:
+              lines = open(path, encoding='utf-8', errors='replace').read().splitlines()[-45:]
+              chunks.append('\n'.join('[local configuration redacted]' if re.search(r'(?i)(service.role.key|authorization:|password=|access.token)', line) else line for line in lines))
+          text = '\n--- local server ---\n'.join(chunks)[-12000:].replace('%','%25').replace('\r','%0D').replace('\n','%0A')
+          print('::error title=Native local integration::' + text)
+          PY
+            exit "$result"
+          fi
+      - name: Stop and discard the local stack
+        if: always()
+        shell: bash
+        run: |
+          if [ -f "$RUNNER_TEMP/printly-native-integration/supabase/config.toml" ]; then
+            cd "$RUNNER_TEMP/printly-native-integration"
+            supabase stop --no-backup > /dev/null 2>&1 || true
+          fi
