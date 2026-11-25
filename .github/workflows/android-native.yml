@@ -40,10 +40,11 @@ jobs:
           result=$?
           tail -n 300 "$RUNNER_TEMP/native-build.log"
           if [ "$result" -ne 0 ]; then
-            (grep -E '(^e: |^e: file:|^FAILURE:|^\* What went wrong|^> |^   > |^Caused by:|error:| FAILED)' "$RUNNER_TEMP/native-build.log" || true) | head -50 | while IFS= read -r line; do
-              line=${line//'%'/'%25'}; line=${line//$'\r'/'%0D'}; line=${line//$'\n'/'%0A'}
-              echo "::error title=Native Android build::$line"
-            done
+            # Keep diagnostics in one annotation, accessible even when CI log downloads are unavailable.
+            lines=$(grep -E '(^e: |^FAILURE:|^\* What went wrong|^> |^   > |^Caused by:|error:| FAILED)' "$RUNNER_TEMP/native-build.log" | grep -v '^> Task ' | head -60 || true)
+            if [ -z "$lines" ]; then lines=$(tail -n 60 "$RUNNER_TEMP/native-build.log"); fi
+            lines=${lines//'%'/'%25'}; lines=${lines//$'\r'/'%0D'}; lines=${lines//$'\n'/'%0A'}
+            echo "::error title=Native Android build::$lines"
           fi
           exit "$result"
       - name: Inspect compiled demo package

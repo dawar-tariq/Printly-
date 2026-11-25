@@ -1,6 +1,7 @@
 package io.github.dawartariq.printly.owner.nativeapp
 
 import android.content.Context
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -261,6 +262,7 @@ private suspend fun http(
         }
         HttpResult(status, result.toByteArray(), conn.getHeaderField("Location"))
     } catch (error: AppError) { throw error }
+    catch (error: CancellationException) { throw error }
     catch (_: IOException) { throw AppError("network", "Connection interrupted. Refresh before retrying any change.") }
     catch (_: Exception) { throw AppError("network", "Could not reach Printly securely. Please try again.") }
     finally { connection?.disconnect() }

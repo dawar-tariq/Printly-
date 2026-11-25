@@ -115,9 +115,16 @@ class DemoOwnerApi : OwnerApi {
         }
         if (parts.size == 3 && method == "POST" && parts[2] == "confirm-payment") {
             val input = requireNotNull(body)
-            if (input.optString("action") == "confirm" && !input.optBoolean("verification_confirmed")) throw AppError("verification_required", "Check the transfer before confirming.", 422)
-            item.put("status", if (input.optString("action") == "confirm") "queued" else "cancelled")
-            item.put("payment_status", if (input.optString("action") == "confirm") "confirmed" else "rejected")
+            when (input.optString("action")) {
+                "confirm" -> {
+                    if (!input.optBoolean("verification_confirmed")) throw AppError("verification_required", "Check the transfer before confirming.", 422)
+                    if (item.optString("payment_status") != "submitted") throw AppError("bad_state", "Record the customer's report before confirming.", 409)
+                    item.put("status", "queued").put("payment_status", "confirmed")
+                }
+                "report" -> item.put("payment_status", "submitted").put("utr", input.optString("utr"))
+                "reject" -> item.put("payment_status", "rejected")
+                else -> throw AppError("validation", "Invalid payment action.", 422)
+            }
             return JSONObject().put("ok", true)
         }
         throw AppError("not_available", "This sample action is not available.", 404)

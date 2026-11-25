@@ -26,17 +26,19 @@ import org.json.JSONObject
     var error by remember { mutableStateOf("") }
     var notice by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(true) }
+    var canEdit by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var creating by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<JSONObject?>(null) }
     var deleting by remember { mutableStateOf<JSONObject?>(null) }
     suspend fun load(clearError: Boolean = true) {
-        loading = true
+        loading = true; canEdit = false
         try {
             val response = api.request("GET", "inventory")
             if (response.optJSONArray("items") == null) throw AppError("invalid_response", "Could not load the complete inventory.")
-            data = response; if (clearError) error = ""
-        } catch (e: Exception) { error = safeError(e) }
+            data = response; canEdit = clearError
+            if (clearError) error = ""
+        } catch (e: Exception) { canEdit = false; error = safeError(e) }
         finally { loading = false }
     }
     LaunchedEffect(api) { load() }
@@ -45,18 +47,18 @@ import org.json.JSONObject
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) { Heading("Inventory", "Keep an eye on the supplies you use.") }
-                IconButton(onClick = { scope.launch { load() } }) { Icon(Icons.Default.Refresh, "Refresh inventory", tint = Orange) }
+                IconButton(enabled = !busy && !loading, onClick = { scope.launch { load() } }) { Icon(Icons.Default.Refresh, "Refresh inventory", tint = Orange) }
             }
         }
         if (error.isNotBlank()) item { ErrorBanner(if (data != null) "$error Refresh before changing stock." else error) }
         if (notice.isNotBlank()) item { InfoBanner(notice) }
-        item { PrimaryButton("Add item", { creating = true }, Modifier.fillMaxWidth(), enabled = !busy && data != null) }
+        item { PrimaryButton("Add item", { creating = true }, Modifier.fillMaxWidth(), enabled = !busy && canEdit && data != null) }
         if (loading && data == null) item { LoadingPanel() }
         if (!loading && data != null && stock.isEmpty()) item { SurfaceCard(Modifier.fillMaxWidth()) { Text("No inventory items yet.", color = Muted) } }
         items(stock, key = { it.text("id") }) { item ->
             val qty = item.optDouble("qty", Double.NaN)
             val threshold = item.optDouble("low_stock_threshold", Double.NaN)
-            SurfaceCard(Modifier.fillMaxWidth().clickable(enabled = !busy) { editing = item }) {
+            SurfaceCard(Modifier.fillMaxWidth().clickable(enabled = !busy && canEdit) { editing = item }) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                     Column(Modifier.weight(1f)) {
                         Text(item.text("name", "Item"), fontWeight = FontWeight.ExtraBold)
@@ -68,8 +70,8 @@ import org.json.JSONObject
                     }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(enabled = !busy, onClick = { editing = item }) { Text("Edit") }
-                    TextButton(enabled = !busy, onClick = { deleting = item }) { Text("Remove", color = Red) }
+                    TextButton(enabled = !busy && canEdit, onClick = { editing = item }) { Text("Edit") }
+                    TextButton(enabled = !busy && canEdit, onClick = { deleting = item }) { Text("Remove", color = Red) }
                 }
             }
         }

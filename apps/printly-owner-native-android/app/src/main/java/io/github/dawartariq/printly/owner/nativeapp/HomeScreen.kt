@@ -33,8 +33,14 @@ import org.json.JSONObject
     val owner = me?.optBoolean("is_owner", false) == true
     suspend fun load() {
         loading = true
-        try { snapshot = api.request("POST", "board", JSONObject().put("pages", JSONObject()).put("search", "")); error = "" }
-        catch (e: Exception) { error = safeError(e) }
+        try {
+            val response = api.request("POST", "board", JSONObject().put("pages", JSONObject()).put("search", ""))
+            val laneData = response.optJSONObject("lanes") ?: throw AppError("invalid_response", "Could not load the complete order board.")
+            if (lanes.any { laneData.optJSONObject(it)?.optJSONArray("orders") == null || laneData.optJSONObject(it)?.optJSONObject("pagination") == null }) {
+                throw AppError("invalid_response", "Could not load the complete order board.")
+            }
+            snapshot = response; error = ""
+        } catch (e: Exception) { error = safeError(e) }
         finally { loading = false }
     }
     LaunchedEffect(api) { load() }

@@ -44,7 +44,8 @@ import org.json.JSONObject
         finally { if (requestSequence == sequence) loading = false }
     }
     LaunchedEffect(api, pages, search) {
-        loading = snapshot == null
+        // Never label a previous page or search result as the newly selected one.
+        snapshot = null; loading = true; error = ""
         load()
         while (isActive) { delay(15_000); load() }
     }
@@ -76,9 +77,9 @@ import org.json.JSONObject
         Spacer(Modifier.height(10.dp))
         if (error.isNotBlank()) { ErrorBanner(if (snapshot != null) "$error The last board may be out of date." else error); Spacer(Modifier.height(8.dp)) }
         if (loading && snapshot == null) LoadingPanel("Loading orders…")
-        else if (orders.isEmpty()) {
+        else if (snapshot != null && orders.isEmpty()) {
             SurfaceCard(Modifier.fillMaxWidth()) { Text("Nothing here right now.", color = Muted, style = MaterialTheme.typography.bodyMedium) }
-        } else {
+        } else if (snapshot != null) {
             LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 12.dp)) {
                 items(orders, key = { it.text("id") }) { order -> OrderCard(order) { val id = order.text("id"); if (isUuid(id)) onOpen(id) } }
             }
@@ -124,11 +125,14 @@ import org.json.JSONObject
     var loading by remember { mutableStateOf(true) }
     suspend fun load() {
         loading = true
-        try { data = api.request("GET", "recovery?page=$page"); error = "" }
-        catch (e: Exception) { error = safeError(e) }
+        try {
+            val result = api.request("GET", "recovery?page=$page")
+            if (result.optJSONArray("orders") == null || result.optJSONObject("pagination") == null) throw AppError("invalid_response", "Could not load the complete recovery list.")
+            data = result; error = ""
+        } catch (e: Exception) { error = safeError(e) }
         finally { loading = false }
     }
-    LaunchedEffect(api, page) { load() }
+    LaunchedEffect(api, page) { data = null; load() }
     val orders = data?.array("orders") ?: emptyList()
     val pages = data?.optJSONObject("pagination")?.optInt("pages", 1) ?: 1
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -148,7 +152,7 @@ import org.json.JSONObject
         }
         if (error.isNotBlank()) item { ErrorBanner(error) }
         if (loading && data == null) item { LoadingPanel() }
-        if (!loading && orders.isEmpty()) item { SurfaceCard(Modifier.fillMaxWidth()) { Text("No open orders found.", color = Muted) } }
+        if (!loading && data != null && orders.isEmpty()) item { SurfaceCard(Modifier.fillMaxWidth()) { Text("No open orders found.", color = Muted) } }
         items(orders, key = { it.text("id") }) { order -> OrderCard(order) { val id = order.text("id"); if (isUuid(id)) onOpen(id) } }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {

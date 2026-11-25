@@ -30,6 +30,7 @@ import java.util.UUID
     val scope = rememberCoroutineScope()
     var detail by remember(id) { mutableStateOf<JSONObject?>(null) }
     var loading by remember(id) { mutableStateOf(true) }
+    var fresh by remember(id) { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
     var notice by remember { mutableStateOf("") }
@@ -38,10 +39,14 @@ import java.util.UUID
     var transferChecked by remember { mutableStateOf(false) }
     var duplicate by remember { mutableStateOf(false) }
     suspend fun load(clearError: Boolean = true) {
-        loading = true
+        loading = true; fresh = false
         try {
             if (!isUuid(id)) throw AppError("validation", "Invalid order ID.")
-            detail = api.request("GET", "orders/$id")
+            val response = api.request("GET", "orders/$id")
+            if (response.optJSONObject("order") == null || response.optJSONArray("items") == null || response.optJSONArray("files") == null) {
+                throw AppError("invalid_response", "Could not load the complete order. Refresh before making changes.")
+            }
+            detail = response; fresh = true
             if (clearError) error = ""
         } catch (e: Exception) { error = safeError(e) }
         finally { loading = false }
@@ -50,7 +55,10 @@ import java.util.UUID
     val order = detail?.optJSONObject("order")
     val status = order?.text("status") ?: ""
     val paymentStatus = order?.text("payment_status") ?: ""
-    val needsPaymentReview = status == "draft" && order?.text("payment_method") == "upi" && paymentStatus in listOf("pending", "submitted")
+    val upiDraft = status == "draft" && order?.text("payment_method") == "upi"
+    val canReportPayment = upiDraft && paymentStatus in listOf("pending", "rejected")
+    val canConfirmPayment = upiDraft && paymentStatus == "submitted"
+    val canRejectPayment = upiDraft && paymentStatus in listOf("pending", "submitted")
     suspend fun mutation(path: String, payload: JSONObject) {
         busy = true; error = ""; notice = ""
         try {
@@ -66,7 +74,7 @@ import java.util.UUID
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(13.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Column(Modifier.weight(1f)) { Heading(order?.text("token")?.ifBlank { "Order details" } ?: "Order details", "Review the details before updating this order.") }
-            IconButton(enabled = !busy, onClick = { scope.launch { load() } }) { Icon(Icons.Default.Refresh, "Refresh order", tint = Orange) }
+            IconButton(enabled = !busy && !loading, onClick = { scope.launch { load() } }) { Icon(Icons.Default.Refresh, "Refresh order", tint = Orange) }
         }
         if (error.isNotBlank()) ErrorBanner(error)
         if (notice.isNotBlank()) InfoBanner(notice)
@@ -118,18 +126,32 @@ import java.util.UUID
                 }
                 if (files.isNotEmpty()) Text("Files are private. Only share or print them on trusted devices.", color = Muted, style = MaterialTheme.typography.bodySmall)
             }
-            if (needsPaymentReview) {
+            if (canReportPayment || canConfirmPayment) {
                 InfoBanner("A reported UPI payment is not proof of payment. Check your receiving account, amount and reference independently.")
-                PrimaryButton("Review UPI transfer", { utr = order.text("utr"); transferChecked = false; action = "confirm_payment" }, Modifier.fillMaxWidth(), enabled = !busy)
-                SecondaryButton("Reject payment report", { action = "reject_payment" }, Modifier.fillMaxWidth(), enabled = !busy)
             }
+            if (canReportPayment) PrimaryButton("Record customer payment report", { utr = order.text("utr"); action = "report_payment" }, Modifier.fillMaxWidth(), enabled = !busy && fresh)
+            if (canConfirmPayment) PrimaryButton("Review UPI transfer", { utr = order.text("utr"); transferChecked = false; action = "confirm_payment" }, Modifier.fillMaxWidth(), enabled = !busy && fresh)
+            if (canRejectPayment) SecondaryButton("Reject payment report", { action = "reject_payment" }, Modifier.fillMaxWidth(), enabled = !busy && fresh)
             allowedTransitions(status).forEach { (target, label) ->
-                if (target == "cancelled") SecondaryButton(label, { action = "status:$target" }, Modifier.fillMaxWidth(), enabled = !busy)
-                else PrimaryButton(label, { action = "status:$target" }, Modifier.fillMaxWidth(), enabled = !busy)
+                if (target == "cancelled") SecondaryButton(label, { action = "status:$target" }, Modifier.fillMaxWidth(), enabled = !busy && fresh)
+                else PrimaryButton(label, { action = "status:$target" }, Modifier.fillMaxWidth(), enabled = !busy && fresh)
             }
             Spacer(Modifier.height(18.dp))
         }
     }
+    if (action == "report_payment") AlertDialog(
+        onDismissRequest = { if (!busy) action = "" },
+        title = { Text("Record the customer's report") },
+        text = { Column {
+            Text("This records the customer's claim only. It does not confirm that money was received. Verify the transfer separately afterward.")
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(utr, { utr = it.take(40) }, label = { Text("UPI reference (optional)") }, singleLine = true)
+        } },
+        confirmButton = { TextButton(enabled = !busy, onClick = { scope.launch {
+            mutation("orders/$id/confirm-payment", JSONObject().put("action", "report").put("utr", utr.trim()))
+        } }) { Text("Record report") } },
+        dismissButton = { TextButton(enabled = !busy, onClick = { action = "" }) { Text("Cancel") } },
+    )
     if (action == "confirm_payment") AlertDialog(
         onDismissRequest = { if (!busy) action = "" },
         title = { Text("Check the transfer") },
