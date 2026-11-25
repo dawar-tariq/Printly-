@@ -107,8 +107,9 @@ jobs:
 
           get('/api/shop/app-release', expected=401)
           headers, _ = get('/api/native/v1/shop/me', expected=401)
-          if 'no-store' not in headers.get('Cache-Control', '').lower() or 'authorization' not in headers.get('Vary', '').lower():
-              raise SystemExit('Native shop gateway: missing private-response headers')
+          gateway_no_store = 'no-store' in headers.get('Cache-Control', '').lower()
+          gateway_vary_auth = 'authorization' in headers.get('Vary', '').lower()
+          print(f'INFO: native gateway no-store={gateway_no_store}, varies-by-authorization={gateway_vary_auth}')
           print('PASS: anonymous release metadata and native shop data are not available')
 
           # This intentionally consumes one short-lived staging rate-limit
@@ -125,6 +126,8 @@ jobs:
           if status != 200:
               raise SystemExit(f'{path}: expected HTTP 200, got HTTP {status}; staging sign-in gate is not ready')
           print('PASS: credential-free staging sign-in gate')
+          if not gateway_no_store or not gateway_vary_auth:
+              raise SystemExit('Native shop gateway: missing private-response headers')
           PY
           result=$?
           cat "$RUNNER_TEMP/isolated-smoke.log"
