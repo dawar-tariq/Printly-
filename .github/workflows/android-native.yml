@@ -71,7 +71,7 @@ jobs:
           set +e
           (
             set -eu -o pipefail
-            for origin in '' 'http://test.example.invalid' 'https://printly-steel-three.vercel.app' 'https://test.example.invalid/path'; do
+            for origin in '' 'http://test.example.invalid' 'https://printly-steel-three.vercel.app' 'https://printly0.vercel.app' 'https://printly-shop.vercel.app' 'https://test.example.invalid/path'; do
               if ./gradlew --no-daemon assembleQa "-PprintlyQaSiteOrigin=$origin" > "$RUNNER_TEMP/invalid-native-qa.log" 2>&1; then
                 echo 'Unsafe isolated-test origin unexpectedly built.' >&2; exit 1
               fi

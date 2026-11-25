@@ -32,7 +32,7 @@ jobs:
           node <<'NODE'
           const assert = require('node:assert/strict');
           const { chromium } = require(`${process.env.RUNNER_TEMP}/owner-smoke/node_modules/playwright-core`);
-          const site = 'https://printly-steel-three.vercel.app';
+          const site = 'https://printly0.vercel.app';
           (async () => {
             const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH, args: ['--no-sandbox'] });
             try {
@@ -83,7 +83,7 @@ jobs:
           set -euo pipefail
           node <<'NODE'
           const assert = require('node:assert/strict');
-          const site = 'https://printly-steel-three.vercel.app';
+          const site = 'https://printly0.vercel.app';
           (async () => {
             for (const size of [192, 512]) {
               const response = await fetch(`${site}/brand/printly-owner-${size}.png`, { signal: AbortSignal.timeout(30000) });
@@ -110,7 +110,7 @@ jobs:
           node <<'NODE'
           const assert = require('node:assert/strict');
           (async () => {
-            const response = await fetch('https://printly-steel-three.vercel.app/.well-known/assetlinks.json', { redirect: 'manual', signal: AbortSignal.timeout(30000) });
+            const response = await fetch('https://printly0.vercel.app/.well-known/assetlinks.json', { redirect: 'manual', signal: AbortSignal.timeout(30000) });
             const association = await response.json();
             if (response.status === 404) {
               assert.deepEqual(association, []);
@@ -132,7 +132,7 @@ jobs:
           set -euo pipefail
           node <<'NODE'
           const assert = require('node:assert/strict');
-          const site = 'https://printly-steel-three.vercel.app';
+          const site = 'https://printly0.vercel.app';
           const get = path => fetch(`${site}${path}`, { redirect: 'manual', signal: AbortSignal.timeout(30000) });
           const notCached = response => {
             assert.match(response.headers.get('cache-control') || '', /\bno-store\b/i, 'response must not be cached');
