@@ -4,7 +4,8 @@ import { SUPABASE_ANON, SUPABASE_URL } from '@/lib/supabase-client';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * Public broadcast carries no order data. The unguessable tracking ID is hashed
+ * Public broadcast carries no order data (Realtime may add a random message ID).
+ * The unguessable tracking ID is hashed
  * before use as a topic, so it is not sent to the Realtime service. Events are
  * untrusted hints only; the caller must re-fetch the rate-limited tracking API.
  * Return a synchronous cleanup even if hashing or connecting finishes later.

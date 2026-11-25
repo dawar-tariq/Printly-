@@ -86,12 +86,22 @@ export async function testNativeRealtimeLocal({ supabaseUrl, anonKey, admin, own
     assert(!update.error, 'synthetic local order update failed');
     await until(() => owner.changes.some((event) => event?.type === 'UPDATE' && event?.record?.shop_id === shop), 'authorized update');
     await until(() => signals.length > 0, 'customer tracking invalidation');
+    const second = await admin.from('orders').update({ eta_minutes: 38 }).eq('id', orderId).eq('shop_id', shop);
+    assert(!second.error, 'second synthetic local order update failed');
+    await until(() => signals.length >= 2, 'second customer tracking invalidation');
     await new Promise((resolve) => setTimeout(resolve, 1500));
     assert.equal(foreign.changes.length, 0, 'Realtime must not expose another shop’s order');
     assert.equal(unrelatedSignals.length, 0, 'a different tracking topic must not receive the event');
-    assert.deepEqual(signals[0].payload, {}, 'customer broadcast must contain no order or customer data');
-    assert(!JSON.stringify(signals[0]).includes(orderId), 'tracking ID must not be sent in the event');
-    console.log('PASS: local owner Realtime and cross-shop RLS; anonymous tracking invalidation contains no data');
+    for (const signal of signals) {
+      // realtime.send adds a fresh random message ID to the empty payload in
+      // newer Supabase versions. No order fields or tracking ID may appear.
+      const keys = Object.keys(signal.payload).sort();
+      assert(keys.length === 0 || (keys.length === 1 && keys[0] === 'id'), 'customer broadcast must contain no order or customer fields');
+      if (keys.length) assert.match(signal.payload.id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+      assert(!JSON.stringify(signal).includes(orderId), 'tracking ID must not be sent in the event');
+    }
+    if (signals[0].payload.id && signals[1].payload.id) assert.notEqual(signals[0].payload.id, signals[1].payload.id, 'message IDs must be fresh, not a stable order identifier');
+    console.log('PASS: local owner Realtime and cross-shop RLS; anonymous tracking invalidation contains no order data');
   } finally {
     owner.socket.close(); foreign.socket.close();
     await customer.removeChannel(customerChannel); await customer.removeChannel(unrelatedChannel);

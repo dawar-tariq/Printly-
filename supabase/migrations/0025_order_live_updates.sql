@@ -12,8 +12,9 @@ begin
 end $$;
 
 -- Customers don't have accounts. A public topic derived from their unguessable
--- tracking ID carries only an empty invalidation, never an order, customer,
--- payment, file or tracking ID. The page ignores event data and re-fetches the
+-- tracking ID carries an empty application payload, never an order, customer,
+-- payment, file or tracking ID. Realtime may add a random per-message ID. The
+-- page ignores event data and re-fetches the
 -- existing rate-limited tracking API. Anyone who knows the topic can forge a
 -- hint, so the client also throttles them. No broad anonymous orders policy is
 -- added. Realtime failures must never prevent an order/payment write.
