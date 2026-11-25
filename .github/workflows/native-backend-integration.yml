@@ -52,6 +52,18 @@ jobs:
           # Only tracked migrations present in this checked-out commit; never
           # connect to a hosted project or include deferred worktree migrations.
           cp "$GITHUB_WORKSPACE"/supabase/migrations/*.sql supabase/migrations/
+          # Loopback can also be a tunnel to another database. Add a unique,
+          # runner-generated marker to this disposable stack, and require the
+          # harness to read it before it is allowed to make any writes.
+          nonce=$(openssl rand -hex 32)
+          echo "PRINTLY_NATIVE_DISPOSABLE_NONCE=$nonce" >> "$GITHUB_ENV"
+          cat > supabase/migrations/9999_native_integration_guard.sql <<SQL
+          create table public.native_integration_guard (nonce text not null);
+          insert into public.native_integration_guard (nonce) values ('$nonce');
+          revoke all on public.native_integration_guard from public, anon, authenticated;
+          grant select on public.native_integration_guard to service_role;
+          notify pgrst, 'reload schema';
+          SQL
           set +e
           supabase start --exclude studio,imgproxy,edge-runtime,logflare,vector,supavisor,mailpit,realtime,postgres-meta > "$RUNNER_TEMP/local-supabase.log" 2>&1
           result=$?

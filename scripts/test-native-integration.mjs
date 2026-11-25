@@ -20,7 +20,9 @@ assert.equal(localOrigin(process.env.NEXT_PUBLIC_SITE_URL, 'Configured test site
 assert.notEqual(supabaseUrl, site, 'the app and disposable backend must use separate ports');
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const guardNonce = process.env.PRINTLY_NATIVE_DISPOSABLE_NONCE || '';
 assert(serviceKey && anonKey, 'local test keys are required');
+assert.match(guardNonce, /^[a-f0-9]{64}$/, 'a per-run disposable stack guard is required');
 const options = { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } };
 const admin = createClient(supabaseUrl, serviceKey, options);
 const ownerAuth = createClient(supabaseUrl, anonKey, options);
@@ -33,6 +35,10 @@ function checked(result, label) {
   if (result.error) throw new Error(`${label} failed (${result.error.code || result.error.status || 'error'})`);
   return result.data;
 }
+// Loopback alone could be a tunnel to a hosted database. Require a unique
+// marker created in this run's freshly initialized stack before any writes.
+const guard = checked(await admin.from('native_integration_guard').select('nonce').single(), 'verify disposable stack');
+assert.equal(guard?.nonce, guardNonce, 'refusing to write without the matching disposable stack guard');
 async function waitForServer() {
   const deadline = Date.now() + 120_000;
   let last = 'not started';
