@@ -32,6 +32,9 @@ export async function middleware(req: NextRequest) {
   const path = req.nextUrl.pathname.replace(/\/+$/, '') || '/';
   const adminPage = isAdminPage(path);
 
+  // Android verifies this public, non-secret association even during maintenance.
+  if (path === '/.well-known/assetlinks.json') return NextResponse.next();
+
   // Admin sign-in, console and APIs remain available so maintenance can always
   // be turned off. Their existing authentication and authorization still apply.
   if (!adminPage && !isAdminApi(path)) {

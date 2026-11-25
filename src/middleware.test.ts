@@ -85,6 +85,16 @@ describe('cross-origin mutation protection', () => {
 });
 
 describe('platform maintenance', () => {
+  it('keeps the public Android association reachable even if maintenance is on or its state is unknown', async () => {
+    for (const maintenance of ['on', 'unknown'] as const) {
+      state.maintenance = maintenance;
+      const response = await visit('/.well-known/assetlinks.json');
+      expect(response.status).toBe(200);
+      expect(response.headers.get('x-middleware-next')).toBe('1');
+      expect((await visit('/owner-app')).status).toBe(503);
+    }
+  });
+
   it('replaces customer and shop pages with a self-contained, non-cacheable 503 notice', async () => {
     state.maintenance = 'on';
     for (const path of ['/', '/login', '/shop', '/shop/signup', '/s/p-demo1', '/s/p-demo1/order', '/track/123', '/other']) {
