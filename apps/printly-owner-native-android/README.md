@@ -1,6 +1,6 @@
 # Printly for Shops — native Android (in progress)
 
-This is a Kotlin/Jetpack Compose Android application. It is not a Trusted Web Activity, browser wrapper, or WebView. It is **not yet a production release**: the matching server gateway is local, has not been deployed, and an authenticated end-to-end test against an isolated real backend and a physical device is still required.
+This is a Kotlin/Jetpack Compose Android application. It is not a Trusted Web Activity, browser wrapper, or WebView. It is **not yet a production release**: the matching server gateway is deployed only to a separate isolated test site, not to the live site, and an authenticated end-to-end test on a physical device is still required.
 
 ## Build variants
 
