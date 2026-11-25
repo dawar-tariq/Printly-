@@ -25,7 +25,7 @@ jobs:
           const site = 'https://printly-native-test.vercel.app';
           const expectedDb = 'https://rahfmpsdbwbktlobntkm.supabase.co';
           const secret = process.env.QA_WORKER_SECRET || '';
-          const fail = (message) => { console.error(message); process.exit(1); };
+          const fail = (message) => { console.error(`::error::${message}`); process.exit(1); };
           if (!/^[A-Za-z0-9_-]{32,128}$/.test(secret)) fail('QA worker secret is missing or invalid in GitHub Actions.');
           try {
             const response = await fetch(`${site}/api/native/v1/test-environment`, { redirect: 'error', signal: AbortSignal.timeout(15000) });
