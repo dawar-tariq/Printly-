@@ -87,6 +87,14 @@ try {
   if (!shopResponse.ok) throw new Error('native_shop');
   const shop = await shopResponse.json();
   if (shop.shop?.id !== SHOP || shop.is_owner !== true || !Array.isArray(shop.services)) throw new Error('native_shop');
+  phase = 'native_board';
+  const boardResponse = await fetch(`${SITE}/api/native/v1/shop/board`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ shop_id: SHOP, pages: {}, search: '' }), redirect: 'error', signal: AbortSignal.timeout(15_000),
+  });
+  if (!boardResponse.ok) throw new Error('native_board');
+  const board = await boardResponse.json();
+  if (board.shop_id !== SHOP || !['confirm', 'queued', 'printing', 'ready'].every((name) => Array.isArray(board.lanes?.[name]?.orders) && board.lanes[name].orders.length === 0)) throw new Error('native_board');
   phase = 'subscription';
   const billingResponse = await fetch(`${SITE}/api/native/v1/shop/subscription`, {
     headers: { Authorization: `Bearer ${token}` }, redirect: 'error', signal: AbortSignal.timeout(15_000),

@@ -87,18 +87,32 @@ jobs:
         run: ":"
       - name: "Runner public key part 16 ${{ steps.listener.outputs.part16 }}"
         run: ":"
-      - name: Validate the new synthetic login and shop
+      - name: Validate the synthetic login, shop and board
+        id: verify
         shell: bash
         run: |
           set -euo pipefail
           for i in $(seq 1 300); do
-            if [ -f "$PRINTLY_QA_LOGIN_DIR/failed" ]; then cat "$PRINTLY_QA_LOGIN_DIR/failed"; exit 1; fi
-            if [ -f "$PRINTLY_QA_LOGIN_DIR/passed" ]; then echo 'PASS: isolated Auth, native shop, temporary entitlement, and sign-out.'; exit 0; fi
-            if ! kill -0 "$(cat "$PRINTLY_QA_LOGIN_DIR/pid")" 2>/dev/null; then echo 'Listener stopped.'; exit 1; fi
+            if [ -f "$PRINTLY_QA_LOGIN_DIR/failed" ]; then
+              phase=$(sed -nE 's/^Synthetic QA validation failed at ([a-z_]+)\.$/\1/p' "$PRINTLY_QA_LOGIN_DIR/failed")
+              echo "phase=${phase:-unknown}" >> "$GITHUB_OUTPUT"
+              cat "$PRINTLY_QA_LOGIN_DIR/failed"
+              exit 1
+            fi
+            if [ -f "$PRINTLY_QA_LOGIN_DIR/passed" ]; then
+              echo 'phase=passed' >> "$GITHUB_OUTPUT"
+              echo 'PASS: isolated Auth, native shop, empty board, temporary entitlement, and sign-out.'
+              exit 0
+            fi
+            if ! kill -0 "$(cat "$PRINTLY_QA_LOGIN_DIR/pid")" 2>/dev/null; then echo 'phase=listener_stopped' >> "$GITHUB_OUTPUT"; exit 1; fi
             sleep 1
           done
+          echo 'phase=timeout' >> "$GITHUB_OUTPUT"
           echo 'Timed out waiting for synthetic login verification.'
           exit 1
+      - name: "Synthetic QA validation result ${{ steps.verify.outputs.phase }}"
+        if: always()
+        run: ":"
       - name: Read encrypted credential for the operator
         id: ciphertext
         if: always()
