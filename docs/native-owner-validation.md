@@ -14,6 +14,12 @@ The delivered synthetic APK is `Printly-Native-DEMO-v2.0.1-Synthetic-Data.apk`, 
 
 The offline emulator and local backend checks **do not** test the live Android HTTPS/session flow end to end and do not establish whether the app works on a particular physical phone. A phone test remains necessary. The demo cannot demonstrate live Realtime or server-controlled settings. These checks do not constitute a production release or a database backup.
 
+## Direct-download candidate checks
+
+- A clean web candidate at `8fc119a177ca7f2b8b47c0b10f34e9b07d523c06` passed 644 tests with one optional Redis test skipped, typecheck and a production build with dummy environment values. The only subsequent source change before the Android check was to its instrumentation test and workflow, not the web code.
+- [Disposable backend run 45598395230](https://github.com/dawar-tariq/Printly-/actions/runs/45598395230) passed for `8fc119a`. It included real local Auth cookies for the download page and API, anonymous and bearer-only rejection, unpublished metadata, and the previously described gateway/RLS checks. No hosted shop or real payment was used.
+- [Android run 45599152352](https://github.com/dawar-tariq/Printly-/actions/runs/45599152352) passed for `1ce5f6acfab81dd74d7161277b58e4c68b8ddb4b`: demo unit/instrumentation tests and offline emulator, separate QA build and origin guard, missing-key refusal, and the native release and signing-review path using disposable CI keys. No real signing secret was used, and no production-signed APK was generated. This does not verify an installed app's signer or real-phone behavior.
+
 ## Release boundary
 
 The user has approved the synthetic demo's appearance and requested a native production app with direct Android downloads; the native gateway has not yet been deployed and no production APK has been published. Before live release, review a clean candidate, test the Android client with an isolated backend and a physical phone, confirm the existing signing certificate and upgrade compatibility, arrange verified database/Storage backups and a rollback plan, and obtain any required operational and signing approvals. Preserve unrelated work and migrations; do not deploy the dirty working tree. See `docs/native-direct-distribution.md` for the proposed release gates and protected review workflow.
