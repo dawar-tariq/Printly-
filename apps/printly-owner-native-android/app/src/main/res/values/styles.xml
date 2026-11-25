@@ -8,4 +8,12 @@
         <item name="android:windowActionModeOverlay">true</item>
         <item name="android:colorAccent">#EF5C19</item>
     </style>
+
+    <!-- Android draws this immediately, before Compose and session restoration.
+         The platform dismisses it as soon as the first frame is ready. -->
+    <style name="Theme.PrintlyNative.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">#FFF8F1</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/owner_icon</item>
+        <item name="postSplashScreenTheme">@style/Theme.PrintlyNative</item>
+    </style>
 </resources>

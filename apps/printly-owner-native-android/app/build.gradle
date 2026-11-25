@@ -14,8 +14,8 @@ android {
         applicationId 'io.github.dawartariq.printly.owner'
         minSdk 24
         targetSdk 36
-        versionCode 3
-        versionName '2.0.0-native-review'
+        versionCode 4
+        versionName '2.0.1-native-review'
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
         buildConfigField 'String', 'SITE_ORIGIN', '"https://printly-steel-three.vercel.app"'
         buildConfigField 'String', 'SUPABASE_HOST', '"lgfqetnfazawglwllymb.supabase.co"'
@@ -75,6 +75,7 @@ dependencies {
     implementation platform('androidx.compose:compose-bom:2024.12.01')
     implementation 'androidx.activity:activity-compose:1.10.0'
     implementation 'androidx.core:core-ktx:1.15.0'
+    implementation 'androidx.core:core-splashscreen:1.0.1'
     implementation 'androidx.lifecycle:lifecycle-runtime-compose:2.8.7'
     implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7'
     implementation 'androidx.compose.ui:ui'

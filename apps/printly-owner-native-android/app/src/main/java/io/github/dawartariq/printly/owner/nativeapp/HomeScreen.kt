@@ -18,20 +18,26 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import java.text.DateFormat
+import java.util.Date
 
-@Composable fun HomeScreen(api: OwnerApi, me: JSONObject?, meFresh: Boolean, open: (Screen) -> Unit, invalidateAccess: () -> Unit, reloadAccess: () -> Unit) {
+@Composable fun HomeScreen(api: OwnerApi, me: JSONObject?, meFresh: Boolean, experience: OwnerExperience, open: (Screen) -> Unit, invalidateAccess: () -> Unit, reloadAccess: () -> Unit) {
     val scope = rememberCoroutineScope()
     var snapshot by remember { mutableStateOf<JSONObject?>(null) }
     var loading by remember { mutableStateOf(true) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf("") }
+    var sequence by remember { mutableIntStateOf(0) }
+    var lastUpdated by remember { mutableStateOf<Long?>(null) }
     var confirmAvailability by remember { mutableStateOf(false) }
     val shop = me?.optJSONObject("shop")
     val isOpen = shop?.optBoolean("is_open", false) == true
     val owner = me?.optBoolean("is_owner", false) == true
     suspend fun load() {
+        val requestSequence = ++sequence
         loading = true
         try {
             val response = api.request("POST", "board", JSONObject().put("pages", JSONObject()).put("search", ""))
@@ -39,11 +45,13 @@ import org.json.JSONObject
             if (lanes.any { laneData.optJSONObject(it)?.optJSONArray("orders") == null || laneData.optJSONObject(it)?.optJSONObject("pagination") == null }) {
                 throw AppError("invalid_response", "Could not load the complete order board.")
             }
-            snapshot = response; error = ""
-        } catch (e: Exception) { error = safeError(e) }
-        finally { loading = false }
+            if (requestSequence == sequence) { snapshot = response; lastUpdated = System.currentTimeMillis(); error = "" }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (e: Exception) { if (requestSequence == sequence) error = safeError(e) }
+        finally { if (requestSequence == sequence) loading = false }
     }
-    LaunchedEffect(api) { load() }
+    BoardRefreshEffect(api, shop?.optString("id", "") ?: "", experience.boardRefreshSeconds) { load() }
+    DisposableEffect(Unit) { onDispose { sequence++ } }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Spacer(Modifier.height(2.dp))
         Column {
@@ -51,8 +59,9 @@ import org.json.JSONObject
             Spacer(Modifier.height(7.dp))
             Text("Hello, ${shop?.text("name", "shop owner") ?: "shop owner"}.", fontSize = 27.sp, lineHeight = 32.sp, fontWeight = FontWeight.Black, color = Ink)
             Spacer(Modifier.height(4.dp))
-            Text("Here’s what’s happening at your counter.", color = Muted, style = MaterialTheme.typography.bodyMedium)
+            Text(experience.homeSubtitle ?: "Here’s what’s happening at your counter.", color = Muted, style = MaterialTheme.typography.bodyMedium)
         }
+        experience.notice?.let { InfoBanner(it) }
         SurfaceCard(Modifier.fillMaxWidth()) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                 Column(Modifier.weight(1f)) {
@@ -71,9 +80,10 @@ import org.json.JSONObject
             }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("Today’s work", fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, color = Ink)
+            Text("Order snapshot", fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, color = Ink)
             TextButton(onClick = { scope.launch { load() } }) { Icon(Icons.Default.Refresh, null, Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text("Refresh") }
         }
+        lastUpdated?.let { Text("Checked ${DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(it))} · refreshes while open", color = Muted, style = MaterialTheme.typography.bodySmall) }
         if (error.isNotBlank()) ErrorBanner(if (snapshot != null) "$error The last snapshot may be out of date." else error)
         if (loading && snapshot == null) LoadingPanel("Loading your order board…")
         snapshot?.let { data ->

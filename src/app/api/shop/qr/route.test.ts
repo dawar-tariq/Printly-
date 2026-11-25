@@ -22,8 +22,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.staff.mockResolvedValue({ shopIds: ['shop-1'] });
   mocks.shop.mockResolvedValue({ data: { slug: 'old-name-link', short_code: 'AB234567', name: 'Bright Prints' } });
+  vi.stubEnv('PRINTLY_REDIS_REST_URL', '');
+  vi.stubEnv('PRINTLY_REDIS_REST_TOKEN', '');
 });
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 
 describe('branded shop QR code', () => {
   it('encodes the unique shop link, includes the brand, and stays decodable at preview size', async () => {
@@ -58,6 +60,30 @@ describe('branded shop QR code', () => {
     vi.stubEnv('NEXT_PUBLIC_SITE_URL', 'https://trusted.example');
     const response = await GET(new Request('https://attacker.example/api/shop/qr'));
     expect(decode(Buffer.from(await response.arrayBuffer()))).toBe('https://trusted.example/s/p-ab234567');
+  });
+
+  it('reuses only the authenticated shop’s public QR and still checks membership on each hit', async () => {
+    vi.stubEnv('NEXT_PUBLIC_SITE_URL', 'https://printly.example');
+    vi.stubEnv('PRINTLY_REDIS_REST_URL', 'https://sample.upstash.io');
+    vi.stubEnv('PRINTLY_REDIS_REST_TOKEN', 'test-token');
+    vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'test-signing-key');
+    const values = new Map<string, string>();
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      const args = JSON.parse(String(init?.body)) as string[];
+      if (args[0] === 'SET') { values.set(args[1], args[2]); return Response.json({ result: 'OK' }); }
+      return Response.json({ result: values.get(args[1]) ?? null });
+    }));
+    const request = new Request('https://printly.example/api/shop/qr');
+    const first = await GET(request);
+    const second = await GET(request);
+    expect(decode(Buffer.from(await first.arrayBuffer()))).toBe('https://printly.example/s/p-ab234567');
+    expect(decode(Buffer.from(await second.arrayBuffer()))).toBe('https://printly.example/s/p-ab234567');
+    expect(fetch).toHaveBeenCalledTimes(3); // miss, write, hit
+    expect(mocks.staff).toHaveBeenCalledTimes(2);
+    expect(mocks.shop).toHaveBeenCalledTimes(2);
+    mocks.staff.mockResolvedValue({ shopIds: [] });
+    expect((await GET(request)).status).toBe(403);
+    expect(fetch).toHaveBeenCalledTimes(3);
   });
 
   it('denies a user with no linked shop', async () => {

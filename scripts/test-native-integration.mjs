@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
+import { testNativeRealtimeLocal } from './test-native-realtime-local.mjs';
 
 function localOrigin(value, label) {
   const url = new URL(value || '');
@@ -97,6 +98,7 @@ const contexts = await Promise.all(Array.from({ length: 8 }, (_, index) => json(
 for (let i = 0; i < contexts.length; i++) assert.equal(contexts[i].shop.id, i % 2 ? otherShop : shop);
 assert.equal((await call(`orders/${submittedOrder}`, { token: otherToken })).status, 403);
 console.log('PASS: real Auth tokens, concurrent request isolation, membership and cross-shop denial');
+await testNativeRealtimeLocal({ supabaseUrl, anonKey, admin, ownerToken, otherToken, shop, orderId: queuedOrder, guardNonce });
 
 // Seed one known duplicate reference; the local migration seed only places
 // references on payment rows for some of its orders, while the guard checks orders.

@@ -24,7 +24,15 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
 import org.json.JSONObject
 
 private enum class Phase { STARTING, INTRO, LOGIN, WORKSPACE }
@@ -51,7 +59,7 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
     }
     Surface(Modifier.fillMaxSize(), color = Cream) {
         when (phase) {
-            Phase.STARTING -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Orange) }
+            Phase.STARTING -> StartingScreen()
             Phase.INTRO -> IntroScreen {
                 preferences.edit().putBoolean("onboarding_done", true).apply()
                 phase = if (hadSession) Phase.WORKSPACE else Phase.LOGIN
@@ -63,6 +71,21 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
                 phase = Phase.LOGIN
             }
         }
+    }
+}
+
+/** Shown only while secure local session restoration is actually in progress. */
+@Composable private fun StartingScreen() {
+    Column(Modifier.fillMaxSize().safeDrawingPadding().padding(24.dp),
+        verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+        Image(painterResource(R.drawable.owner_icon), contentDescription = null, modifier = Modifier.size(104.dp))
+        Spacer(Modifier.height(16.dp))
+        Text("printly", fontSize = 30.sp, fontWeight = FontWeight.Black, letterSpacing = (-1).sp, color = Ink)
+        Text("FOR SHOPS", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp, color = OrangeDark)
+        Spacer(Modifier.height(25.dp))
+        CircularProgressIndicator(Modifier.size(24.dp), color = Orange, strokeWidth = 3.dp)
+        Spacer(Modifier.height(12.dp))
+        Text("Getting your shop ready…", color = Muted, style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -164,14 +187,33 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
     var accessError by remember { mutableStateOf("") }
     var restricted by remember { mutableStateOf(false) }
     var refreshKey by remember { mutableIntStateOf(0) }
+    var experience by remember(api) { mutableStateOf(OwnerExperience()) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
 
-    suspend fun loadAccess() {
+    // These are presentation settings only. Keep the last safe values if the
+    // server is unavailable; never change access/payment rules from this feed.
+    LaunchedEffect(api, lifecycle) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (isActive) {
+                try { api.experience()?.let { experience = it } }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { /* Defaults and board polling remain available. */ }
+                delay(5 * 60_000L)
+            }
+        }
+    }
+
+    suspend fun loadAccess() = supervisorScope {
         accessLoading = true; accessError = ""; meFresh = false
+        // Both are independent authoritative reads; overlap their network wait
+        // without allowing failure of either to grant workspace access.
+        val billingRequest = async { api.request("GET", "subscription") }
+        val meRequest = async { api.request("GET", "me") }
         try {
-            val billing = api.request("GET", "subscription")
+            val billing = billingRequest.await()
             subscription = billing
             try {
-                val fresh = api.request("GET", "me")
+                val fresh = meRequest.await()
                 if (fresh.optJSONObject("shop") == null || fresh.optJSONArray("services") == null || fresh.opt("is_owner") !is Boolean) {
                     throw AppError("invalid_response", "Could not verify the complete shop settings.")
                 }
@@ -181,10 +223,10 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
                 if (e.httpStatus == 403) { me = null; restricted = true; screen = Screen.RECOVERY }
                 else throw e
             }
-        } catch (e: Exception) {
-            if (e is AppError && e.httpStatus == 401) return
-            accessError = safeError(e)
-        } finally { accessLoading = false }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (e: Exception) {
+            if (e !is AppError || e.httpStatus != 401) accessError = safeError(e)
+        } finally { billingRequest.cancel(); meRequest.cancel(); accessLoading = false }
     }
     LaunchedEffect(api, refreshKey) { loadAccess() }
     val main = setOf(Screen.HOME, Screen.ORDERS, Screen.INVENTORY, Screen.REPORTS, Screen.MORE)
@@ -246,8 +288,9 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
                     SecondaryButton("Sign out", { scope.launch { onSignedOut(api.signOut()) } }, Modifier.fillMaxWidth())
                 }
                 else -> when (screen) {
-                    Screen.HOME -> HomeScreen(api, me, meFresh, { screen = it }, { meFresh = false }, { refreshKey++ })
-                    Screen.ORDERS -> OrdersScreen(api, onOpen = { detailId = it; detailParent = Screen.ORDERS; screen = Screen.DETAIL })
+                    Screen.HOME -> HomeScreen(api, me, meFresh, experience, { screen = it }, { meFresh = false }, { refreshKey++ })
+                    Screen.ORDERS -> OrdersScreen(api, me?.optJSONObject("shop")?.optString("id", "") ?: "", experience.boardRefreshSeconds,
+                        onOpen = { detailId = it; detailParent = Screen.ORDERS; screen = Screen.DETAIL })
                     Screen.INVENTORY -> InventoryScreen(api)
                     Screen.REPORTS -> ReportsScreen(api)
                     Screen.MORE -> MoreScreen(restricted, onOpen = { screen = it }, onSignOut = { scope.launch { onSignedOut(api.signOut()) } })

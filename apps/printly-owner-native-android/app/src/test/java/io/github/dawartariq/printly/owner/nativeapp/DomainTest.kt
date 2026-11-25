@@ -59,6 +59,17 @@ class DomainTest {
         assertTrue(validApiPath("orders/123/files/456/download"))
     }
 
+    @Test fun remotePresentationIsBoundedAndNeverChangesAccessRules() {
+        val data = JSONObject("""{"schema":1,"notice":"Shop update","home_subtitle":"Hello again","board_refresh_seconds":20,"access_granted":true}""")
+        assertEquals(OwnerExperience("Shop update", "Hello again", 20), parseOwnerExperience(data))
+        assertNull(parseOwnerExperience(JSONObject("""{"schema":2}""")))
+        assertNull(parseOwnerExperience(JSONObject("""{"schema":"1"}""")))
+        val invalid = JSONObject().put("schema", 1).put("notice", "x".repeat(181))
+            .put("home_subtitle", "A\nB").put("board_refresh_seconds", 1)
+        assertEquals(OwnerExperience(), parseOwnerExperience(invalid))
+        assertEquals(15, parseOwnerExperience(JSONObject().put("schema", 1).put("board_refresh_seconds", "10"))!!.boardRefreshSeconds)
+    }
+
     @Test fun imageDetectionUsesSignatures() {
         assertEquals("image/jpeg", detectImageMime(byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0xff.toByte())))
         assertEquals("image/png", detectImageMime(byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)))

@@ -23,6 +23,7 @@ import { formatPaiseExact } from '@/lib/format';
 import { duplexSheets } from '@/lib/duplex';
 import { rateUnitLabel } from '@/lib/rate-display';
 import { rememberCheckout, rememberedCheckout, forgetCheckout, type PendingCheckout } from '@/lib/checkout-recovery-client';
+import { useRememberedCustomerContact } from '@/lib/use-remembered-customer-contact';
 import type { Quote } from '@/lib/pricing';
 
 type Service = 'print' | 'photocopy' | 'scan' | 'bind' | 'laminate';
@@ -92,9 +93,8 @@ function OrderWizardForShop({ slug }: { slug: string }) {
   const [lamination, setLamination] = useState(false);
 
   // checkout
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [email, setEmail] = useState('');
+  const { name, setName, phone, setPhone, email, setEmail, remember: rememberContact, choose: chooseRememberContact,
+    hasSaved: hasSavedContact, clear: clearSavedContact, status: contactStatus, saveNow: saveContactNow } = useRememberedCustomerContact();
   const [notes, setNotes] = useState('');
   const [rush, setRush] = useState(false);
   const [method, setMethod] = useState<'upi' | 'cod'>('upi');
@@ -487,6 +487,8 @@ function OrderWizardForShop({ slug }: { slug: string }) {
     try {
       const contactOk = name.trim().length > 0 && phone.replace(/\D/g, '').length >= 8;
       if (!contactOk) { setBanner('Please enter your name and a valid phone number'); return; }
+      // Only explicit browser-local opt-in is saved, independently of payment.
+      saveContactNow();
       // A previous request can still commit after its response is lost. A
       // later 4xx does not prove that earlier attempt failed, so preserve the
       // original payload and retry capability until an outcome is recovered.
@@ -523,7 +525,7 @@ function OrderWizardForShop({ slug }: { slug: string }) {
       checkoutInFlight.current = false;
       setBusy(false);
     }
-  }, [orderId, quote, name, phone, email, notes, method, rush, router, markClosed, showUpi, slug]);
+  }, [orderId, quote, name, phone, email, notes, method, rush, router, markClosed, showUpi, slug, saveContactNow]);
 
   const confirmPaid = useCallback(async () => {
     if (!orderId) return;
@@ -541,6 +543,10 @@ function OrderWizardForShop({ slug }: { slug: string }) {
   /* ---------- render ---------- */
   const stepIndex = { service: 0, files: 1, options: 2, checkout: 3, recovery: 3, upi: 4 }[step];
   const shopName = shopData?.shop.name ?? '…';
+  const contactMessage = contactStatus && ({
+    saved: t.rememberSaved, incomplete: t.rememberIncomplete, unavailable: t.rememberUnavailable,
+    cleared: t.rememberCleared, removeFailed: t.rememberRemoveFailed, changed: t.rememberChanged, pending: t.rememberPending,
+  })[contactStatus];
 
   return (
     <div lang={language} dir={language === 'ur' ? 'rtl' : 'ltr'} className="min-h-screen bg-[radial-gradient(1200px_600px_at_50%_-10%,#ffedd5,transparent)]">
@@ -587,6 +593,11 @@ function OrderWizardForShop({ slug }: { slug: string }) {
           <section>
             <h1 className="text-2xl font-extrabold tracking-tight">{t.whatNeed}</h1>
             <p className="text-sm text-neutral-500 mt-1">{t.pickService}</p>
+            {(hasSavedContact || contactStatus === 'cleared' || contactStatus === 'removeFailed' || contactStatus === 'changed') && <div className="mt-4 rounded-xl border border-neutral-200 bg-white p-3 text-xs leading-relaxed text-neutral-700">
+              {hasSavedContact && <p>{t.savedContactHint}</p>}
+              {contactStatus !== 'saved' && contactMessage && <p role="status" className="mt-1">{contactMessage}</p>}
+              {hasSavedContact && <button type="button" onClick={clearSavedContact} className="mt-2 font-bold text-orange-800 underline">{t.clearRemembered}</button>}
+            </div>}
             {shopLoading && <p className="mt-5 text-sm text-neutral-500" role="status">Loading services…</p>}
             {!shopLoading && shopData && !shopData.accepting_orders && <p role="status" className="mt-5 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">{shopData.shop.is_open === false ? t.shopClosed : t.shopUnavailable}</p>}
             {!shopLoading && shopData && !shopData.services.some((s) => s.enabled) && <p className="mt-5 text-sm text-neutral-500">This shop has no services available right now.</p>}
@@ -808,11 +819,20 @@ function OrderWizardForShop({ slug }: { slug: string }) {
             <p className="text-sm text-neutral-500 mt-1">{t.contactDetails}</p>
 
             <fieldset disabled={busy || recoveryPossible} className="card mt-4 p-4 space-y-3">
-              <div><label className="label">{t.name} *<input value={name} onChange={(e) => setName(e.target.value)} className="input" placeholder="e.g. Aisha Khan" autoComplete="name" /></label></div>
-              <div><label className="label">{t.phone} *<input value={phone} onChange={(e) => setPhone(e.target.value)} className="input" placeholder="97970 00000" inputMode="numeric" autoComplete="tel" /></label></div>
-              <div><label className="label">{t.email}<input value={email} onChange={(e) => setEmail(e.target.value)} className="input" placeholder="you@example.com" inputMode="email" type="email" /></label></div>
+              <div><label className="label">{t.name} *<input value={name} onChange={(e) => setName(e.target.value)} className="input" placeholder="e.g. Aisha Khan" autoComplete="name" maxLength={80} /></label></div>
+              <div><label className="label">{t.phone} *<input value={phone} onChange={(e) => setPhone(e.target.value)} className="input" placeholder="97970 00000" inputMode="numeric" autoComplete="tel" maxLength={16} /></label></div>
+              <div><label className="label">{t.email}<input value={email} onChange={(e) => setEmail(e.target.value)} className="input" placeholder="you@example.com" inputMode="email" type="email" autoComplete="email" maxLength={120} /></label></div>
               <div><label className="label">{t.notes}<input value={notes} onChange={(e) => setNotes(e.target.value)} className="input" placeholder="e.g. double-sided, spiral on left edge…" /></label></div>
             </fieldset>
+            <div className="card mt-3 p-4">
+              <label className="flex cursor-pointer items-start gap-3 text-sm font-bold text-neutral-800">
+                <input type="checkbox" checked={rememberContact} onChange={(event) => chooseRememberContact(event.target.checked)} className="mt-1 h-4 w-4 accent-orange-700" />
+                <span>{t.rememberContact}</span>
+              </label>
+              <p className="mt-2 text-xs leading-relaxed text-neutral-600">{t.rememberContactHelp}</p>
+              {contactMessage && <p role="status" className="mt-2 text-xs font-semibold text-neutral-700">{contactMessage}</p>}
+              {hasSavedContact && <button type="button" onClick={clearSavedContact} className="mt-2 text-xs font-bold text-orange-800 underline">{t.clearRemembered}</button>}
+            </div>
 
             {/* rush */}
             <button disabled={busy || recoveryPossible} onClick={() => setRush(!rush)} className={cn('w-full mt-3 flex items-center justify-between rounded-xl border-2 px-4 py-3 text-left disabled:opacity-60', rush ? 'border-orange-600 bg-orange-50' : 'border-neutral-200 bg-white')}>

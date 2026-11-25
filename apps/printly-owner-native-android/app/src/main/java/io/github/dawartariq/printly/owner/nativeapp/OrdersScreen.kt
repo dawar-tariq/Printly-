@@ -16,12 +16,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import java.text.DateFormat
+import java.util.Date
 
-@Composable fun OrdersScreen(api: OwnerApi, onOpen: (String) -> Unit) {
+@Composable fun OrdersScreen(api: OwnerApi, shopId: String, refreshSeconds: Int, onOpen: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     var currentLane by remember { mutableStateOf("queued") }
     var searchInput by remember { mutableStateOf("") }
@@ -31,6 +32,7 @@ import org.json.JSONObject
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf("") }
     var sequence by remember { mutableIntStateOf(0) }
+    var lastUpdated by remember { mutableStateOf<Long?>(null) }
     suspend fun load() {
         val requestSequence = ++sequence
         try {
@@ -39,16 +41,17 @@ import org.json.JSONObject
             if (lanes.any { laneData.optJSONObject(it)?.optJSONArray("orders") == null || laneData.optJSONObject(it)?.optJSONObject("pagination") == null }) {
                 throw AppError("invalid_response", "Could not load the complete order board.")
             }
-            if (requestSequence == sequence) { snapshot = response; error = "" }
-        } catch (e: Exception) { if (requestSequence == sequence) error = safeError(e) }
+            if (requestSequence == sequence) { snapshot = response; lastUpdated = System.currentTimeMillis(); error = "" }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (e: Exception) { if (requestSequence == sequence) error = safeError(e) }
         finally { if (requestSequence == sequence) loading = false }
     }
     LaunchedEffect(api, pages, search) {
-        // Never label a previous page or search result as the newly selected one.
-        snapshot = null; loading = true; error = ""
-        load()
-        while (isActive) { delay(15_000); load() }
+        // Never label a previous page or search result as the newly selected one,
+        // including a manual refresh that was still in flight during the change.
+        sequence++; snapshot = null; lastUpdated = null; loading = true; error = ""
     }
+    BoardRefreshEffect(api, shopId, refreshSeconds, pages to search) { load() }
     DisposableEffect(Unit) { onDispose { sequence++ } }
     val lane = snapshot?.optJSONObject("lanes")?.optJSONObject(currentLane)
     val orders = lane?.array("orders") ?: emptyList()
@@ -60,6 +63,7 @@ import org.json.JSONObject
             Column(Modifier.weight(1f)) { Heading("Order board", "The latest work for your shop.") }
             IconButton(onClick = { scope.launch { load() } }) { Icon(Icons.Default.Refresh, contentDescription = "Refresh orders", tint = Orange) }
         }
+        lastUpdated?.let { Text("Checked ${DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(it))} · refreshes while open", color = Muted, style = MaterialTheme.typography.bodySmall) }
         Spacer(Modifier.height(12.dp))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
             OutlinedTextField(searchInput, { searchInput = it }, label = { Text("Search name, phone or token") }, singleLine = true, modifier = Modifier.weight(1f),

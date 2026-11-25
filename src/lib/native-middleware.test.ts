@@ -18,7 +18,7 @@ describe('native middleware protections', () => {
   it('blocks native auth configuration and data while maintenance is on or unknown', async () => {
     for (const mode of ['on', 'unknown'] as const) {
       state.maintenance = mode;
-      for (const path of ['/api/native/v1/config', '/api/native/v1/shop/me', '/api/native/v1/shop/orders/123/status']) {
+      for (const path of ['/api/native/v1/config', '/api/native/v1/experience', '/api/native/v1/shop/me', '/api/native/v1/shop/orders/123/status']) {
         const response = await middleware(new NextRequest(`https://printly.test${path}`));
         expect(response.status).toBe(503);
         expect(response.headers.get('cache-control')).toContain('no-store');

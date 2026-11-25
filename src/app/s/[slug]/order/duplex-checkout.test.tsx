@@ -3,6 +3,7 @@ import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { computeQuote, type ItemSpec, type RateRow } from '@/lib/pricing';
+import { CUSTOMER_CONTACT_KEY } from '@/lib/remembered-customer-contact';
 
 vi.mock('next/navigation', () => ({ useParams: () => ({ slug: 'p-demo1' }), useRouter: () => ({ push: vi.fn() }) }));
 vi.mock('next/link', () => ({ default: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => <a href={href} {...props}>{children}</a> }));
@@ -18,6 +19,7 @@ let rate: RateRow;
 
 beforeEach(() => {
   window.sessionStorage.clear();
+  window.localStorage.clear();
   selectedItems = [];
   rate = { service: 'print', paper_size: 'A4', color: 'bw', sides: 'duplex', paper_gsm: 80, option: null, unit: 'duplex_sheet', price_paise: 300 };
   vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => {
@@ -168,5 +170,63 @@ describe('customer duplex checkout', () => {
     expect(screen.getByRole('link', { name: /Open UPI app/i }).getAttribute('href')).toBe('upi://pay?pa=original%40upi');
     expect(paymentAttempts).toBe(1);
     expect(checks).toEqual([{ method: 'upi', quote_token: 'a'.repeat(64) }, { method: 'upi', quote_token: 'a'.repeat(64) }]);
+    expect(window.localStorage.getItem(CUSTOMER_CONTACT_KEY)).toBeNull();
+  });
+
+  it('offers opt-in saved details, restores them on a repeat visit and allows removal before ordering', async () => {
+    await goToDuplex();
+    const remember = screen.getByRole('checkbox', { name: 'Remember my details on this browser' }) as HTMLInputElement;
+    expect(remember.checked).toBe(false);
+    fireEvent.change(screen.getByLabelText(/Your name/), { target: { value: 'Aisha Khan' } });
+    fireEvent.change(screen.getByLabelText(/^Phone/), { target: { value: '9797000000' } });
+    fireEvent.change(screen.getByLabelText(/Email \(optional\)/), { target: { value: 'aisha@example.com' } });
+    fireEvent.change(screen.getByLabelText(/Notes for the shop/), { target: { value: 'do not save this' } });
+    expect(window.localStorage.getItem(CUSTOMER_CONTACT_KEY)).toBeNull();
+    fireEvent.click(remember);
+    await screen.findByText('Saved on this browser.');
+    expect(window.localStorage.getItem(CUSTOMER_CONTACT_KEY)).not.toContain('do not save this');
+
+    cleanup();
+    await goToDuplex();
+    expect((screen.getByLabelText(/Your name/) as HTMLInputElement).value).toBe('Aisha Khan');
+    expect((screen.getByLabelText(/^Phone/) as HTMLInputElement).value).toBe('9797000000');
+    expect((screen.getByLabelText(/Email \(optional\)/) as HTMLInputElement).value).toBe('aisha@example.com');
+    expect((screen.getByLabelText(/Notes for the shop/) as HTMLInputElement).value).toBe('');
+    fireEvent.change(screen.getByLabelText(/^Phone/), { target: { value: '9876500000' } });
+    await waitFor(() => expect(JSON.parse(window.localStorage.getItem(CUSTOMER_CONTACT_KEY)!).phone).toBe('9876500000'));
+
+    cleanup();
+    render(<OrderWizard />);
+    await screen.findByText(/Contact details are saved on this browser/);
+    fireEvent.click(screen.getByRole('button', { name: 'Clear saved details' }));
+    expect(window.localStorage.getItem(CUSTOMER_CONTACT_KEY)).toBeNull();
+    expect(screen.getByText(/Saved details removed/)).toBeTruthy();
+  });
+
+  it('flushes opt-in before checkout, and clearing it cannot alter a safe payment retry', async () => {
+    const mock = vi.mocked(fetch);
+    const original = mock.getMockImplementation()!;
+    const attempts: unknown[] = [];
+    mock.mockImplementation(async (input, init) => {
+      if (String(input) === `/api/orders/${order}/pay`) {
+        attempts.push(JSON.parse(String(init?.body)));
+        throw new Error('response lost');
+      }
+      return original(input, init);
+    });
+    await goToDuplex();
+    fireEvent.change(screen.getByLabelText(/Your name/), { target: { value: 'Aisha' } });
+    fireEvent.change(screen.getByLabelText(/^Phone/), { target: { value: '9797000000' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Remember my details on this browser' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Proceed to pay' }));
+    await screen.findByText(/Could not complete checkout/);
+    expect(JSON.parse(window.localStorage.getItem(CUSTOMER_CONTACT_KEY)!).name).toBe('Aisha');
+    const recovery = window.sessionStorage.getItem('printly-checkout-v1:p-demo1');
+    fireEvent.click(screen.getByRole('button', { name: 'Clear saved details' }));
+    expect(window.localStorage.getItem(CUSTOMER_CONTACT_KEY)).toBeNull();
+    expect(window.sessionStorage.getItem('printly-checkout-v1:p-demo1')).toBe(recovery);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry checkout safely' }));
+    await waitFor(() => expect(attempts).toHaveLength(2));
+    expect(attempts[1]).toEqual(attempts[0]);
   });
 });

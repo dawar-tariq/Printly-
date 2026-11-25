@@ -3,6 +3,8 @@ package io.github.dawartariq.printly.owner.nativeapp
 import android.content.Context
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -34,6 +36,10 @@ interface OwnerApi {
     suspend fun request(method: String, path: String, body: JSONObject? = null): JSONObject
     suspend fun requestWithProof(method: String, path: String, body: JSONObject, photo: ProofPhoto?): JSONObject
     suspend fun file(path: String): ByteArray
+    /** Safe presentation settings; null means retain the current defaults. */
+    suspend fun experience(): OwnerExperience? = null
+    /** Advisory invalidations only; the board API remains authoritative. */
+    fun orderUpdates(shopId: String): Flow<Unit> = emptyFlow()
 }
 
 private data class PublicConfig(val authOrigin: String, val anonKey: String)
@@ -54,6 +60,16 @@ class LiveOwnerApi(context: Context) : OwnerApi {
         session = try { store.load() } catch (_: Exception) { store.clear(); null }
         session != null
     }
+
+    override suspend fun experience(): OwnerExperience? {
+        val response = http("${BuildConfig.SITE_ORIGIN}/api/native/v1/experience", "GET", maxBytes = 8_192)
+        return if (response.status == 200) parseOwnerExperience(response.json()) else null
+    }
+
+    override fun orderUpdates(shopId: String): Flow<Unit> = observeOrderChanges(shopId, BuildConfig.SUPABASE_HOST, {
+        val cfg = publicConfig()
+        RealtimeCredentials(cfg.authOrigin, cfg.anonKey, usableSession().accessToken)
+    })
 
     private suspend fun publicConfig(): PublicConfig {
         config?.let { return it }
