@@ -68,28 +68,42 @@ jobs:
         working-directory: apps/printly-owner-native-android
         shell: bash
         run: |
-          set -eu -o pipefail
-          for origin in '' 'http://test.example.invalid' 'https://printly-steel-three.vercel.app' 'https://test.example.invalid/path'; do
-            if ./gradlew --no-daemon assembleQa "-PprintlyQaSiteOrigin=$origin" > "$RUNNER_TEMP/invalid-native-qa.log" 2>&1; then
-              echo 'Unsafe isolated-test origin unexpectedly built.' >&2; exit 1
-            fi
-            grep -F 'isolated QA build needs' "$RUNNER_TEMP/invalid-native-qa.log"
-          done
-          ./gradlew --no-daemon assembleQa '-PprintlyQaSiteOrigin=https://native-staging.example.invalid'
-          QA=app/build/outputs/apk/qa/app-qa.apk
-          "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest print "$QA" > "$RUNNER_TEMP/native-qa-manifest.xml"
-          python3 check-manifest.py "$RUNNER_TEMP/native-qa-manifest.xml" io.github.dawartariq.printly.owner.native.qa
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$QA" > "$RUNNER_TEMP/native-qa-badging.txt"
-          grep -F "application-label:'Printly Isolated Test'" "$RUNNER_TEMP/native-qa-badging.txt"
-          grep -F 'application-debuggable' "$RUNNER_TEMP/native-qa-badging.txt"
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$QA"
-          CONFIG=$(find app/build/generated -name BuildConfig.java -path '*/qa/*' -print -quit)
-          test -n "$CONFIG"
-          grep -F 'ISOLATED_TEST_MODE = true' "$CONFIG"
-          grep -F 'DEMO_MODE = false' "$CONFIG"
-          grep -F 'https://native-staging.example.invalid' "$CONFIG"
-          grep -F 'rahfmpsdbwbktlobntkm.supabase.co' "$CONFIG"
-          if grep -F 'lgfqetnfazawglwllymb.supabase.co' "$CONFIG"; then echo 'Production Auth host found in QA build.' >&2; exit 1; fi
+          set +e
+          (
+            set -eu -o pipefail
+            for origin in '' 'http://test.example.invalid' 'https://printly-steel-three.vercel.app' 'https://test.example.invalid/path'; do
+              if ./gradlew --no-daemon assembleQa "-PprintlyQaSiteOrigin=$origin" > "$RUNNER_TEMP/invalid-native-qa.log" 2>&1; then
+                echo 'Unsafe isolated-test origin unexpectedly built.' >&2; exit 1
+              fi
+              if ! grep -F 'isolated QA build needs' "$RUNNER_TEMP/invalid-native-qa.log"; then
+                tail -n 80 "$RUNNER_TEMP/invalid-native-qa.log"
+                echo 'Expected the isolated-origin guard, but another failure occurred.' >&2; exit 1
+              fi
+            done
+            ./gradlew --no-daemon assembleQa '-PprintlyQaSiteOrigin=https://native-staging.example.invalid'
+            QA=app/build/outputs/apk/qa/app-qa.apk
+            "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest print "$QA" > "$RUNNER_TEMP/native-qa-manifest.xml"
+            python3 check-manifest.py "$RUNNER_TEMP/native-qa-manifest.xml" io.github.dawartariq.printly.owner.native.qa
+            "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$QA" > "$RUNNER_TEMP/native-qa-badging.txt"
+            grep -F "application-label:'Printly Isolated Test'" "$RUNNER_TEMP/native-qa-badging.txt"
+            grep -F 'application-debuggable' "$RUNNER_TEMP/native-qa-badging.txt"
+            "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$QA"
+            CONFIG=$(find app/build/generated -name BuildConfig.java -path '*/qa/*' -print -quit)
+            test -n "$CONFIG"
+            grep -F 'ISOLATED_TEST_MODE = true' "$CONFIG"
+            grep -F 'DEMO_MODE = false' "$CONFIG"
+            grep -F 'https://native-staging.example.invalid' "$CONFIG"
+            grep -F 'rahfmpsdbwbktlobntkm.supabase.co' "$CONFIG"
+            if grep -F 'lgfqetnfazawglwllymb.supabase.co' "$CONFIG"; then echo 'Production Auth host found in QA build.' >&2; exit 1; fi
+          ) > "$RUNNER_TEMP/native-qa-check.log" 2>&1
+          result=$?
+          tail -n 160 "$RUNNER_TEMP/native-qa-check.log"
+          if [ "$result" -ne 0 ]; then
+            lines=$(tail -n 80 "$RUNNER_TEMP/native-qa-check.log")
+            lines=${lines//'%'/'%25'}; lines=${lines//$'\r'/'%0D'}; lines=${lines//$'\n'/'%0A'}
+            echo "::error title=Native isolated build::$lines"
+          fi
+          exit "$result"
       - name: Refuse release without signing configuration
         working-directory: apps/printly-owner-native-android
         shell: bash

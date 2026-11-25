@@ -3,7 +3,6 @@ package io.github.dawartariq.printly.owner.nativeapp
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
-import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
