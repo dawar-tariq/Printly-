@@ -25,6 +25,9 @@ jobs:
           persist-credentials: false
       - name: Test unpublished native draft safeguards
         run: node --test scripts/create-native-draft-review.test.mjs
+      - name: Test the native manifest guard with synthetic XML
+        working-directory: apps/printly-owner-native-android
+        run: python3 -m unittest test_check_manifest.py
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin

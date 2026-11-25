@@ -19,13 +19,14 @@ async function body(request: Request): Promise<Record<string, unknown> | null> {
 const keysAre = (value: Record<string, unknown>, keys: string[]) =>
   Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
 
-/** Bound enrollment per verified user even when the client changes networks.
- * Uses the existing checkout window with a separate HMAC namespace. */
-async function registrationLimit(userId: string): Promise<Response | null> {
+/** Bound each write type per verified user even when the client changes networks.
+ * Separate HMAC namespaces keep registration attempts from consuming cleanup's
+ * allowance; revocation creates a short-lived tombstone even for a late POST. */
+async function deviceWriteLimit(userId: string, operation: 'registration' | 'revocation'): Promise<Response | null> {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!key || !uuid.test(userId)) return jsonError(503, 'unavailable', 'Notification setup is unavailable.');
   try {
-    const hash = createHmac('sha256', key).update(`printly-native-push-registration-v1:${userId.toLowerCase()}`).digest('hex');
+    const hash = createHmac('sha256', key).update(`printly-native-push-${operation}-v1:${userId.toLowerCase()}`).digest('hex');
     const result = await createAdminSupabase().rpc('consume_public_rate_limit', { p_bucket: 'checkout', p_client_hash: hash });
     if (result.error || !result.data || typeof result.data.allowed !== 'boolean') return jsonError(503, 'unavailable', 'Notification setup is unavailable.');
     if (result.data.allowed) return null;
@@ -46,7 +47,7 @@ export async function POST(request: Request): Promise<Response> {
     return jsonError(422, 'validation', 'Invalid notification registration.');
   }
   if (!nativePushConfig()) return jsonError(503, 'unavailable', 'Notifications are not set up on the server yet.');
-  const limited = await registrationLimit(session.user.id);
+  const limited = await deviceWriteLimit(session.user.id, 'registration');
   if (limited) return limited;
   const staff = await getStaffContext({ allowExpired: true });
   if (!staff || staff.membershipError || staff.subscriptionError) return jsonError(503, 'unavailable', 'Could not verify your shop.');
@@ -56,7 +57,8 @@ export async function POST(request: Request): Promise<Response> {
   });
   if (result.error) {
     if (result.error.message?.includes('SHOP_MEMBERSHIP_REQUIRED')) return jsonError(403, 'forbidden', 'Not your shop.');
-    if (result.error.message?.includes('PUSH_BINDING_IN_USE') || result.error.message?.includes('NATIVE_PUSH_DEVICE_LIMIT')) {
+    if (result.error.message?.includes('PUSH_BINDING_IN_USE') || result.error.message?.includes('NATIVE_PUSH_BINDING_REVOKED') ||
+        result.error.message?.includes('NATIVE_PUSH_DEVICE_LIMIT')) {
       return jsonError(409, 'device_limit', 'Could not connect this device. Please contact support.');
     }
     return jsonError(503, 'unavailable', 'Could not connect notifications. Please try again.');
@@ -72,6 +74,10 @@ export async function DELETE(request: Request): Promise<Response> {
   if (!data || !keysAre(data, ['binding_id']) || typeof data.binding_id !== 'string' || !uuid.test(data.binding_id)) {
     return jsonError(422, 'validation', 'Invalid notification registration.');
   }
+  // Bound tombstone creation independently from enrollment. This endpoint is
+  // still available when delivery is disabled or shop access has expired.
+  const limited = await deviceWriteLimit(session.user.id, 'revocation');
+  if (limited) return limited;
   const result = await createAdminSupabase().rpc('unregister_native_push_device', { p_user: session.user.id, p_binding: data.binding_id });
   if (result.error) return jsonError(503, 'unavailable', 'Could not disconnect notifications. Please try again.');
   return jsonOk({ ok: true }, { headers: { 'Cache-Control': 'private, no-store' } });

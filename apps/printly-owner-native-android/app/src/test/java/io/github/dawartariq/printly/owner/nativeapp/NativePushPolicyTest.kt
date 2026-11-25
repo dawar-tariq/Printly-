@@ -24,6 +24,30 @@ class NativePushPolicyTest {
         assertNull(nativePushNotice(payload, true, null, true))
     }
 
+    @Test fun enrolledSessionMustStillBeTheCurrentSession() {
+        val first = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        val second = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+        assertTrue(pushSessionMatches(true, first, first))
+        assertFalse(pushSessionMatches(false, first, first))
+        assertFalse(pushSessionMatches(true, first, second))
+        assertFalse(pushSessionMatches(true, first, null))
+        assertFalse(pushSessionMatches(true, "broken", "broken"))
+        // Even an otherwise valid old message cannot display after another
+        // account signs in on the same phone or in the same shop.
+        assertNull(nativePushNotice(payload, pushSessionMatches(true, first, second), binding, true))
+    }
+
+    @Test fun lateFirebaseCallbacksReconcileWithCurrentConsent() {
+        val first = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        val second = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+        assertEquals(PushCallbackAction.UNREGISTER, pushCallbackAction(true, false, first, first, true))
+        assertEquals(PushCallbackAction.IGNORE, pushCallbackAction(false, false, first, first, true))
+        assertEquals(PushCallbackAction.ACCEPT, pushCallbackAction(true, true, first, first, true))
+        assertEquals(PushCallbackAction.REREGISTER, pushCallbackAction(false, true, first, first, true))
+        assertEquals(PushCallbackAction.STOP, pushCallbackAction(true, true, first, second, true))
+        assertEquals(PushCallbackAction.STOP, pushCallbackAction(false, true, first, first, false))
+    }
+
     @Test fun unexpectedOrMalformedDataIsRejected() {
         assertNull(nativePushNotice(payload + ("customer" to "private"), true, binding, true))
         assertNull(nativePushNotice(payload + ("kind" to "unknown"), true, binding, true))

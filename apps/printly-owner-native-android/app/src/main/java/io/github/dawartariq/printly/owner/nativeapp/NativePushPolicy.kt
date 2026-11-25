@@ -7,6 +7,20 @@ private val pushUuid = Regex("^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0
 internal fun validPushFid(value: String): Boolean = Regex("^[A-Za-z0-9_-]{22}$").matches(value)
 internal fun validPushUuid(value: String): Boolean = pushUuid.matches(value)
 
+/** A random local session ID survives refresh, but changes at every sign-in. */
+internal fun pushSessionMatches(enabled: Boolean, enrolledSession: String?, currentSession: String?): Boolean =
+    enabled && enrolledSession != null && currentSession != null && validPushUuid(enrolledSession) && enrolledSession == currentSession
+
+internal enum class PushCallbackAction { ACCEPT, STOP, UNREGISTER, REREGISTER, IGNORE }
+internal fun pushCallbackAction(registered: Boolean, enabled: Boolean, enrolledSession: String?, currentSession: String?, allowed: Boolean): PushCallbackAction {
+    if (!enabled) return if (registered) PushCallbackAction.UNREGISTER else PushCallbackAction.IGNORE
+    if (!pushSessionMatches(enabled, enrolledSession, currentSession) || !allowed) return PushCallbackAction.STOP
+    return if (registered) PushCallbackAction.ACCEPT else PushCallbackAction.REREGISTER
+}
+
+/** Local storage/display shutdown can fail independently of remote deletion. */
+internal data class LocalPushStop(val binding: String? = null, val localConfirmed: Boolean = true)
+
 /** The binding changes on each opt-in. Late messages from an earlier account
  * or a signed-out phone must never turn into a notification. */
 internal fun nativePushNotice(data: Map<String, String>, enabled: Boolean, binding: String?, allowed: Boolean): PushNotice? {

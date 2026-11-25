@@ -28,6 +28,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -41,12 +42,15 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
 @Composable fun PrintlyApp(api: OwnerApi) {
     val context = LocalContext.current
     val preferences = remember { context.getSharedPreferences("native_preferences", 0) }
+    val scope = rememberCoroutineScope()
     var phase by remember { mutableStateOf(Phase.STARTING) }
     var hadSession by remember { mutableStateOf(false) }
+    var signingOut by remember { mutableStateOf(false) }
+    var workspaceEpoch by remember { mutableIntStateOf(0) }
     var loginNotice by remember { mutableStateOf("") }
     val workspaceApi = remember(api) {
         ExpiryHandlingApi(api) {
-            if (phase == Phase.WORKSPACE) {
+            if (phase == Phase.WORKSPACE && !signingOut) {
                 hadSession = false
                 loginNotice = "Your session expired. Please sign in again."
                 phase = Phase.LOGIN
@@ -55,6 +59,7 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
     }
     LaunchedEffect(api) {
         hadSession = try { api.restore() } catch (_: Exception) { false }
+        if (hadSession) workspaceEpoch++
         phase = if (!preferences.getBoolean("onboarding_done", false)) Phase.INTRO else if (hadSession) Phase.WORKSPACE else Phase.LOGIN
     }
     Surface(Modifier.fillMaxSize(), color = Cream) {
@@ -64,11 +69,28 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
                 preferences.edit().putBoolean("onboarding_done", true).apply()
                 phase = if (hadSession) Phase.WORKSPACE else Phase.LOGIN
             }
-            Phase.LOGIN -> LoginScreen(api, loginNotice) { loginNotice = ""; phase = Phase.WORKSPACE }
-            Phase.WORKSPACE -> Workspace(workspaceApi) { confirmed ->
-                hadSession = false
-                loginNotice = if (confirmed) "Signed out on this device." else "Signed out and notifications are off on this phone, but server removal could not be confirmed. Keep this device private."
-                phase = Phase.LOGIN
+            Phase.LOGIN -> LoginScreen(api, loginNotice) { loginNotice = ""; workspaceEpoch++; phase = Phase.WORKSPACE }
+            Phase.WORKSPACE -> key(workspaceEpoch) {
+                val epoch = workspaceEpoch
+                Workspace(workspaceApi, signingOut) {
+                    if (!signingOut) {
+                        signingOut = true
+                        // Begin local cleanup before a click/navigation can
+                        // dispose this UI; remote cleanup remains non-cancellable.
+                        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                            val confirmed = try { api.signOut() }
+                                catch (cancelled: CancellationException) { throw cancelled }
+                                catch (_: Exception) { false }
+                            if (phase == Phase.WORKSPACE && workspaceEpoch == epoch) {
+                                hadSession = false
+                                loginNotice = if (confirmed) "Signed out on this device." else
+                                    "Sign-out or server removal could not be fully confirmed. Keep this phone private and clear the app’s data before handing it over."
+                                phase = Phase.LOGIN
+                            }
+                            signingOut = false
+                        }
+                    }
+                }
             }
         }
     }
@@ -178,9 +200,8 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
     }
 }
 
-@Composable private fun Workspace(api: OwnerApi, onSignedOut: (Boolean) -> Unit) {
+@Composable private fun Workspace(api: OwnerApi, signingOut: Boolean, onSignOut: () -> Unit) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     var screen by remember { mutableStateOf(Screen.HOME) }
     var detailId by remember { mutableStateOf("") }
     var detailParent by remember { mutableStateOf(Screen.ORDERS) }
@@ -194,6 +215,12 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
     var restricted by remember { mutableStateOf(false) }
     var refreshKey by remember { mutableIntStateOf(0) }
     var experience by remember(api) { mutableStateOf(OwnerExperience()) }
+    if (signingOut) {
+        Column(Modifier.fillMaxSize().safeDrawingPadding().padding(24.dp), verticalArrangement = Arrangement.Center) {
+            LoadingPanel("Signing out on this phone…")
+        }
+        return
+    }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
 
     // These are presentation settings only. Keep the last safe values if the
@@ -298,7 +325,7 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
                     Heading("Can’t open your shop", "Your account or shop access could not be checked.")
                     ErrorBanner(accessError)
                     PrimaryButton("Try again", { refreshKey++ }, Modifier.fillMaxWidth())
-                    SecondaryButton("Sign out", { scope.launch { onSignedOut(api.signOut()) } }, Modifier.fillMaxWidth())
+                    SecondaryButton("Sign out", onSignOut, Modifier.fillMaxWidth())
                 }
                 else -> when (screen) {
                     Screen.HOME -> HomeScreen(api, me, meFresh, experience, { screen = it },
@@ -308,7 +335,7 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
                         onOpen = { detailId = it; detailParent = Screen.ORDERS; screen = Screen.DETAIL })
                     Screen.INVENTORY -> InventoryScreen(api)
                     Screen.REPORTS -> ReportsScreen(api)
-                    Screen.MORE -> MoreScreen(restricted, api.isDemo, onOpen = { screen = it }, onSignOut = { scope.launch { onSignedOut(api.signOut()) } })
+                    Screen.MORE -> MoreScreen(restricted, api.isDemo, onOpen = { screen = it }, onSignOut = onSignOut)
                     Screen.DETAIL -> OrderDetailScreen(api, detailId, onBack = { screen = detailParent })
                     Screen.PROFILE -> ProfileScreen(api, me, meFresh,
                         onInvalidated = { meFresh = false }, onSaved = { updated -> me = updated; meFresh = true },

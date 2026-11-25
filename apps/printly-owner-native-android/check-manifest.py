@@ -36,9 +36,33 @@ if production:
         raise SystemExit('Firebase auto-init must default off and FID registration must be enabled.')
     if not any(p.get(ANDROID + 'name') == 'com.google.firebase.provider.FirebaseInitProvider' and p.get(ANDROID + 'exported') == 'false' for p in app.findall('provider')):
         raise SystemExit('Production Firebase must have its internal initializer.')
-    if not any(a.get(ANDROID + 'name') == 'com.google.firebase.MESSAGING_EVENT' for f in services[0].findall('intent-filter') for a in f.findall('action')):
-        raise SystemExit('Missing FCM messaging event handler.')
+    receiver = [r for r in app.findall('receiver') if r.get(ANDROID + 'name') == 'com.google.firebase.iid.FirebaseInstanceIdReceiver']
+    if len(receiver) != 1 or receiver[0].get(ANDROID + 'exported') != 'true' or receiver[0].get(ANDROID + 'permission') != 'com.google.android.c2dm.permission.SEND':
+        raise SystemExit('The Firebase receiver must be protected by the Google sender permission.')
+    if services[0].get(ANDROID + 'name') != 'io.github.dawartariq.printly.owner.nativeapp.NativeMessagingService':
+        raise SystemExit('Unexpected native messaging service class.')
+    def event_filters(service):
+        return [f for f in service.findall('intent-filter') if any(
+            a.get(ANDROID + 'name') == 'com.google.firebase.MESSAGING_EVENT' for a in f.findall('action'))]
+    def priority(intent_filter):
+        try:
+            value = int(intent_filter.get(ANDROID + 'priority', '0'), 0)
+            return value - 2**32 if value >= 2**31 else value
+        except ValueError:
+            raise SystemExit('Unable to verify messaging service priority.')
+    own_filters = event_filters(services[0])
+    if len(own_filters) != 1:
+        raise SystemExit('Expected one FCM messaging event handler.')
+    own_priority = priority(own_filters[0])
+    # Firebase includes its own fallback service at priority -500. An equal or
+    # higher-priority competitor could consume callbacks instead of our handler.
+    for service in app.findall('service'):
+        if service is services[0]:
+            continue
+        if any(priority(f) >= own_priority for f in event_filters(service)):
+            raise SystemExit('Another messaging service can outrank the native handler.')
 else:
-    if services or 'android.permission.POST_NOTIFICATIONS' in permissions or any('firebase' in p.get(ANDROID + 'name', '').lower() for p in app.findall('provider')):
+    components = app.findall('provider') + app.findall('service') + app.findall('receiver')
+    if services or 'android.permission.POST_NOTIFICATIONS' in permissions or any('firebase' in c.get(ANDROID + 'name', '').lower() for c in components):
         raise SystemExit('Demo and isolated QA must not include production Firebase or push permissions.')
 print('Native launcher, privacy flags, file provider and variant-specific push manifest verified.')

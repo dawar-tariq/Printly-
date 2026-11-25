@@ -59,7 +59,7 @@ private const val UNREGISTER_WORK = "printly_native_fcm_unregister"
 private const val SYNC_INTERVAL = 12 * 60 * 60 * 1000L
 
 private data class PushState(
-    val enabled: Boolean, val binding: String, val shop: String, val fid: String,
+    val enabled: Boolean, val binding: String, val shop: String, val sessionId: String, val fid: String,
     val syncedFid: String, val syncedAt: Long, val problem: String,
 ) {
     val connected: Boolean get() = enabled && fid.isNotBlank() && fid == syncedFid && syncedAt > 0
@@ -78,7 +78,8 @@ internal object NativePush {
     private fun read(context: Context): PushState = synchronized(stateLock) {
         val p = prefs(context)
         PushState(p.getBoolean("enabled", false), p.getString("binding", "") ?: "", p.getString("shop", "") ?: "",
-            p.getString("fid", "") ?: "", p.getString("synced_fid", "") ?: "", p.getLong("synced_at", 0), p.getString("problem", "") ?: "")
+            p.getString("session_id", "") ?: "", p.getString("fid", "") ?: "", p.getString("synced_fid", "") ?: "",
+            p.getLong("synced_at", 0), p.getString("problem", "") ?: "")
     }
     private fun problem(context: Context, binding: String, value: String) {
         synchronized(stateLock) {
@@ -103,10 +104,10 @@ internal object NativePush {
     }
     private fun manager(context: Context) = WorkManager.getInstance(context.applicationContext)
     private fun constraints() = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
-    private fun enqueueRegister(context: Context) {
+    private fun enqueueRegister(context: Context, afterCurrent: Boolean = false) {
         val work = OneTimeWorkRequestBuilder<FcmRegisterWorker>().setConstraints(constraints())
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 1, TimeUnit.MINUTES).build()
-        manager(context).enqueueUniqueWork(REGISTER_WORK, ExistingWorkPolicy.KEEP, work)
+        manager(context).enqueueUniqueWork(REGISTER_WORK, if (afterCurrent) ExistingWorkPolicy.APPEND_OR_REPLACE else ExistingWorkPolicy.KEEP, work)
     }
     private fun enqueueSync(context: Context) {
         val work = OneTimeWorkRequestBuilder<PushSyncWorker>().setConstraints(constraints())
@@ -114,67 +115,100 @@ internal object NativePush {
         // A changed FID arriving while a worker runs must not be dropped.
         manager(context).enqueueUniqueWork(SYNC_WORK, ExistingWorkPolicy.APPEND_OR_REPLACE, work)
     }
-    private fun enqueueUnregister(context: Context) {
+    private fun enqueueUnregister(context: Context, afterCurrent: Boolean = false) {
         val work = OneTimeWorkRequestBuilder<FcmUnregisterWorker>().setConstraints(constraints())
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 1, TimeUnit.MINUTES).build()
-        manager(context).enqueueUniqueWork(UNREGISTER_WORK, ExistingWorkPolicy.REPLACE, work)
+        manager(context).enqueueUniqueWork(UNREGISTER_WORK, if (afterCurrent) ExistingWorkPolicy.APPEND_OR_REPLACE else ExistingWorkPolicy.REPLACE, work)
     }
 
     private suspend fun enable(context: Context, shop: String) = registrationLock.withLock {
         if (!validPushUuid(shop) || !allowed(context)) throw AppError("notification_permission", "Allow notifications in your phone settings first.")
         createChannel(context)
-        if (!allowed(context)) throw AppError("notification_permission", "Allow the New orders notification channel in your phone settings.")
-        val previous = read(context)
-        if (previous.enabled && previous.shop != shop) throw AppError("notification_shop", "Turn notifications off before changing shops.")
-        val binding = if (previous.enabled && validPushUuid(previous.binding)) previous.binding else UUID.randomUUID().toString()
         synchronized(stateLock) {
-            check(prefs(context).edit().clear().putBoolean("enabled", true).putString("binding", binding).putString("shop", shop).commit())
-        }
-        try {
-            manager(context).cancelUniqueWork(UNREGISTER_WORK)
-            FirebaseMessaging.getInstance().isAutoInitEnabled = true
-            enqueueRegister(context)
-        } catch (_: Exception) { problem(context, binding, "Could not start notifications. Check Google Play services and try again.") }
-    }
-
-    /** Clearing and canceling notifications happen under the same lock as
-     * delivery, so an in-flight old message cannot appear after sign-out. */
-    private fun stopLocal(context: Context): PushState? {
-        val previous = synchronized(stateLock) {
-            val state = read(context)
-            prefs(context).edit().clear().commit()
-            try { NotificationManagerCompat.from(context).cancelAll() } catch (_: Exception) { /* Local gate remains off. */ }
-            state.takeIf { it.enabled && validPushUuid(it.binding) }
-        }
-        if (previous != null) {
+            if (!allowed(context)) throw AppError("notification_permission", "Allow the New orders notification channel in your phone settings.")
+            val currentSession = SessionStore(context).localIdOrNull()
+                ?: throw AppError("session_expired", "Please sign in again.", 401)
+            var previous = read(context)
+            if (previous.enabled && !pushSessionMatches(true, previous.sessionId, currentSession)) {
+                stopLocalLocked(context)
+                previous = read(context)
+            }
+            if (previous.enabled && previous.shop != shop) throw AppError("notification_shop", "Turn notifications off before changing shops.")
+            val binding = if (previous.enabled && validPushUuid(previous.binding)) previous.binding else UUID.randomUUID().toString()
+            if (!previous.enabled || binding != previous.binding) {
+                check(prefs(context).edit().clear().putBoolean("enabled", true).putString("binding", binding)
+                    .putString("shop", shop).putString("session_id", currentSession).commit())
+            }
+            // Scheduling and the persisted opt-in transition share this lock;
+            // a late stop cannot cancel work belonging to a newer opt-in.
             try {
-                FirebaseMessaging.getInstance().isAutoInitEnabled = false
-                manager(context).cancelUniqueWork(REGISTER_WORK)
-                manager(context).cancelUniqueWork(SYNC_WORK)
-                enqueueUnregister(context)
-            } catch (_: Exception) { /* Local delivery remains disabled. */ }
+                manager(context).cancelUniqueWork(UNREGISTER_WORK)
+                FirebaseMessaging.getInstance().isAutoInitEnabled = true
+                enqueueRegister(context)
+            } catch (_: Exception) { problem(context, binding, "Could not start notifications. Check Google Play services and try again.") }
         }
-        return previous
     }
 
-    private suspend fun disconnect(context: Context, api: OwnerApi): Boolean {
-        val previous = stopLocal(context) ?: return true
+    /** State, notification cancellation and work scheduling share the display
+     * lock. No code here waits for registrationLock or the API session lock. */
+    private fun stopLocalLocked(context: Context, expectedSession: String? = null, expectedBinding: String? = null): LocalPushStop {
+        val state = read(context)
+        if (expectedSession != null && state.sessionId.isNotBlank() && state.sessionId != expectedSession) return LocalPushStop()
+        if (expectedBinding != null && state.binding != expectedBinding) return LocalPushStop()
+        if (!state.enabled && state.binding.isBlank() && state.fid.isBlank()) return LocalPushStop()
+        var confirmed = prefs(context).edit().clear().commit()
+        try { NotificationManagerCompat.from(context).cancelAll() } catch (_: Exception) { confirmed = false }
+        try { FirebaseMessaging.getInstance().isAutoInitEnabled = false } catch (_: Exception) { confirmed = false }
+        try { manager(context).cancelUniqueWork(REGISTER_WORK); manager(context).cancelUniqueWork(SYNC_WORK) } catch (_: Exception) { confirmed = false }
+        try { enqueueUnregister(context) } catch (_: Exception) { confirmed = false }
+        return LocalPushStop(state.binding.takeIf { validPushUuid(it) }, confirmed)
+    }
+    private fun stopLocal(context: Context, expectedSession: String? = null, expectedBinding: String? = null): LocalPushStop = synchronized(stateLock) {
+        try { stopLocalLocked(context, expectedSession, expectedBinding) } catch (_: Exception) { LocalPushStop(localConfirmed = false) }
+    }
+
+    /** The session and push gate change atomically with respect to delivery and
+     * opt-in. The callback never waits for registrationLock. */
+    fun sessionChange(context: Context, expectedSession: String? = null, change: () -> Unit): LocalPushStop = synchronized(stateLock) {
+        val stopped = try { stopLocalLocked(context, expectedSession) } catch (_: Exception) { LocalPushStop(localConfirmed = false) }
+        change()
+        stopped
+    }
+    fun beginSignOut(context: Context, sessionId: String): LocalPushStop = stopLocal(context, expectedSession = sessionId)
+
+    suspend fun finishSignOut(context: Context, stops: List<LocalPushStop>, revoke: suspend (String) -> Boolean): Boolean {
+        val bindings = stops.mapNotNull { it.binding }.distinct()
+        if (bindings.isEmpty()) return stops.all { it.localConfirmed }
         return registrationLock.withLock {
-            try { api.request("DELETE", "push-device", JSONObject().put("binding_id", previous.binding)); true }
+            var confirmed = stops.all { it.localConfirmed }
+            for (binding in bindings) {
+                if (!revoke(binding)) confirmed = false
+            }
+            confirmed
+        }
+    }
+
+    private suspend fun disconnect(context: Context, api: OwnerApi, expectedBinding: String? = null): Boolean {
+        val previous = stopLocal(context, expectedBinding = expectedBinding)
+        val binding = previous.binding ?: return previous.localConfirmed
+        return registrationLock.withLock {
+            try { api.request("DELETE", "push-device", JSONObject().put("binding_id", binding)); previous.localConfirmed }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { false }
         }
     }
-    suspend fun beforeSignOut(context: Context, api: OwnerApi): Boolean = disconnect(context, api)
-    fun sessionExpired(context: Context) { stopLocal(context) }
 
     /** Revalidate permission and shop on each foreground return, and ask FCM to
      * refresh registration. A worker also retries when the network returns. */
     suspend fun refresh(context: Context, api: OwnerApi, shopId: String?) {
         val state = read(context)
         if (!state.enabled) return
+        if (!pushSessionMatches(true, state.sessionId, SessionStore(context).localIdOrNull())) {
+            stopLocal(context, expectedBinding = state.binding)
+            return
+        }
         if (!allowed(context) || (shopId != null && shopId.isNotBlank() && shopId != state.shop)) {
-            disconnect(context, api)
+            disconnect(context, api, state.binding)
             return
         }
         try { enqueueRegister(context) }
@@ -183,27 +217,62 @@ internal object NativePush {
 
     fun registered(context: Context, fid: String) {
         if (!validPushFid(fid)) return
-        val shouldSync = synchronized(stateLock) {
-            val p = prefs(context)
+        synchronized(stateLock) {
             val state = read(context)
-            if (!state.enabled || !validPushUuid(state.binding) || !validPushUuid(state.shop) || !allowed(context)) false
-            else {
-                val changed = state.fid != fid
-                val edit = p.edit().putString("fid", fid)
-                if (changed) edit.remove("synced_fid").putLong("synced_at", 0)
-                edit.commit()
-                changed || state.syncedFid != fid || System.currentTimeMillis() - state.syncedAt >= SYNC_INTERVAL
+            val currentSession = if (state.enabled) SessionStore(context).localIdOrNull() else null
+            when (pushCallbackAction(true, state.enabled, state.sessionId, currentSession, allowed(context))) {
+                PushCallbackAction.UNREGISTER -> {
+                    // A timed-out/cancelled register() can finish after opt-out.
+                    try { FirebaseMessaging.getInstance().isAutoInitEnabled = false; enqueueUnregister(context, afterCurrent = true) }
+                    catch (_: Exception) { /* The local display gate stays off. */ }
+                }
+                PushCallbackAction.STOP -> stopLocalLocked(context, expectedBinding = state.binding)
+                PushCallbackAction.ACCEPT -> {
+                    if (!validPushUuid(state.binding) || !validPushUuid(state.shop)) { stopLocalLocked(context); return@synchronized }
+                    val changed = state.fid != fid
+                    val edit = prefs(context).edit().putString("fid", fid)
+                    if (changed) edit.remove("synced_fid").putLong("synced_at", 0)
+                    if (!edit.commit()) { problem(context, state.binding, "Could not save notification setup. Please try again."); return@synchronized }
+                    if (changed || state.syncedFid != fid || System.currentTimeMillis() - state.syncedAt >= SYNC_INTERVAL) {
+                        try { enqueueSync(context) }
+                        catch (_: Exception) { problem(context, state.binding, "Could not connect notifications. Open the app to retry.") }
+                    }
+                }
+                else -> Unit
             }
         }
-        if (shouldSync) try { enqueueSync(context) } catch (_: Exception) { problem(context, read(context).binding, "Could not connect notifications. Open the app to retry.") }
+    }
+
+    fun unregistered(context: Context) = synchronized(stateLock) {
+        val state = read(context)
+        val currentSession = if (state.enabled) SessionStore(context).localIdOrNull() else null
+        when (pushCallbackAction(false, state.enabled, state.sessionId, currentSession, allowed(context))) {
+            PushCallbackAction.STOP -> { stopLocalLocked(context, expectedBinding = state.binding); Unit }
+            PushCallbackAction.REREGISTER -> {
+                // An earlier unregister() may finish after a new opt-in. Clear
+                // the cached server sync and queue registration behind any
+                // running register work so the late callback cannot be lost.
+                prefs(context).edit().remove("synced_fid").putLong("synced_at", 0).commit()
+                try { FirebaseMessaging.getInstance().isAutoInitEnabled = true; enqueueRegister(context, afterCurrent = true) }
+                catch (_: Exception) { problem(context, state.binding, "Could not reconnect notifications. Open the app to retry.") }
+            }
+            else -> Unit
+        }
     }
 
     internal suspend fun registerFcm(context: Context): Boolean = registrationLock.withLock {
-        val state = read(context)
-        if (!state.enabled) return@withLock true
-        if (!allowed(context)) { stopLocal(context); return@withLock true }
+        val state = synchronized(stateLock) {
+            val current = read(context)
+            if (!current.enabled) return@withLock true
+            if (!pushSessionMatches(true, current.sessionId, SessionStore(context).localIdOrNull()) || !allowed(context)) {
+                stopLocalLocked(context, expectedBinding = current.binding)
+                return@withLock true
+            }
+            try { FirebaseMessaging.getInstance().isAutoInitEnabled = true }
+            catch (_: Exception) { problem(context, current.binding, "Waiting for Google Play services or an internet connection."); return@withLock false }
+            current
+        }
         try {
-            FirebaseMessaging.getInstance().isAutoInitEnabled = true
             withContext(Dispatchers.IO) { Tasks.await(FirebaseMessaging.getInstance().register(), 20, TimeUnit.SECONDS) }
             true // onRegistered() schedules the authenticated server sync.
         } catch (cancelled: CancellationException) { throw cancelled }
@@ -213,32 +282,40 @@ internal object NativePush {
     internal suspend fun sync(context: Context): Boolean = registrationLock.withLock {
         val state = read(context)
         if (!state.enabled) return@withLock true
-        if (!allowed(context)) { stopLocal(context); return@withLock true }
+        if (!pushSessionMatches(true, state.sessionId, SessionStore(context).localIdOrNull()) || !allowed(context)) {
+            stopLocal(context, expectedBinding = state.binding)
+            return@withLock true
+        }
         if (!validPushUuid(state.binding) || !validPushUuid(state.shop) || !validPushFid(state.fid)) return@withLock true
         if (state.fid == state.syncedFid && state.syncedAt > 0 && System.currentTimeMillis() - state.syncedAt < SYNC_INTERVAL) return@withLock true
         val api = OwnerApiProvider.live(context)
         try {
             if (!api.restore()) return@withLock true
-            // The server re-verifies the bearer and membership for this exact shop.
-            api.request("POST", "push-device", JSONObject().put("shop_id", state.shop).put("binding_id", state.binding).put("fid", state.fid))
+            // Bind the request to the same local session, then re-verify its
+            // bearer and membership for this exact shop on the server.
+            api.registerPush(state.sessionId, JSONObject().put("shop_id", state.shop).put("binding_id", state.binding).put("fid", state.fid))
             synchronized(stateLock) {
                 val current = read(context)
-                if (current.enabled && current.binding == state.binding && current.shop == state.shop && current.fid == state.fid) {
+                if (current.enabled && current.binding == state.binding && current.shop == state.shop &&
+                    current.sessionId == state.sessionId && current.fid == state.fid) {
                     prefs(context).edit().putString("synced_fid", state.fid).putLong("synced_at", System.currentTimeMillis()).remove("problem").commit()
                 }
             }
             true
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (error: AppError) {
-            if (error.httpStatus == 401 || error.httpStatus == 403) { stopLocal(context); true }
-            else { problem(context, state.binding, "Could not connect notifications. We’ll retry when the service is available."); false }
+            if (error.httpStatus == 401 || error.httpStatus == 403 || error.code == "session_changed" || error.code == "stale_request") {
+                stopLocal(context, expectedBinding = state.binding); true
+            } else { problem(context, state.binding, "Could not connect notifications. We’ll retry when the service is available."); false }
         } catch (_: Exception) { problem(context, state.binding, "Could not connect notifications. We’ll retry when the service is available."); false }
     }
 
     internal suspend fun unregisterFcm(context: Context): Boolean = registrationLock.withLock {
-        if (read(context).enabled) return@withLock true
+        synchronized(stateLock) {
+            if (read(context).enabled) return@withLock true
+            try { FirebaseMessaging.getInstance().isAutoInitEnabled = false } catch (_: Exception) { return@withLock false }
+        }
         try {
-            FirebaseMessaging.getInstance().isAutoInitEnabled = false
             withContext(Dispatchers.IO) { Tasks.await(FirebaseMessaging.getInstance().unregister(), 20, TimeUnit.SECONDS) }
             true
         } catch (cancelled: CancellationException) { throw cancelled }
@@ -248,7 +325,8 @@ internal object NativePush {
     @SuppressLint("MissingPermission")
     fun deliver(context: Context, data: Map<String, String>) = synchronized(stateLock) {
         val state = read(context)
-        val notice = nativePushNotice(data, state.enabled && SessionStore(context).hasSession(), state.binding, allowed(context)) ?: return@synchronized
+        val sessionMatches = pushSessionMatches(state.enabled, state.sessionId, SessionStore(context).localIdOrNull())
+        val notice = nativePushNotice(data, sessionMatches, state.binding, allowed(context)) ?: return@synchronized
         createChannel(context)
         if (!allowed(context)) return@synchronized
         val intent = Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
@@ -317,9 +395,11 @@ internal object NativePush {
                 SecondaryButton(if (busy) "Turning off…" else "Turn off notifications", {
                     if (!busy) scope.launch {
                         busy = true
-                        val confirmed = try { disconnect(context, api) } catch (_: Exception) { false }
+                        val confirmed = try { disconnect(context, api) }
+                            catch (cancelled: CancellationException) { throw cancelled }
+                            catch (_: Exception) { false }
                         state = read(context); busy = false
-                        notice = if (confirmed) "Notifications are off on this phone." else "Notifications are off on this phone, but server removal could not be confirmed."
+                        notice = if (confirmed) "Notifications are off on this phone." else "Notification shutdown could not be fully confirmed. Block Printly notifications in phone settings if needed."
                     }
                 }, Modifier.fillMaxWidth(), enabled = !busy)
             } else {
@@ -338,6 +418,7 @@ internal object NativePush {
 
 class NativeMessagingService : FirebaseMessagingService() {
     override fun onRegistered(installationId: String) { NativePush.registered(applicationContext, installationId) }
+    override fun onUnregistered(installationId: String) { NativePush.unregistered(applicationContext) }
     override fun onMessageReceived(message: RemoteMessage) { NativePush.deliver(applicationContext, message.data) }
 }
 

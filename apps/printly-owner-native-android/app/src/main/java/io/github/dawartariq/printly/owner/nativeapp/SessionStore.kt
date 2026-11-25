@@ -6,6 +6,7 @@ import android.security.keystore.KeyProperties
 import android.util.Base64
 import org.json.JSONObject
 import java.security.KeyStore
+import java.util.UUID
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -33,8 +34,9 @@ class SessionStore(context: Context) {
     @Synchronized fun save(session: Session) {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, requireNotNull(key(true)))
+        require(validPushUuid(session.localId))
         val plain = JSONObject().put("access_token", session.accessToken).put("refresh_token", session.refreshToken)
-            .put("expires_at", session.expiresAt).toString().toByteArray(Charsets.UTF_8)
+            .put("expires_at", session.expiresAt).put("local_id", session.localId).toString().toByteArray(Charsets.UTF_8)
         val ciphertext = cipher.doFinal(plain)
         val encoded = Base64.encodeToString(cipher.iv + ciphertext, Base64.NO_WRAP)
         check(prefs.edit().putString("session", encoded).commit()) { "Could not persist encrypted session" }
@@ -51,14 +53,27 @@ class SessionStore(context: Context) {
         val refresh = data.getString("refresh_token")
         val expiry = data.getLong("expires_at")
         require(access.isNotBlank() && refresh.isNotBlank() && access.length <= 8192 && refresh.length <= 8192 && expiry > 0)
-        return Session(access, refresh, expiry)
+        // Older signed builds did not store a local identity. Upgrade their
+        // encrypted session once, before it can be associated with push.
+        val needsUpgrade = !data.has("local_id")
+        val localId = if (needsUpgrade) UUID.randomUUID().toString() else data.getString("local_id")
+        require(validPushUuid(localId))
+        val restored = Session(access, refresh, expiry, localId)
+        if (needsUpgrade) save(restored)
+        return restored
     }
 
-    /** Used only as an additional local gate before displaying a generic alert. */
-    fun hasSession(): Boolean = prefs.contains("session")
+    /** Fail closed if ciphertext or the Keystore cannot be read. */
+    fun localIdOrNull(): String? = try { load()?.localId } catch (_: Exception) { null }
 
-    @Synchronized fun clear() {
-        prefs.edit().remove("session").commit()
-        try { KeyStore.getInstance("AndroidKeyStore").apply { load(null); deleteEntry(alias) } } catch (_: Exception) { /* local ciphertext was removed */ }
+    /** Either removing ciphertext or deleting its key prevents restoration. */
+    @Synchronized fun clear(): Boolean {
+        val removed = prefs.edit().remove("session").commit()
+        val keyRemoved = try {
+            val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            store.deleteEntry(alias)
+            !store.containsAlias(alias)
+        } catch (_: Exception) { false }
+        return removed || keyRemoved
     }
 }

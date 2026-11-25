@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({
-  config: true, authorize: true, tokenFails: false, sweepFails: false,
+  config: true, authorize: true, tokenFails: false, sweepFails: false, staleGone: false,
   calls: [] as Array<{ name: string; args?: Record<string, unknown> }>,
 }));
 vi.mock('@/lib/native-push-server', () => ({
@@ -16,12 +16,12 @@ vi.mock('@/lib/supabase', () => ({ createAdminSupabase: () => ({ rpc: async (nam
     { delivery_id: 'delivery-a', lease_token: 'lease-a', kind: 'order' },
     { delivery_id: 'delivery-b', lease_token: 'lease-b', kind: 'payment' },
   ], error: null };
-  if (name === 'finish_native_push_delivery') return { data: true, error: null };
+  if (name === 'finish_native_push_delivery') return { data: state.staleGone && args?.p_outcome === 'gone' ? 'retry' : args?.p_outcome, error: null };
   return { data: null, error: state.sweepFails ? { message: 'failed' } : null };
 } }) }));
 import { GET, POST } from './route';
 const request = () => new Request('https://printly.test/api/cron/native-order-push', { headers: { authorization: 'Bearer test' } });
-beforeEach(() => { state.config = true; state.authorize = true; state.tokenFails = false; state.sweepFails = false; state.calls = []; });
+beforeEach(() => { state.config = true; state.authorize = true; state.tokenFails = false; state.sweepFails = false; state.staleGone = false; state.calls = []; });
 
 describe('private native notification worker', () => {
   it('does not access credentials or queue for unauthorized callers', async () => {
@@ -37,9 +37,11 @@ describe('private native notification worker', () => {
   it('acknowledges each lease and returns counts rather than device data', async () => {
     const response = await POST(request());
     expect(response.status).toBe(200); expect(response.headers.get('cache-control')).toContain('no-store');
-    expect(await response.json()).toEqual({ claimed: 2, accepted: 1, retried: 0, expired: 1, discarded: 0, unconfirmed: 0, cleanup_ok: true });
+    expect(await response.json()).toEqual({ claimed: 2, accepted: 1, retried: 0, unregistered: 1, discarded: 0, unconfirmed: 0, cleanup_ok: true });
     expect(state.calls).toContainEqual({ name: 'finish_native_push_delivery', args: { p_id: 'delivery-a', p_lease: 'lease-a', p_outcome: 'sent' } });
     expect(state.calls).toContainEqual({ name: 'finish_native_push_delivery', args: { p_id: 'delivery-b', p_lease: 'lease-b', p_outcome: 'gone' } });
+    state.staleGone = true;
+    expect(await (await GET(request())).json()).toMatchObject({ retried: 1, unregistered: 0 });
     state.sweepFails = true;
     expect((await GET(request())).status).toBe(503);
   });

@@ -7,10 +7,23 @@ create table public.native_push_devices (
   user_id uuid not null references public.profiles(id) on delete cascade,
   shop_id uuid not null references public.shops(id) on delete cascade,
   fid text not null unique check (fid ~ '^[A-Za-z0-9_-]{22}$'),
+  generation uuid not null default gen_random_uuid(),
   updated_at timestamptz not null default clock_timestamp()
 );
 create index native_push_devices_shop on public.native_push_devices(shop_id, user_id);
 create index native_push_devices_user on public.native_push_devices(user_id);
+
+-- A DELETE must also defeat an older registration request that reaches the
+-- database late (for example, after the phone timed out). Bindings are random
+-- per opt-in; revocation is scoped to the authenticated user and retained well
+-- beyond any expected HTTP request lifetime. New opt-ins use a new binding.
+create table public.native_push_revocations (
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  binding_id uuid not null,
+  expires_at timestamptz not null default (clock_timestamp() + interval '7 days'),
+  primary key (user_id, binding_id)
+);
+create index native_push_revocations_expiry on public.native_push_revocations(expires_at);
 
 create table public.native_push_events (
   id uuid primary key default gen_random_uuid(),
@@ -29,15 +42,17 @@ create table public.native_push_deliveries (
   next_attempt_at timestamptz not null default clock_timestamp(),
   lease_until timestamptz,
   lease_token uuid,
+  leased_device_generation uuid,
   completed_at timestamptz,
   unique (event_id, binding_id)
 );
 create index native_push_pending on public.native_push_deliveries(next_attempt_at, id) where state = 'pending';
 
 alter table public.native_push_devices enable row level security;
+alter table public.native_push_revocations enable row level security;
 alter table public.native_push_events enable row level security;
 alter table public.native_push_deliveries enable row level security;
-revoke all on public.native_push_devices, public.native_push_events, public.native_push_deliveries from public, anon, authenticated, service_role;
+revoke all on public.native_push_devices, public.native_push_revocations, public.native_push_events, public.native_push_deliveries from public, anon, authenticated, service_role;
 
 -- Only the server calls this after verifying the bearer token. Recheck membership
 -- inside the transaction. A device can belong to only one account/shop; handover
@@ -51,6 +66,9 @@ begin
     raise exception 'INVALID_NATIVE_PUSH_DEVICE' using errcode = 'P0001';
   end if;
   perform pg_advisory_xact_lock(2112026, 1);
+  if exists (select 1 from public.native_push_revocations where user_id = p_user and binding_id = p_binding and expires_at > clock_timestamp()) then
+    raise exception 'NATIVE_PUSH_BINDING_REVOKED' using errcode = 'P0001';
+  end if;
   -- Hold the membership until registration commits. A concurrent removal then
   -- runs its cleanup after the device exists, rather than missing it.
   perform 1 from public.shop_staff where user_id = p_user and shop_id = p_shop for key share;
@@ -62,7 +80,9 @@ begin
     raise exception 'PUSH_BINDING_IN_USE' using errcode = 'P0001';
   end if;
   if found and v_old.fid = p_fid then
-    update public.native_push_devices set updated_at = clock_timestamp() where binding_id = p_binding;
+    -- A late FCM UNREGISTERED response for an older lease must not delete a
+    -- device that has since completed a fresh authenticated registration.
+    update public.native_push_devices set updated_at = clock_timestamp(), generation = gen_random_uuid() where binding_id = p_binding;
     return;
   end if;
   -- Deleting first cancels pending deliveries from the former association.
@@ -78,6 +98,13 @@ returns void language plpgsql security definer set search_path = public, pg_temp
 begin
   if p_user is null or p_binding is null then raise exception 'INVALID_NATIVE_PUSH_DEVICE' using errcode = 'P0001'; end if;
   perform pg_advisory_xact_lock(2112026, 1);
+  -- Keep cleanup progressing even when the dispatcher is disabled.
+  delete from public.native_push_revocations where (user_id, binding_id) in (
+    select user_id, binding_id from public.native_push_revocations where expires_at <= clock_timestamp() order by expires_at limit 1000
+  );
+  -- Record revocation even if the corresponding POST has not arrived yet.
+  insert into public.native_push_revocations(user_id, binding_id) values (p_user, p_binding)
+    on conflict (user_id, binding_id) do update set expires_at = clock_timestamp() + interval '7 days';
   delete from public.native_push_devices where binding_id = p_binding and user_id = p_user;
 end $$;
 
@@ -139,7 +166,7 @@ create function public.claim_native_push_deliveries(p_limit integer default 20)
 returns table (delivery_id uuid, lease_token uuid, event_id uuid, binding_id uuid, fid text, kind text, expires_at timestamptz)
 language sql security definer set search_path = public, pg_temp as $$
   with candidates as (
-    select d.id from public.native_push_deliveries d
+    select d.id, device.generation as device_generation from public.native_push_deliveries d
     join public.native_push_events e on e.id = d.event_id
     join public.native_push_devices device on device.binding_id = d.binding_id
     where d.state = 'pending' and d.attempts < 8 and d.next_attempt_at <= clock_timestamp()
@@ -150,7 +177,8 @@ language sql security definer set search_path = public, pg_temp as $$
     limit greatest(1, least(coalesce(p_limit, 20), 30))
   ), claimed as (
     update public.native_push_deliveries d set attempts = d.attempts + 1,
-      lease_until = clock_timestamp() + interval '2 minutes', lease_token = gen_random_uuid()
+      lease_until = clock_timestamp() + interval '2 minutes', lease_token = gen_random_uuid(),
+      leased_device_generation = c.device_generation
     from candidates c where d.id = c.id
     returning d.id, d.event_id, d.binding_id, d.lease_token
   )
@@ -160,25 +188,38 @@ language sql security definer set search_path = public, pg_temp as $$
 $$;
 
 create function public.finish_native_push_delivery(p_id uuid, p_lease uuid, p_outcome text)
-returns boolean language plpgsql security definer set search_path = public, pg_temp as $$
+returns text language plpgsql security definer set search_path = public, pg_temp as $$
 declare v_delivery public.native_push_deliveries%rowtype;
 begin
   if p_id is null or p_lease is null or p_outcome is null or p_outcome not in ('sent','gone','retry','drop') then
     raise exception 'INVALID_NATIVE_PUSH_OUTCOME' using errcode = 'P0001';
   end if;
+  -- Lock device before delivery, matching registration's device -> cascade
+  -- ordering. Re-read the lease after waiting for either lock.
+  select * into v_delivery from public.native_push_deliveries where id = p_id and lease_token = p_lease
+    and state = 'pending' and lease_until > clock_timestamp();
+  if not found then return 'unconfirmed'; end if;
+  perform 1 from public.native_push_devices where binding_id = v_delivery.binding_id for update;
+  if not found then return 'unconfirmed'; end if;
   select * into v_delivery from public.native_push_deliveries where id = p_id and lease_token = p_lease
     and state = 'pending' and lease_until > clock_timestamp() for update;
-  if not found then return false; end if;
+  if not found then return 'unconfirmed'; end if;
   if p_outcome = 'gone' then
-    delete from public.native_push_devices where binding_id = v_delivery.binding_id;
-  elsif p_outcome in ('sent','drop') or v_delivery.attempts >= 8 then
+    delete from public.native_push_devices where binding_id = v_delivery.binding_id and generation = v_delivery.leased_device_generation;
+    if found then return 'gone'; end if; -- cascade removes this old delivery
+    -- The installation re-registered after the send began. Keep that newer
+    -- device and retry the still-live event rather than deleting its binding.
+    p_outcome := 'retry';
+  end if;
+  if p_outcome in ('sent','drop') or v_delivery.attempts >= 8 then
     update public.native_push_deliveries set state = case when p_outcome = 'sent' then 'sent' else 'discarded' end,
-      completed_at = clock_timestamp(), lease_until = null, lease_token = null where id = p_id;
+      completed_at = clock_timestamp(), lease_until = null, lease_token = null, leased_device_generation = null where id = p_id;
+    return case when p_outcome = 'sent' then 'sent' else 'drop' end;
   else
     update public.native_push_deliveries set next_attempt_at = clock_timestamp() + make_interval(secs => least(3600, (60 * power(2, v_delivery.attempts - 1))::integer)),
-      lease_until = null, lease_token = null where id = p_id;
+      lease_until = null, lease_token = null, leased_device_generation = null where id = p_id;
+    return 'retry';
   end if;
-  return true;
 end $$;
 
 create function public.sweep_native_push() returns void
@@ -186,7 +227,7 @@ language plpgsql security definer set search_path = public, pg_temp as $$
 begin
   -- A worker can die while holding its final lease. Do not let that leave a
   -- forever-pending row; never steal a lease which is still in use.
-  update public.native_push_deliveries d set state = 'discarded', completed_at = clock_timestamp(), lease_until = null, lease_token = null
+  update public.native_push_deliveries d set state = 'discarded', completed_at = clock_timestamp(), lease_until = null, lease_token = null, leased_device_generation = null
     where d.id in (
       select q.id from public.native_push_deliveries q join public.native_push_events e on e.id = q.event_id
       where q.state = 'pending' and (q.attempts >= 8 or e.expires_at <= clock_timestamp())
@@ -195,6 +236,9 @@ begin
     );
   delete from public.native_push_events where id in (
     select id from public.native_push_events where created_at < clock_timestamp() - interval '7 days' order by created_at limit 1000
+  );
+  delete from public.native_push_revocations where (user_id, binding_id) in (
+    select user_id, binding_id from public.native_push_revocations where expires_at <= clock_timestamp() order by expires_at limit 1000
   );
   delete from public.native_push_devices where binding_id in (
     select binding_id from public.native_push_devices where updated_at < clock_timestamp() - interval '180 days' order by updated_at limit 1000

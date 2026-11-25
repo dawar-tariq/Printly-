@@ -30,7 +30,7 @@ beforeAll(async () => {
 }, 30000);
 afterAll(async () => { await db.close(); });
 beforeEach(async () => {
-  await db.exec('truncate public.native_push_events, public.native_push_devices, public.orders, public.shop_staff cascade');
+  await db.exec('truncate public.native_push_events, public.native_push_devices, public.native_push_revocations, public.orders, public.shop_staff cascade');
   await query('insert into public.shop_staff values ($1,$2),($3,$4)', [owner, shop, other, otherShop]);
 });
 
@@ -43,6 +43,7 @@ describe('native push registration and outbox', () => {
       await db.exec(`set role ${role}`);
       try {
         await expect(query('select * from public.native_push_devices')).rejects.toThrow(/permission denied/i);
+        await expect(query('select * from public.native_push_revocations')).rejects.toThrow(/permission denied/i);
         await expect(query('select * from public.native_push_deliveries')).rejects.toThrow(/permission denied/i);
         await expect(query('select * from public.claim_native_push_deliveries(1)')).rejects.toThrow(/permission denied/i);
         await expect(register()).rejects.toThrow(/permission denied/i);
@@ -70,13 +71,26 @@ describe('native push registration and outbox', () => {
     const claim = (await query('select * from public.claim_native_push_deliveries(10)')).rows[0];
     expect(claim).toMatchObject({ binding_id: binding, fid, kind: 'order' });
     expect((await query('select * from public.claim_native_push_deliveries(10)')).rows).toHaveLength(0);
-    expect((await query('select public.finish_native_push_delivery($1,$2,$3) as ok', [claim.delivery_id, secondBinding, 'sent'])).rows[0].ok).toBe(false);
-    expect((await query('select public.finish_native_push_delivery($1,$2,$3) as ok', [claim.delivery_id, claim.lease_token, 'retry'])).rows[0].ok).toBe(true);
+    expect((await query('select public.finish_native_push_delivery($1,$2,$3) as ok', [claim.delivery_id, secondBinding, 'sent'])).rows[0].ok).toBe('unconfirmed');
+    expect((await query('select public.finish_native_push_delivery($1,$2,$3) as ok', [claim.delivery_id, claim.lease_token, 'retry'])).rows[0].ok).toBe('retry');
     await query("update public.native_push_deliveries set next_attempt_at=clock_timestamp()-interval '1 second' where id=$1", [claim.delivery_id]);
     const retry = (await query('select * from public.claim_native_push_deliveries(10)')).rows[0];
     expect(retry.lease_token).not.toBe(claim.lease_token);
-    expect((await query('select public.finish_native_push_delivery($1,$2,$3) as ok', [retry.delivery_id, retry.lease_token, 'sent'])).rows[0].ok).toBe(true);
+    expect((await query('select public.finish_native_push_delivery($1,$2,$3) as ok', [retry.delivery_id, retry.lease_token, 'sent'])).rows[0].ok).toBe('sent');
     expect((await query('select state,attempts from public.native_push_deliveries')).rows).toEqual([{ state: 'sent', attempts: 2 }]);
+  });
+  it('does not delete a fresh registration when an older FCM send says unregistered', async () => {
+    await register();
+    await query("insert into public.orders values ($1,$2,'queued','cod','cod_pending','Private')", [order, shop]);
+    const oldClaim = (await query('select * from public.claim_native_push_deliveries(1)')).rows[0];
+    await register(); // same FID re-registered after the old send started
+    expect((await query('select public.finish_native_push_delivery($1,$2,$3) as ok', [oldClaim.delivery_id, oldClaim.lease_token, 'gone'])).rows[0].ok).toBe('retry');
+    expect((await query('select binding_id from public.native_push_devices')).rows).toEqual([{ binding_id: binding }]);
+    expect((await query('select state,attempts from public.native_push_deliveries')).rows).toEqual([{ state: 'pending', attempts: 1 }]);
+    await query("update public.native_push_deliveries set next_attempt_at=clock_timestamp()-interval '1 second'");
+    const retry = (await query('select * from public.claim_native_push_deliveries(1)')).rows[0];
+    expect((await query('select public.finish_native_push_delivery($1,$2,$3) as ok', [retry.delivery_id, retry.lease_token, 'gone'])).rows[0].ok).toBe('gone');
+    expect((await query('select * from public.native_push_devices')).rows).toHaveLength(0);
   });
   it('does not transfer queued alerts when a device changes account or loses membership', async () => {
     await register();
@@ -90,6 +104,21 @@ describe('native push registration and outbox', () => {
     expect((await query('select user_id,shop_id from public.native_push_devices')).rows).toEqual([{ user_id: other, shop_id: otherShop }]);
     await query('delete from public.shop_staff where user_id=$1 and shop_id=$2', [other, otherShop]);
     expect((await query('select * from public.native_push_devices')).rows).toHaveLength(0);
+  });
+  it('rejects a delayed registration after revocation without taking back a new account’s device', async () => {
+    // DELETE can reach the database even before the older POST arrives.
+    await query('select public.unregister_native_push_device($1,$2)', [owner, binding]);
+    await expect(register()).rejects.toThrow('NATIVE_PUSH_BINDING_REVOKED');
+    await register(other, otherShop, secondBinding, fid);
+    await expect(register()).rejects.toThrow('NATIVE_PUSH_BINDING_REVOKED');
+    expect((await query('select user_id,shop_id,binding_id from public.native_push_devices')).rows)
+      .toEqual([{ user_id: other, shop_id: otherShop, binding_id: secondBinding }]);
+    // One user cannot revoke another user's binding, and tombstones expire.
+    await query('select public.unregister_native_push_device($1,$2)', [owner, secondBinding]);
+    await register(other, otherShop, secondBinding, fid);
+    await query("update public.native_push_revocations set expires_at=clock_timestamp()-interval '1 second' where user_id=$1 and binding_id=$2", [owner, binding]);
+    await query('select public.sweep_native_push()');
+    expect((await query('select * from public.native_push_revocations where user_id=$1 and binding_id=$2', [owner, binding])).rows).toHaveLength(0);
   });
   it('bounds devices, and cancels old work on FID rotation without breaking idempotent sync', async () => {
     await register();

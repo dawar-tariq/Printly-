@@ -166,9 +166,15 @@ describe('native bearer gateway', () => {
       });
       fixture.pushConfigured = false;
       expect((await POST(request(path, 'tokenA', 'POST', body), context(path))).status).toBe(503);
+      fixture.pushRateAllowed = false;
+      expect((await DELETE(request(path, 'tokenA', 'DELETE', { binding_id: binding }), context(path))).status).toBe(429);
+      expect(fixture.rpcCalls.some((call) => call.name === 'unregister_native_push_device')).toBe(false);
+      fixture.pushRateAllowed = true;
       const removed = await DELETE(request(path, 'tokenA', 'DELETE', { binding_id: binding }), context(path));
       expect(removed.status).toBe(200);
       expect(fixture.rpcCalls.find((call) => call.name === 'unregister_native_push_device')?.args).toEqual({ p_user: fixture.userA, p_binding: binding });
+      const hashes = fixture.rpcCalls.filter((call) => call.name === 'consume_public_rate_limit').map((call) => call.args.p_client_hash);
+      expect(new Set(hashes).size).toBeGreaterThan(1); // enrollment cannot exhaust cleanup's window
       expect(removed.headers.get('cache-control')).toContain('no-store');
     } finally { vi.unstubAllEnvs(); }
   });
