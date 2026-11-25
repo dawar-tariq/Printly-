@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createServerSupabase, createAdminSupabase } from '@/lib/supabase';
+import { currentNativeSession } from '@/lib/native-session';
 import { subscriptionState, type ShopSubscription } from '@/lib/subscription';
 
 export function jsonOk(data: unknown, init: ResponseInit = {}) {
@@ -11,8 +12,15 @@ export function jsonError(status: number, code: string, message: string) {
 
 /** Current user + profile; null when signed out. */
 export async function getSessionProfile() {
-  const supabase = await createServerSupabase();
-  const { data: { user }, error: userErr } = await supabase.auth.getUser();
+  // Native requests can reach here only through the allowlisted gateway, which
+  // has already verified the access token with Supabase Auth. The request-local
+  // context prevents one concurrent user's identity leaking into another.
+  const native = currentNativeSession();
+  const supabase = native?.supabase ?? await createServerSupabase();
+  const verified = native
+    ? { user: native.user, error: null }
+    : await supabase.auth.getUser().then(({ data, error }) => ({ user: data.user, error }));
+  const { user, error: userErr } = verified;
   if (userErr || !user) return null;
   const admin = createAdminSupabase();
   const { data: profile } = await admin
