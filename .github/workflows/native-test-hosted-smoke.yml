@@ -1,0 +1,116 @@
+# Temporary read-only check of the explicitly isolated test site. No Supabase
+# keys, account credentials, customer data or real payments are used by CI.
+name: Verify isolated native test site
+
+on:
+  push:
+    paths:
+      - '.github/workflows/native-test-hosted-smoke.yml'
+
+permissions: {}
+
+jobs:
+  smoke:
+    if: github.ref == 'refs/heads/arena/309fdf51-printly'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify public reachability and staging isolation without printing keys
+        shell: bash
+        run: |
+          set +e
+          python3 - <<'PY' > "$RUNNER_TEMP/isolated-smoke.log" 2>&1
+          import base64, json, re, urllib.error, urllib.request
+
+          site = 'https://printly-native-test.vercel.app'
+          expected_supabase = 'https://rahfmpsdbwbktlobntkm.supabase.co'
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, *args, **kwargs):
+                  return None
+
+          opener = urllib.request.build_opener(NoRedirect())
+
+          def get(path, expected=200):
+              request = urllib.request.Request(site + path, headers={'User-Agent': 'Printly-isolated-smoke/1', 'Cache-Control': 'no-cache'})
+              try:
+                  with opener.open(request, timeout=20) as response:
+                      status = response.status
+                      headers = response.headers
+                      body = response.read(1_000_001)
+              except urllib.error.HTTPError as error:
+                  status = error.code
+                  headers = error.headers
+                  body = error.read(1_000_001) if status == expected else b''
+              except Exception:
+                  raise SystemExit(f'{path}: request failed; check connectivity or Vercel protection')
+              if status != expected:
+                  raise SystemExit(f'{path}: expected HTTP {expected}, got HTTP {status}; check deployment, isolation and access protection')
+              if len(body) > 1_000_000:
+                  raise SystemExit(f'{path}: unexpectedly large response')
+              return headers, body
+
+          def parse_json(path, body):
+              try:
+                  value = json.loads(body)
+                  if not isinstance(value, dict): raise ValueError('not an object')
+                  return value
+              except (ValueError, UnicodeDecodeError):
+                  raise SystemExit(f'{path}: response is not the expected JSON object')
+
+          path = '/api/native/v1/test-environment'
+          headers, body = get(path)
+          diagnostic = parse_json(path, body)
+          if diagnostic != {'isolated_test': True, 'supabase_url': expected_supabase, 'public_auth_check': 'ok', 'server_database_read': 'ok'}:
+              raise SystemExit(f'{path}: isolation diagnostic did not match')
+          if 'no-store' not in headers.get('Cache-Control', '').lower() or 'noindex' not in headers.get('X-Robots-Tag', '').lower():
+              raise SystemExit(f'{path}: missing no-store or noindex header')
+          print('PASS: hosted staging Auth and server database read; no sensitive data returned')
+
+          path = '/api/native/v1/config'
+          headers, body = get(path)
+          config = parse_json(path, body)
+          public_key = config.get('supabase_anon_key')
+          if config.get('api_version') != 1 or config.get('supabase_url') != expected_supabase or not isinstance(public_key, str):
+              raise SystemExit(f'{path}: unexpected public configuration')
+          if not re.fullmatch(r'sb_publishable_[A-Za-z0-9_-]{16,512}', public_key):
+              try:
+                  parts = public_key.split('.')
+                  if len(parts) != 3: raise ValueError('invalid JWT')
+                  payload = json.loads(base64.urlsafe_b64decode(parts[1] + '=' * (-len(parts[1]) % 4)))
+                  if payload.get('iss') != 'supabase' or payload.get('ref') != 'rahfmpsdbwbktlobntkm' or payload.get('role') != 'anon':
+                      raise ValueError('unexpected claims')
+              except (ValueError, TypeError, UnicodeDecodeError):
+                  raise SystemExit(f'{path}: not an expected public-key type')
+          if 'no-store' not in headers.get('Cache-Control', '').lower():
+              raise SystemExit(f'{path}: missing no-store header')
+          print('PASS: app configuration names staging and contains a public-key type (key not printed)')
+
+          headers, body = get('/')
+          if b'ISOLATED TEST SITE' not in body or b'Synthetic data only' not in body or 'noindex' not in headers.get('X-Robots-Tag', '').lower():
+              raise SystemExit('Home page: missing test banner or noindex header')
+          print('PASS: anonymous test domain is reachable and visibly labelled')
+
+          _, body = get('/robots.txt')
+          if 'disallow: /' not in body.decode('utf-8', errors='replace').lower():
+              raise SystemExit('robots.txt: test-site disallow is missing')
+          print('PASS: test-site robots directive')
+
+          path = '/api/native/v1/experience'
+          _, body = get(path)
+          experience = parse_json(path, body)
+          if experience.get('schema') != 1 or 'TEST ONLY' not in experience.get('notice', ''):
+              raise SystemExit(f'{path}: missing test notice')
+          print('PASS: native presentation includes the test notice')
+
+          get('/api/shop/app-release', expected=401)
+          print('PASS: anonymous release metadata is not available')
+          PY
+          result=$?
+          cat "$RUNNER_TEMP/isolated-smoke.log"
+          if [ "$result" -ne 0 ]; then
+            lines=$(tail -n 8 "$RUNNER_TEMP/isolated-smoke.log")
+            lines=${lines//'%'/'%25'}; lines=${lines//$'\r'/'%0D'}; lines=${lines//$'\n'/'%0A'}
+            echo "::error title=Isolated hosted smoke::$lines"
+          fi
+          exit "$result"
