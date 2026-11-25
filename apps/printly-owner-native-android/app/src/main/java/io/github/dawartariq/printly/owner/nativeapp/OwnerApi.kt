@@ -37,6 +37,8 @@ interface OwnerApi {
     /** True means remote session and notification revocation were confirmed. Local access is removed either way. */
     suspend fun signOut(): Boolean
     suspend fun request(method: String, path: String, body: JSONObject? = null): JSONObject
+    /** Best-effort deletion using only the session that originally opted in. */
+    suspend fun unregisterPush(expectedSessionId: String, binding: String): Boolean = false
     suspend fun requestWithProof(method: String, path: String, body: JSONObject, photo: ProofPhoto?): JSONObject
     suspend fun file(path: String): ByteArray
     /** Safe presentation settings; null means retain the current defaults. */
@@ -84,7 +86,7 @@ class LiveOwnerApi(context: Context) : OwnerApi {
         RealtimeCredentials(cfg.authOrigin, cfg.anonKey, usableSession().accessToken)
     })
 
-    private suspend fun publicConfig(client: OkHttpClient = secureHttpClient): PublicConfig {
+    private suspend fun publicConfig(client: OkHttpClient = sessionHttpClient): PublicConfig {
         config?.let { return it }
         val response = http("${BuildConfig.SITE_ORIGIN}/api/native/v1/config", "GET", maxBytes = 32_768, client = client)
         if (response.status != 200) throw AppError("config", "The app service is not available yet. Please try again later.", response.status)
@@ -100,12 +102,12 @@ class LiveOwnerApi(context: Context) : OwnerApi {
     override suspend fun signIn(email: String, password: String) = lock.withLock {
         if (email.isBlank() || password.isBlank()) throw AppError("validation", "Enter your email and password.")
         if (session != null) throw AppError("session_busy", "Please finish signing out before signing in again.")
-        val gate = http("${BuildConfig.SITE_ORIGIN}/api/auth/login-attempt", "POST", maxBytes = 32_768)
+        val gate = http("${BuildConfig.SITE_ORIGIN}/api/auth/login-attempt", "POST", maxBytes = 32_768, client = sessionHttpClient)
         if (gate.status == 429) throw AppError("rate_limit", "Too many sign-in attempts. Please wait before trying again.", 429)
         if (gate.status !in 200..299) throw AppError("gate", "Sign-in protection is temporarily unavailable.", gate.status)
         val cfg = publicConfig()
         val payload = JSONObject().put("email", email.trim()).put("password", password)
-        val response = http("${cfg.authOrigin}/auth/v1/token?grant_type=password", "POST", payload, apiKey = cfg.anonKey)
+        val response = http("${cfg.authOrigin}/auth/v1/token?grant_type=password", "POST", payload, apiKey = cfg.anonKey, client = sessionHttpClient)
         if (response.status !in 200..299) {
             val message = when (response.status) {
                 400, 401 -> "Incorrect email or password."
@@ -128,7 +130,7 @@ class LiveOwnerApi(context: Context) : OwnerApi {
         if (current.expiresAt > System.currentTimeMillis() / 1000 + 120) return@withLock current
         val cfg = publicConfig()
         val response = http("${cfg.authOrigin}/auth/v1/token?grant_type=refresh_token", "POST",
-            JSONObject().put("refresh_token", current.refreshToken), apiKey = cfg.anonKey)
+            JSONObject().put("refresh_token", current.refreshToken), apiKey = cfg.anonKey, client = sessionHttpClient)
         if (response.status == 400 || response.status == 401) {
             NativePush.sessionChange(appContext) { store.clear(); session = null }
             throw AppError("session_expired", "Your session expired. Please sign in again.", 401)
@@ -165,15 +167,16 @@ class LiveOwnerApi(context: Context) : OwnerApi {
                     current to stopped
                 } else target to LocalPushStop()
             }
-            // The registration mutex drains any in-flight sync before DELETE.
-            // The server also tombstones this binding in case a timed-out POST
-            // reaches it after the DELETE. Never use a newer account's bearer.
-            val pushConfirmed = NativePush.finishSignOut(appContext, listOf(first, second)) { binding ->
+            // POST and DELETE are serialized and tombstoned by the server, so
+            // cleanup need not wait indefinitely for an in-flight sync. Never
+            // use a newer account's bearer for this old binding.
+            val pushConfirmed = NativePush.finishSignOut(target?.localId, listOf(first, second)) { binding ->
                 if (captured == null) false else try {
                     val result = http("${BuildConfig.SITE_ORIGIN}/api/native/v1/shop/push-device", "DELETE",
                         JSONObject().put("binding_id", binding), token = captured.accessToken, client = cleanupHttpClient)
                     result.status in 200..299
-                } catch (_: Exception) { false }
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { false }
             }
             val authConfirmed = if (captured == null) true else try {
                 val cfg = publicConfig(cleanupHttpClient)
@@ -212,6 +215,20 @@ class LiveOwnerApi(context: Context) : OwnerApi {
     }
 
     override suspend fun request(method: String, path: String, body: JSONObject?): JSONObject = requestForSession(method, path, body)
+
+    override suspend fun unregisterPush(expectedSessionId: String, binding: String): Boolean {
+        if (!validPushUuid(expectedSessionId) || !validPushUuid(binding)) return false
+        // Snapshot this session, without waiting for an unrelated token refresh
+        // or ever substituting a newer account's bearer. An expired bearer is
+        // reported as an unconfirmed cleanup rather than silently refreshed.
+        val captured = session?.takeIf { it.localId == expectedSessionId } ?: return false
+        return try {
+            val response = http("${BuildConfig.SITE_ORIGIN}/api/native/v1/shop/push-device", "DELETE",
+                JSONObject().put("binding_id", binding), token = captured.accessToken, client = cleanupHttpClient)
+            response.status in 200..299
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { false }
+    }
 
     /** Bind background registration to the session that opted in, never a
      * newer account that happened to sign in while work was queued. */
@@ -304,9 +321,11 @@ internal val secureHttpClient: OkHttpClient = OkHttpClient.Builder()
     .writeTimeout(25, TimeUnit.SECONDS)
     .build()
 
-// Sign-out is non-cancellable once started, but each best-effort remote call
-// still needs an overall deadline rather than an unbounded trickle response.
-private val cleanupHttpClient = secureHttpClient.newBuilder().callTimeout(15, TimeUnit.SECONDS).build()
+// Session operations hold the API mutex during sign-in/refresh; bound those
+// calls so a trickle response cannot hold up sign-out indefinitely. Cleanup
+// has a shorter deadline; neither client automatically retries a write.
+internal val sessionHttpClient = secureHttpClient.newBuilder().callTimeout(30, TimeUnit.SECONDS).build()
+internal val cleanupHttpClient = secureHttpClient.newBuilder().callTimeout(15, TimeUnit.SECONDS).build()
 
 /** Also prevents OkHttp's HTTP 503 Retry-After: 0 / 421 follow-up for writes. */
 private class OneShotBody(private val body: RequestBody) : RequestBody() {

@@ -41,7 +41,9 @@ import com.google.firebase.messaging.FirebaseMessaging
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -70,9 +72,13 @@ private data class PushState(
 internal object NativePush {
     val available = true
     private val stateLock = Any()
+    // Sign-out also retries earlier failed or still-running opt-outs. This
+    // bounded bookkeeping contains no credentials and is not persisted.
+    private val cleanup = PendingPushCleanup()
     // WorkManager and the activity share this process and the same API session.
-    // Serialize registration with revocation so a late request cannot reattach
-    // a signed-out device after the delete has completed.
+    // Serialize Firebase registration, unregistration and background sync. The
+    // server independently serializes DELETE with POST and tombstones bindings,
+    // so local sign-out does not have to wait for a stuck network operation.
     private val registrationLock = Mutex()
     private fun prefs(context: Context) = context.applicationContext.getSharedPreferences("native_push_v1", Context.MODE_PRIVATE)
     private fun read(context: Context): PushState = synchronized(stateLock) {
@@ -156,46 +162,64 @@ internal object NativePush {
         if (expectedSession != null && state.sessionId.isNotBlank() && state.sessionId != expectedSession) return LocalPushStop()
         if (expectedBinding != null && state.binding != expectedBinding) return LocalPushStop()
         if (!state.enabled && state.binding.isBlank() && state.fid.isBlank()) return LocalPushStop()
-        var confirmed = prefs(context).edit().clear().commit()
+        cleanup.remember(state.sessionId, state.binding)
+        // A preferences exception must not skip notification cancellation,
+        // disabling FCM auto-init, or scheduling its unregistration.
+        var confirmed = try { prefs(context).edit().clear().commit() } catch (_: Exception) { false }
+        if (!validPushUuid(state.binding) || !validPushUuid(state.sessionId)) confirmed = false
         try { NotificationManagerCompat.from(context).cancelAll() } catch (_: Exception) { confirmed = false }
         try { FirebaseMessaging.getInstance().isAutoInitEnabled = false } catch (_: Exception) { confirmed = false }
         try { manager(context).cancelUniqueWork(REGISTER_WORK); manager(context).cancelUniqueWork(SYNC_WORK) } catch (_: Exception) { confirmed = false }
         try { enqueueUnregister(context) } catch (_: Exception) { confirmed = false }
-        return LocalPushStop(state.binding.takeIf { validPushUuid(it) }, confirmed)
+        if (!confirmed) cleanup.localFailure(state.sessionId)
+        return LocalPushStop(state.binding.takeIf { validPushUuid(it) }, confirmed, state.sessionId.takeIf { validPushUuid(it) })
     }
     private fun stopLocal(context: Context, expectedSession: String? = null, expectedBinding: String? = null): LocalPushStop = synchronized(stateLock) {
-        try { stopLocalLocked(context, expectedSession, expectedBinding) } catch (_: Exception) { LocalPushStop(localConfirmed = false) }
+        try { stopLocalLocked(context, expectedSession, expectedBinding) }
+        catch (_: Exception) { cleanup.localFailure(null); LocalPushStop(localConfirmed = false) }
     }
 
     /** The session and push gate change atomically with respect to delivery and
      * opt-in. The callback never waits for registrationLock. */
     fun sessionChange(context: Context, expectedSession: String? = null, change: () -> Unit): LocalPushStop = synchronized(stateLock) {
-        val stopped = try { stopLocalLocked(context, expectedSession) } catch (_: Exception) { LocalPushStop(localConfirmed = false) }
+        val stopped = try { stopLocalLocked(context, expectedSession) }
+            catch (_: Exception) { cleanup.localFailure(null); LocalPushStop(localConfirmed = false) }
+        // A warning belongs to the previous session, not a later sign-in.
+        if (expectedSession == null && stopped.localConfirmed) {
+            try {
+                val current = read(context)
+                if (!current.enabled && current.binding.isBlank()) prefs(context).edit().remove("problem").apply()
+            } catch (_: Exception) { /* A warning is advisory, not a display gate. */ }
+        }
         change()
         stopped
     }
     fun beginSignOut(context: Context, sessionId: String): LocalPushStop = stopLocal(context, expectedSession = sessionId)
 
-    suspend fun finishSignOut(context: Context, stops: List<LocalPushStop>, revoke: suspend (String) -> Boolean): Boolean {
-        val bindings = stops.mapNotNull { it.binding }.distinct()
-        if (bindings.isEmpty()) return stops.all { it.localConfirmed }
-        return registrationLock.withLock {
-            var confirmed = stops.all { it.localConfirmed }
-            for (binding in bindings) {
-                if (!revoke(binding)) confirmed = false
-            }
-            confirmed
-        }
-    }
+    suspend fun finishSignOut(sessionId: String?, stops: List<LocalPushStop>, revoke: suspend (String) -> Boolean): Boolean =
+        cleanup.finish(sessionId, stops, revoke)
 
-    private suspend fun disconnect(context: Context, api: OwnerApi, expectedBinding: String? = null): Boolean {
+    internal suspend fun disconnect(context: Context, api: OwnerApi, expectedBinding: String? = null): Boolean = withContext(NonCancellable) {
+        // Local display stops before remote I/O. Keep the attempt alive if the
+        // settings screen is left, but never substitute a later account's token.
         val previous = stopLocal(context, expectedBinding = expectedBinding)
-        val binding = previous.binding ?: return previous.localConfirmed
-        return registrationLock.withLock {
-            try { api.request("DELETE", "push-device", JSONObject().put("binding_id", binding)); previous.localConfirmed }
-            catch (cancelled: CancellationException) { throw cancelled }
+        val binding = previous.binding ?: return@withContext previous.localConfirmed
+        val sessionId = previous.sessionId ?: return@withContext false
+        val remoteConfirmed = try { api.unregisterPush(sessionId, binding) }
             catch (_: Exception) { false }
+        if (remoteConfirmed) cleanup.acknowledge(sessionId, binding)
+        if (!previous.localConfirmed || !remoteConfirmed) {
+            // If the screen was left during cleanup, keep a non-sensitive
+            // warning for the same signed-in user when settings are reopened.
+            try {
+                synchronized(stateLock) {
+                    if (!read(context).enabled && SessionStore(context).localIdOrNull() == sessionId) {
+                        prefs(context).edit().putString("problem", "Could not confirm server removal. Keep this phone private and block notifications in phone settings if needed.").apply()
+                    }
+                }
+            } catch (_: Exception) { /* The immediate result still reports failure. */ }
         }
+        previous.localConfirmed && remoteConfirmed
     }
 
     /** Revalidate permission and shop on each foreground return, and ask FCM to
@@ -393,7 +417,7 @@ internal object NativePush {
                     } catch (_: Exception) { notice = "Could not start notification setup. Please try again." }
                 }, Modifier.fillMaxWidth(), enabled = !busy)
                 SecondaryButton(if (busy) "Turning off…" else "Turn off notifications", {
-                    if (!busy) scope.launch {
+                    if (!busy) scope.launch(start = CoroutineStart.UNDISPATCHED) {
                         busy = true
                         val confirmed = try { disconnect(context, api) }
                             catch (cancelled: CancellationException) { throw cancelled }

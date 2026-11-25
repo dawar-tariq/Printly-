@@ -11,7 +11,7 @@ internal object NativePush {
         return LocalPushStop()
     }
     fun beginSignOut(context: Context, sessionId: String): LocalPushStop = LocalPushStop()
-    suspend fun finishSignOut(context: Context, stops: List<LocalPushStop>, revoke: suspend (String) -> Boolean): Boolean = stops.all { it.localConfirmed }
+    suspend fun finishSignOut(sessionId: String?, stops: List<LocalPushStop>, revoke: suspend (String) -> Boolean): Boolean = stops.all { it.localConfirmed }
     suspend fun refresh(context: Context, api: OwnerApi, shopId: String?) = Unit
     @Composable fun Settings(api: OwnerApi, shopId: String?) = Unit
 }

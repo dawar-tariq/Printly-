@@ -94,6 +94,13 @@ class HttpTransportTest {
         assertTrue(text.contains("\"name\":\"Example\""))
     }
 
+    @Test fun sessionAndCleanupCallsHaveOverallDeadlines() {
+        assertEquals(30_000, sessionHttpClient.callTimeoutMillis)
+        assertEquals(15_000, cleanupHttpClient.callTimeoutMillis)
+        assertFalse(sessionHttpClient.retryOnConnectionFailure)
+        assertFalse(cleanupHttpClient.retryOnConnectionFailure)
+    }
+
     @Test fun rejectsPlaintextAndBoundsResponses() = runBlocking {
         try { http("http://localhost/", "GET", client = client); fail("Plaintext must be rejected") }
         catch (error: AppError) { assertEquals("connection", error.code) }

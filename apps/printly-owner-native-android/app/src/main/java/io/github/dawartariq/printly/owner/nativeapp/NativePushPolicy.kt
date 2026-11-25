@@ -19,7 +19,11 @@ internal fun pushCallbackAction(registered: Boolean, enabled: Boolean, enrolledS
 }
 
 /** Local storage/display shutdown can fail independently of remote deletion. */
-internal data class LocalPushStop(val binding: String? = null, val localConfirmed: Boolean = true)
+internal data class LocalPushStop(
+    val binding: String? = null,
+    val localConfirmed: Boolean = true,
+    val sessionId: String? = null,
+)
 
 /** The binding changes on each opt-in. Late messages from an earlier account
  * or a signed-out phone must never turn into a notification. */

@@ -12,8 +12,19 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
+/** Always try both ways to make stored session data unreadable. */
+internal fun clearSessionStorage(removeCiphertext: () -> Boolean, removeKey: () -> Boolean): Boolean {
+    val ciphertextRemoved = try { removeCiphertext() } catch (_: Exception) { false }
+    val keyRemoved = try { removeKey() } catch (_: Exception) { false }
+    return ciphertextRemoved || keyRemoved
+}
+
 /** Access and refresh tokens are encrypted with a non-exportable Android Keystore key. */
 class SessionStore(context: Context) {
+    // Activities, workers and messaging callbacks create separate SessionStore
+    // instances. Serialize them all, especially a one-time legacy ID upgrade
+    // and a concurrent clear/save, rather than locking each instance alone.
+    private companion object { val sessionLock = Any() }
     private val prefs = context.getSharedPreferences("native_session_v1", Context.MODE_PRIVATE)
     private val alias = "printly_owner_native_session_v1"
 
@@ -31,7 +42,7 @@ class SessionStore(context: Context) {
         return generator.generateKey()
     }
 
-    @Synchronized fun save(session: Session) {
+    fun save(session: Session) = synchronized(sessionLock) {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, requireNotNull(key(true)))
         require(validPushUuid(session.localId))
@@ -42,8 +53,8 @@ class SessionStore(context: Context) {
         check(prefs.edit().putString("session", encoded).commit()) { "Could not persist encrypted session" }
     }
 
-    @Synchronized fun load(): Session? {
-        val encoded = prefs.getString("session", null) ?: return null
+    fun load(): Session? = synchronized(sessionLock) {
+        val encoded = prefs.getString("session", null) ?: return@synchronized null
         val bytes = Base64.decode(encoded, Base64.NO_WRAP)
         require(bytes.size > 12 + 16)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
@@ -60,20 +71,21 @@ class SessionStore(context: Context) {
         require(validPushUuid(localId))
         val restored = Session(access, refresh, expiry, localId)
         if (needsUpgrade) save(restored)
-        return restored
+        restored
     }
 
     /** Fail closed if ciphertext or the Keystore cannot be read. */
     fun localIdOrNull(): String? = try { load()?.localId } catch (_: Exception) { null }
 
     /** Either removing ciphertext or deleting its key prevents restoration. */
-    @Synchronized fun clear(): Boolean {
-        val removed = prefs.edit().remove("session").commit()
-        val keyRemoved = try {
-            val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-            store.deleteEntry(alias)
-            !store.containsAlias(alias)
-        } catch (_: Exception) { false }
-        return removed || keyRemoved
+    fun clear(): Boolean = synchronized(sessionLock) {
+        clearSessionStorage(
+            removeCiphertext = { prefs.edit().remove("session").commit() },
+            removeKey = {
+                val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+                store.deleteEntry(alias)
+                !store.containsAlias(alias)
+            },
+        )
     }
 }

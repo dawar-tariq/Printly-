@@ -12,8 +12,8 @@ export async function testNativePushLocal({ admin, ownerAuth, otherAuth, ownerTo
     if (result.error) throw new Error(`${label} failed (${result.error.code || result.error.status || 'error'})`);
     return result.data;
   };
-  const bindingA = randomUUID(), bindingB = randomUUID(), bindingC = randomUUID(), bindingD = randomUUID();
-  const fidA = 'A'.repeat(22), fidB = 'B'.repeat(22);
+  const bindingA = randomUUID(), bindingB = randomUUID(), bindingC = randomUUID(), bindingD = randomUUID(), racingBinding = randomUUID();
+  const fidA = 'A'.repeat(22), fidB = 'B'.repeat(22), racingFid = 'R'.repeat(22);
   const register = (token, shopId, binding, fid) => call('push-device', { method: 'POST', token, body: { shop_id: shopId, binding_id: binding, fid } });
   const remove = (token, binding) => call('push-device', { method: 'DELETE', token, body: { binding_id: binding } });
   assert.equal((await register(undefined, shop, bindingA, fidA)).status, 401);
@@ -22,6 +22,15 @@ export async function testNativePushLocal({ admin, ownerAuth, otherAuth, ownerTo
   assert.equal((await register(ownerToken, shop, bindingA, fidA)).status, 200);
   assert.equal((await register(otherToken, otherShop, bindingB, fidB)).status, 200);
   assert.equal((await remove(otherToken, bindingA)).status, 200); // idempotent, cannot remove another user
+  // A real Postgres race: either POST commits before DELETE and is removed,
+  // or DELETE commits first and its tombstone rejects POST. Neither ordering
+  // may leave a device that can receive an event after cleanup.
+  const [racingRegistration, racingRemoval] = await Promise.all([
+    register(ownerToken, shop, racingBinding, racingFid), remove(ownerToken, racingBinding),
+  ]);
+  assert([200, 409].includes(racingRegistration.status), 'concurrent registration must succeed or be revoked');
+  assert.equal(racingRemoval.status, 200, 'concurrent revocation must succeed');
+  assert.equal((await register(ownerToken, shop, racingBinding, racingFid)).status, 409, 'late registration remains revoked');
   for (const client of [ownerAuth, otherAuth]) {
     const table = await client.from('native_push_devices').select('*');
     const worker = await client.rpc('claim_native_push_deliveries', { p_limit: 10 });
