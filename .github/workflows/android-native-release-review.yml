@@ -144,6 +144,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          EXPECTED_CERTIFICATE: ${{ vars.PRINTLY_ANDROID_EXPECTED_CERT_SHA256 }}
           REQUESTED_VERSION_CODE: ${{ steps.request.outputs.version_code }}
           REQUESTED_VERSION_NAME: ${{ steps.request.outputs.version_name }}
         run: |

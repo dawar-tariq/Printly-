@@ -8,39 +8,51 @@ import { join, resolve } from 'node:path';
 
 const script = resolve('scripts/create-native-draft-review.sh');
 const commit = 'a'.repeat(40);
+const certificate = 'c'.repeat(64);
 const tag = 'native-v2.0.1';
 const file = 'Printly-for-Shops-2.0.1.apk';
 
-function fixture({ before = [], tagStatus = 2, corruptEvidence = false, corruptUploadedDigest = false, repository = 'dawar-tariq/Printly-' } = {}) {
+function fixture({ before = [], tagStatus = 2, corruptEvidence = false, corruptUploadedDigest = false, corruptDownload = false, wrongSigner = false, debuggable = false, repository = 'dawar-tariq/Printly-' } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'printly-draft-test-'));
   const bin = join(root, 'bin');
+  const android = join(root, 'android');
+  const tools = join(android, 'build-tools', '36.0.0');
   mkdirSync(bin);
+  mkdirSync(tools, { recursive: true });
   const apk = join(root, file);
   const evidence = join(root, 'sha256-evidence.txt');
   writeFileSync(apk, 'not a real APK; disposable test input\n');
+  writeFileSync(join(root, 'downloaded.apk'), corruptDownload ? 'wrong bytes' : readFileSync(apk));
   const hash = createHash('sha256').update(readFileSync(apk)).digest('hex');
   writeFileSync(evidence, `${corruptEvidence ? 'f'.repeat(64) : hash}  app/build/outputs/apk/release/app-release.apk\n`);
   writeFileSync(join(root, 'before.json'), JSON.stringify([before]));
   writeFileSync(join(root, 'after.json'), JSON.stringify([[{
     tag_name: tag, draft: true, prerelease: true, target_commitish: commit,
-    assets: [{ name: file, digest: `sha256:${corruptUploadedDigest ? '0'.repeat(64) : hash}` }],
+    assets: [{ id: 12345, name: file, state: 'uploaded', digest: `sha256:${corruptUploadedDigest ? '0'.repeat(64) : hash}` }],
   }]]));
   writeFileSync(join(bin, 'git'), '#!/bin/sh\nexit "$MOCK_TAG_STATUS"\n', { mode: 0o755 });
   writeFileSync(join(bin, 'gh'), `#!/bin/sh
 set -eu
 case "$1" in
-  api) if [ -f "$MOCK_CREATED" ]; then cat "$MOCK_AFTER"; else cat "$MOCK_BEFORE"; fi ;;
+  api) case "$*" in */releases/assets/*) cat "$MOCK_DOWNLOAD" ;; *) if [ -f "$MOCK_CREATED" ]; then cat "$MOCK_AFTER"; else cat "$MOCK_BEFORE"; fi ;; esac ;;
   release) printf '%s\\n' "$*" > "$MOCK_CALL"; touch "$MOCK_CREATED" ;;
   *) exit 1 ;;
 esac
 `, { mode: 0o755 });
+  writeFileSync(join(tools, 'apksigner'), '#!/bin/sh\nprintf "Signer #1 certificate SHA-256 digest: %s\\n" "$MOCK_CERT"\n', { mode: 0o755 });
+  writeFileSync(join(tools, 'aapt'), `#!/bin/sh
+printf "package: name='io.github.dawartariq.printly.owner' versionCode='4' versionName='2.0.1' platformBuildVersionName='16'\\n"
+if [ "$MOCK_DEBUGGABLE" = 1 ]; then echo application-debuggable; fi
+`, { mode: 0o755 });
   const result = spawnSync('bash', [script, apk, evidence], {
     encoding: 'utf8',
     env: {
-      ...process.env, PATH: `${bin}:${process.env.PATH}`, RUNNER_TEMP: root,
+      ...process.env, PATH: `${bin}:${process.env.PATH}`, RUNNER_TEMP: root, ANDROID_HOME: android,
       GITHUB_REPOSITORY: repository, GITHUB_REF: 'refs/heads/arena/309fdf51-printly',
       GITHUB_EVENT_NAME: 'push', GITHUB_SHA: commit, REQUESTED_VERSION_NAME: '2.0.1',
-      REQUESTED_VERSION_CODE: '4', GH_TOKEN: 'fake-test-only', MOCK_TAG_STATUS: String(tagStatus),
+      REQUESTED_VERSION_CODE: '4', EXPECTED_CERTIFICATE: certificate, GH_TOKEN: 'fake-test-only',
+      MOCK_TAG_STATUS: String(tagStatus), MOCK_CERT: wrongSigner ? 'e'.repeat(64) : certificate,
+      MOCK_DEBUGGABLE: debuggable ? '1' : '0', MOCK_DOWNLOAD: join(root, 'downloaded.apk'),
       MOCK_CREATED: join(root, 'created'), MOCK_CALL: join(root, 'call'),
       MOCK_BEFORE: join(root, 'before.json'), MOCK_AFTER: join(root, 'after.json'),
     },
@@ -51,7 +63,7 @@ esac
   return { result, created, call };
 }
 
-test('creates only a draft pinned to the reviewed commit and checks the uploaded digest', () => {
+test('creates only a draft pinned to the reviewed commit and verifies downloaded bytes and identity', () => {
   const { result, created, call } = fixture();
   assert.equal(result.status, 0, result.stderr);
   assert.equal(created, true);
@@ -72,9 +84,11 @@ test('refuses wrong identity, checksum, an existing tag, or an existing draft', 
   }
 });
 
-test('does not report success when GitHub reports a different uploaded digest', () => {
-  const { result, created } = fixture({ corruptUploadedDigest: true });
-  assert.equal(created, true); // Keep the unpublished draft for investigation.
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /Do not publish/);
+test('does not report success for a bad hosted digest, download, signer or debuggable package', () => {
+  for (const options of [{ corruptUploadedDigest: true }, { corruptDownload: true }, { wrongSigner: true }, { debuggable: true }]) {
+    const { result, created } = fixture(options);
+    assert.equal(created, true, JSON.stringify(options)); // Keep the unpublished draft for investigation.
+    assert.notEqual(result.status, 0, JSON.stringify(options));
+    assert.match(result.stderr, /Do not publish/);
+  }
 });

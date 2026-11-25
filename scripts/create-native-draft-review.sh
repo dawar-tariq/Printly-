@@ -16,6 +16,10 @@ case "${GITHUB_EVENT_NAME:-}" in push|workflow_dispatch) ;; *) fail 'Unexpected 
 [ "${REQUESTED_VERSION_NAME:-}" = '2.0.1' ] && [ "${REQUESTED_VERSION_CODE:-}" = '4' ] || fail 'Unexpected native version.'
 [ "$(basename -- "$apk")" = 'Printly-for-Shops-2.0.1.apk' ] || fail 'Unexpected APK filename.'
 [ -n "${GH_TOKEN:-}" ] || fail 'The scoped GitHub token is unavailable.'
+certificate=$(printf '%s' "${EXPECTED_CERTIFICATE:-}" | tr -d ':[:space:]' | tr '[:upper:]' '[:lower:]')
+[[ "$certificate" =~ ^[0-9a-f]{64}$ ]] || fail 'A verified public certificate fingerprint is required.'
+tools="${ANDROID_HOME:?}/build-tools/36.0.0"
+[ -x "$tools/apksigner" ] && [ -x "$tools/aapt" ] || fail 'Android verification tools are unavailable.'
 expected=$(awk 'NR == 1 { print $1 }' "$evidence")
 [[ "$expected" =~ ^[0-9a-f]{64}$ ]] || fail 'Invalid APK checksum evidence.'
 actual=$(sha256sum "$apk" | cut -d' ' -f1)
@@ -49,6 +53,23 @@ jq -e --arg tag "$tag" --arg commit "$GITHUB_SHA" --arg digest "sha256:$expected
   [add[] | select(.tag_name == $tag)] |
   length == 1 and .[0].draft == true and .[0].prerelease == true and
   .[0].target_commitish == $commit and (.[0].assets | length) == 1 and
-  .[0].assets[0].name == "Printly-for-Shops-2.0.1.apk" and .[0].assets[0].digest == $digest
+  .[0].assets[0].name == "Printly-for-Shops-2.0.1.apk" and .[0].assets[0].state == "uploaded" and
+  .[0].assets[0].digest == $digest and (.[0].assets[0].id | type) == "number"
 ' "$work/after.json" >/dev/null || fail 'The draft exists but its uploaded asset could not be verified. Do not publish it.'
-echo 'Verified an unpublished native release draft with one matching APK asset. A device test is still required.'
+asset_id=$(jq -r --arg tag "$tag" '[add[] | select(.tag_name == $tag)][0].assets[0].id' "$work/after.json")
+[[ "$asset_id" =~ ^[1-9][0-9]*$ ]] || fail 'The draft asset ID is invalid. Do not publish it.'
+# Independently retrieve the hosted bytes rather than relying only on metadata.
+gh api -H 'Accept: application/octet-stream' "repos/${repo}/releases/assets/${asset_id}" > "$work/hosted.apk"
+hosted=$(sha256sum "$work/hosted.apk" | cut -d' ' -f1)
+[ "$hosted" = "$expected" ] || fail 'The downloaded draft APK differs from the signed build. Do not publish it.'
+"$tools/apksigner" verify --verbose --print-certs "$work/hosted.apk" > "$work/signer.txt"
+mapfile -t signers < <(sed -n 's/^Signer #[0-9]* certificate SHA-256 digest: //p' "$work/signer.txt")
+[ "${#signers[@]}" -eq 1 ] || fail 'The downloaded APK does not have exactly one signer. Do not publish it.'
+actual_certificate=$(printf '%s' "${signers[0]}" | tr -d ':[:space:]' | tr '[:upper:]' '[:lower:]')
+[ "$actual_certificate" = "$certificate" ] || fail 'The downloaded APK has the wrong signer. Do not publish it.'
+"$tools/aapt" dump badging "$work/hosted.apk" > "$work/badging.txt"
+package_line=$(head -n 1 "$work/badging.txt")
+[[ "$package_line" == "package: name='io.github.dawartariq.printly.owner' "* ]] || fail 'Unexpected downloaded APK package.'
+[[ "$package_line" == *" versionCode='4' "* && "$package_line" == *" versionName='2.0.1' "* ]] || fail 'Unexpected downloaded APK version.'
+if grep -q '^application-debuggable' "$work/badging.txt"; then fail 'The downloaded APK is debuggable. Do not publish it.'; fi
+echo 'Verified the unpublished draft by downloading its APK and checking SHA-256, signer, package and version. A device test is still required.'
