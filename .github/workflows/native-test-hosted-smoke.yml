@@ -89,9 +89,17 @@ jobs:
           print('PASS: app configuration names staging and contains a public-key type (key not printed)')
 
           headers, body = get('/')
-          if b'ISOLATED TEST SITE' not in body or b'Synthetic data only' not in body or 'noindex' not in headers.get('X-Robots-Tag', '').lower():
-              raise SystemExit('Home page: missing test banner or noindex header')
+          if (b'ISOLATED TEST SITE' not in body or b'Test with synthetic data only.' not in body or
+              b'Never send money.' not in body or b'The demo shop has real checkout options' in body or
+              'noindex' not in headers.get('X-Robots-Tag', '').lower()):
+              raise SystemExit('Home page: missing isolated warning, or real-checkout marketing is present')
           print('PASS: anonymous test domain is reachable and visibly labelled')
+
+          _, body = get('/s/p-demo1')
+          if (b'Test contact only' not in body or b'Never send money' not in body or
+              b'Pay the shop directly on UPI' in body or re.search(rb'href=[\"\']tel:', body, re.I)):
+              raise SystemExit('Test shop: unsafe payment or contact prompt')
+          print('PASS: test-shop payment and contact warnings')
 
           _, body = get('/robots.txt')
           if 'disallow: /' not in body.decode('utf-8', errors='replace').lower():
@@ -120,13 +128,16 @@ jobs:
           request = urllib.request.Request(site + path, data=b'', method='POST', headers={'User-Agent': 'Printly-isolated-smoke/1', 'Cache-Control': 'no-cache'})
           try:
               with opener.open(request, timeout=20) as response:
-                  status = response.status
+                  status, gate_headers, gate_body = response.status, response.headers, response.read(1025)
           except urllib.error.HTTPError as error:
-              status = error.code
+              status, gate_headers, gate_body = error.code, error.headers, b''
           except Exception:
               raise SystemExit(f'{path}: request failed; check connectivity or Vercel protection')
           if status != 200:
               raise SystemExit(f'{path}: expected HTTP 200, got HTTP {status}; staging sign-in gate is not ready')
+          if (len(gate_body) > 1024 or parse_json(path, gate_body) != {'ok': True} or
+              'no-store' not in gate_headers.get('Cache-Control', '').lower()):
+              raise SystemExit(f'{path}: invalid sign-in gate response')
           print('PASS: credential-free staging sign-in gate')
           if not gateway_no_store or not gateway_vary_auth:
               raise SystemExit('Native shop gateway: missing private-response headers')
