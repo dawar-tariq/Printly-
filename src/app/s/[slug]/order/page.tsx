@@ -69,6 +69,7 @@ export default function OrderWizard() {
 }
 
 function OrderWizardForShop({ slug }: { slug: string }) {
+  const isolatedTest = process.env.NEXT_PUBLIC_PRINTLY_ISOLATED_TEST === '1';
   const { language, setLanguage, t } = useCustomerLanguage();
   const router = useRouter();
   const [shopData, setShopData] = useState<ShopPublic | null>(null);
@@ -454,12 +455,15 @@ function OrderWizardForShop({ slug }: { slug: string }) {
 
   const showUpi = useCallback(async (data: UpiData, recovered: boolean) => {
     setUpi(data); setRecoveredUpi(recovered); setQrDataUrl(null); setQrFailed(false); setStep('upi');
+    // The staging flow can report a synthetic reference, but never produces
+    // a scannable payment QR or opens a real UPI app.
+    if (isolatedTest) return;
     try {
       const plan = paymentQrPlan(data.link);
       setQrBrandInside(plan.brandInside);
       setQrDataUrl(await QRCode.toDataURL(data.link, plan.options));
     } catch { setQrDataUrl(null); setQrFailed(true); }
-  }, []);
+  }, [isolatedTest]);
 
   const checkPreviousCheckout = useCallback(async () => {
     if (!savedCheckout || checkoutInFlight.current) return;
@@ -654,8 +658,8 @@ function OrderWizardForShop({ slug }: { slug: string }) {
               <span className="text-xs text-orange-800/60 mt-1">Gallery, Drive downloads, file manager…</span>
             </button>
 
-            {/* Dropbox import */}
-            <div className="mt-3 card p-3">
+            {/* Dropbox import is not part of the isolated synthetic-file rehearsal. */}
+            {isolatedTest ? <p className="mt-3 rounded-xl bg-amber-50 p-3 text-xs font-semibold text-amber-950">Use a synthetic file from this device. Dropbox import is disabled on this test site.</p> : <div className="mt-3 card p-3">
               <div className="flex items-center gap-2 text-sm font-bold text-neutral-700"><FolderInput size={16} /> Import from Dropbox</div>
               <div className="mt-2 flex gap-2">
                 <input value={dropboxLink} onChange={(e) => setDropboxLink(e.target.value)} placeholder="Paste a Dropbox share link…" className="input h-11 min-w-0 flex-1 text-sm" inputMode="url" />
@@ -667,7 +671,7 @@ function OrderWizardForShop({ slug }: { slug: string }) {
                 <button disabled={dropboxBusy || fileOperations || files.length >= 10} onClick={openDropboxChooser} className="mt-2 text-xs text-blue-700 font-semibold hover:underline flex items-center gap-1 disabled:opacity-50"><Link2 size={12} /> Browse my Dropbox…</button>
               )}
               <p className="mt-1.5 text-[11px] text-neutral-500">The link must allow viewing. We copy the file into private order storage for your shop.</p>
-            </div>
+            </div>}
 
             {/* file list */}
             <ul className="mt-4 space-y-2">
@@ -874,16 +878,16 @@ function OrderWizardForShop({ slug }: { slug: string }) {
             <div className="grid grid-cols-2 gap-2 mt-3">
               {(['upi', 'cod'] as const).map((m) => (
                 <button key={m} disabled={busy || recoveryPossible} onClick={() => setMethod(m)} className={cn('h-12 rounded-xl border-2 font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-60', method === m ? 'border-orange-600 bg-orange-50 text-orange-900' : 'border-neutral-200 bg-white')}>
-                  {m === 'upi' ? <><Wallet size={16} /> {t.upi}</> : <><Banknote size={16} /> {t.cash}</>}
+                  {m === 'upi' ? <><Wallet size={16} /> {isolatedTest ? 'UPI simulation' : t.upi}</> : <><Banknote size={16} /> {t.cash}</>}
                 </button>
               ))}
             </div>
 
             {recoveryPossible && <p className="mt-3 text-xs text-amber-900">The last checkout may have started. Retry the same details below; if you already paid, contact the shop before paying again. {!recoverySaved && 'Keep this tab open: this browser could not save a recovery reference for reload.'}</p>}
             <button disabled={busy || quoteLoading || !quote || (!shopData?.accepting_orders && !recoveryPossible)} onClick={submitPayment} className="btn btn-primary w-full py-4 text-lg mt-4">
-              {busy ? <Loader2 size={20} className="animate-spin" /> : recoveryPossible ? 'Retry checkout safely' : method === 'upi' ? t.proceedPay : t.placeCash}
+              {busy ? <Loader2 size={20} className="animate-spin" /> : recoveryPossible ? 'Retry checkout safely' : method === 'upi' ? isolatedTest ? 'Continue to simulated payment' : t.proceedPay : t.placeCash}
             </button>
-            <p className="mt-2 text-center text-[11px] text-neutral-400 flex items-center justify-center gap-1"><ShieldCheck size={12} /> {t.directPayment}</p>
+            <p className="mt-2 text-center text-[11px] text-neutral-400 flex items-center justify-center gap-1"><ShieldCheck size={12} /> {isolatedTest ? 'Test only: do not send money.' : t.directPayment}</p>
           </section>
         )}
 
@@ -894,37 +898,39 @@ function OrderWizardForShop({ slug }: { slug: string }) {
             {!recoverySaved && <p className="mb-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">Keep this tab open or save the tracking link: this browser could not save a recovery reference for reload.</p>}
             <div className="rounded-3xl overflow-hidden shadow-2xl">
               <div className="bg-neutral-950 text-white px-6 pt-6 pb-5 text-center relative">
-                <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-400">{t.upiCheckout}</div>
-                <div className="mt-1 text-sm text-neutral-300">{t.payingTo}</div>
+                <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-400">{isolatedTest ? 'Simulated checkout' : t.upiCheckout}</div>
+                <div className="mt-1 text-sm text-neutral-300">{isolatedTest ? 'Test shop' : t.payingTo}</div>
                 <div className="text-xl font-extrabold tracking-tight">{upi.shop_name}</div>
                 <div className="mt-3 text-5xl font-black tabular-nums tracking-tight">₹{(upi.total_paise / 100).toFixed(2)}</div>
-                <div className="mt-1 text-[11px] text-neutral-500">{t.checkAmount}</div>
+                <div className="mt-1 text-[11px] text-neutral-500">{isolatedTest ? 'No real payment' : t.checkAmount}</div>
               </div>
 
               <div className="bg-white px-6 py-6 text-center border-x border-neutral-100">
-                {qrDataUrl
-                  ? <BrandedQr src={qrDataUrl} alt="UPI QR" brandInside={qrBrandInside} />
-                  : qrFailed
-                    ? <div className="mx-auto grid min-h-28 max-w-56 place-items-center rounded-xl bg-neutral-50 p-4 text-xs text-neutral-600" role="status">QR unavailable. Use the button below to open your UPI app.</div>
-                    : <div className="w-56 h-56 mx-auto skeleton" />}
-                <div className="mt-3 flex items-center justify-center gap-1.5 text-xs text-neutral-500">{qrDataUrl && !qrBrandInside && <BrandMark className="h-4 w-4" />}{t.scanUpi}</div>
-                <div className="mt-1 flex items-center justify-center gap-4 text-[10px] font-bold text-neutral-400">
-                  <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-blue-600 inline-block" />GPay</span>
-                  <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-purple-600 inline-block" />PhonePe</span>
-                  <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-sky-500 inline-block" />Paytm</span>
-                  <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-green-600 inline-block" />BHIM</span>
-                </div>
-                <a href={upi.link} className="btn btn-dark w-full h-12 mt-4"><Smartphone size={17} /> {t.openUpi}</a>
-                <div className="mt-2 text-[11px] font-mono text-neutral-400 break-all">{upi.pa}</div>
+                {isolatedTest ? <p role="status" className="rounded-xl bg-amber-50 p-4 text-sm font-bold text-amber-950">SIMULATED PAYMENT ONLY. Do not send money. Payment QR and UPI app links are disabled on this test site.</p> : <>
+                  {qrDataUrl
+                    ? <BrandedQr src={qrDataUrl} alt="UPI QR" brandInside={qrBrandInside} />
+                    : qrFailed
+                      ? <div className="mx-auto grid min-h-28 max-w-56 place-items-center rounded-xl bg-neutral-50 p-4 text-xs text-neutral-600" role="status">QR unavailable. Use the button below to open your UPI app.</div>
+                      : <div className="w-56 h-56 mx-auto skeleton" />}
+                  <div className="mt-3 flex items-center justify-center gap-1.5 text-xs text-neutral-500">{qrDataUrl && !qrBrandInside && <BrandMark className="h-4 w-4" />}{t.scanUpi}</div>
+                  <div className="mt-1 flex items-center justify-center gap-4 text-[10px] font-bold text-neutral-400">
+                    <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-blue-600 inline-block" />GPay</span>
+                    <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-purple-600 inline-block" />PhonePe</span>
+                    <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-sky-500 inline-block" />Paytm</span>
+                    <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-green-600 inline-block" />BHIM</span>
+                  </div>
+                  <a href={upi.link} className="btn btn-dark w-full h-12 mt-4"><Smartphone size={17} /> {t.openUpi}</a>
+                  <div className="mt-2 text-[11px] font-mono text-neutral-400 break-all">{upi.pa}</div>
+                </>}
               </div>
 
               <div className="bg-neutral-50 border border-neutral-100 px-6 py-5 rounded-b-3xl">
-                <label className="label">{t.reference}</label>
-                <input value={utr} onChange={(e) => setUtr(e.target.value)} className="input text-center font-mono tracking-wider" placeholder="e.g. 426178900123" inputMode="numeric" />
+                <label className="label">{isolatedTest ? 'Synthetic test reference' : t.reference}</label>
+                <input value={utr} onChange={(e) => setUtr(e.target.value)} className="input text-center font-mono tracking-wider" placeholder={isolatedTest ? 'e.g. TEST123456' : 'e.g. 426178900123'} inputMode={isolatedTest ? 'text' : 'numeric'} />
                 <button disabled={busy} onClick={confirmPaid} className="btn btn-primary w-full h-13 py-4 text-lg mt-3">
-                  {busy ? <Loader2 size={20} className="animate-spin" /> : <>{t.paid} ₹{(upi.total_paise / 100).toFixed(2)}</>}
+                  {busy ? <Loader2 size={20} className="animate-spin" /> : isolatedTest ? 'Report simulated payment' : <>{t.paid} ₹{(upi.total_paise / 100).toFixed(2)}</>}
                 </button>
-                <p className="mt-2 text-center text-xs text-neutral-600">{t.paymentSafety}</p>
+                <p className="mt-2 text-center text-xs text-neutral-600">{isolatedTest ? 'This records a test reference only. Do not send any payment.' : t.paymentSafety}</p>
               </div>
             </div>
             <button disabled={busy} onClick={() => router.push(`/track/${orderId}`)} className="w-full text-center text-sm text-neutral-500 mt-4 hover:underline disabled:opacity-50">{t.trackWithout}</button>

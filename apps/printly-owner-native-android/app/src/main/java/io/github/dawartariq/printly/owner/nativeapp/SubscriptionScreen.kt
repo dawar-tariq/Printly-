@@ -87,6 +87,7 @@ private fun validPurchase(purchase: JSONObject): Boolean {
     val plan = data?.optJSONObject("plan")
     val purchases = data?.array("purchases") ?: emptyList()
     val open = purchases.firstOrNull { it.text("status") in listOf("initiated", "submitted") }
+    val allowExternalPayment = externalPaymentAllowed(api.isDemo, BuildConfig.ISOLATED_TEST_MODE)
     val canChoose = owner && !permanent && open == null && !busy && !stale && pending?.resolvedPurchaseId == null
 
     suspend fun requestQuote(term: String) {
@@ -121,6 +122,7 @@ private fun validPurchase(purchase: JSONObject): Boolean {
             quote = null; selected = ""; reference = ""
             notice = if (result.optBoolean("existing", false)) "An existing request was returned. Review its status and amount below."
                 else if (purchase.optLong("amount_paise", -1) == 0L && purchase.text("status") == "approved") "The free term was approved. Check the updated period in your history."
+                else if (BuildConfig.ISOLATED_TEST_MODE) "Test request created. Do not send money."
                 else "Request created. Verify the recipient and exact amount before paying."
             load(clearError = false)
         } catch (e: Exception) {
@@ -159,6 +161,7 @@ private fun validPurchase(purchase: JSONObject): Boolean {
         if (loading && data == null) LoadingPanel()
         if (stale && data != null) InfoBanner("Details may be out of date. Refresh before making a payment or changing a request.")
         if (api.isDemo) InfoBanner("Sample subscription only. Do not send payment to sample details.")
+        if (BuildConfig.ISOLATED_TEST_MODE) InfoBanner("ISOLATED TEST ONLY · Use synthetic references. Do not send money; UPI app launching is disabled.")
         if (data != null) {
             SurfaceCard(Modifier.fillMaxWidth()) {
                 SectionLabel("PRINTLY ACCESS")
@@ -179,33 +182,40 @@ private fun validPurchase(purchase: JSONObject): Boolean {
             }
             open?.let { purchase ->
                 SurfaceCard(Modifier.fillMaxWidth()) {
-                    Text(if (purchase.text("status") == "initiated") "Complete your payment" else "Payment report submitted", fontWeight = FontWeight.ExtraBold)
+                    Text(if (purchase.text("status") == "initiated") {
+                        if (BuildConfig.ISOLATED_TEST_MODE) "Simulate a payment" else "Complete your payment"
+                    } else "Payment report submitted", fontWeight = FontWeight.ExtraBold)
                     Spacer(Modifier.height(6.dp))
                     Text("${termLabel(purchase.text("term"))} · ${money(purchase.optLong("amount_paise", 0))}", fontWeight = FontWeight.Bold)
                     val payee = purchase.text("payee_name"); val upi = purchase.text("upi_id")
                     if (purchase.text("status") == "initiated") {
                         if (payee.isBlank() || upi.isBlank() || purchase.optLong("amount_paise", 0) <= 0) ErrorBanner("Payment details are unavailable. Do not pay; contact Printly.")
                         else {
-                            Spacer(Modifier.height(7.dp)); Text("Recipient: $payee\nUPI ID: $upi", color = Ink, style = MaterialTheme.typography.bodyMedium)
-                            Spacer(Modifier.height(7.dp)); InfoBanner("Already paid? Do not pay again or cancel. Submit the transaction reference, or contact Printly for help.")
-                            Spacer(Modifier.height(8.dp))
-                            SecondaryButton("Open UPI app", {
-                                try {
-                                    val uri = subscriptionUpiUri(purchase, data?.optJSONObject("shop")?.text("short_code") ?: "")
-                                    context.startActivity(Intent.createChooser(Intent(Intent.ACTION_VIEW, uri), "Choose UPI app"))
-                                } catch (_: ActivityNotFoundException) { error = "No UPI app was found. Use the displayed recipient and amount only after verifying them." }
-                                catch (e: Exception) { error = safeError(e) }
-                            }, Modifier.fillMaxWidth(), enabled = !api.isDemo && owner && !busy && !stale)
+                            if (!BuildConfig.ISOLATED_TEST_MODE) {
+                                Spacer(Modifier.height(7.dp)); Text("Recipient: $payee\nUPI ID: $upi", color = Ink, style = MaterialTheme.typography.bodyMedium)
+                                Spacer(Modifier.height(7.dp)); InfoBanner("Already paid? Do not pay again or cancel. Submit the transaction reference, or contact Printly for help.")
+                            }
+                            if (!BuildConfig.ISOLATED_TEST_MODE) {
+                                Spacer(Modifier.height(8.dp))
+                                SecondaryButton("Open UPI app", {
+                                    if (!allowExternalPayment) error = "Payments are disabled in this test build. Do not send money."
+                                    else try {
+                                        val uri = subscriptionUpiUri(purchase, data?.optJSONObject("shop")?.text("short_code") ?: "")
+                                        context.startActivity(Intent.createChooser(Intent(Intent.ACTION_VIEW, uri), "Choose UPI app"))
+                                    } catch (_: ActivityNotFoundException) { error = "No UPI app was found. Use the displayed recipient and amount only after verifying them." }
+                                    catch (e: Exception) { error = safeError(e) }
+                                }, Modifier.fillMaxWidth(), enabled = allowExternalPayment && owner && !busy && !stale)
+                            }
                             Spacer(Modifier.height(6.dp))
-                            OutlinedTextField(reference, { reference = it.take(40) }, label = { Text("UPI reference / UTR") }, singleLine = true, enabled = owner && !busy && !stale, modifier = Modifier.fillMaxWidth())
+                            OutlinedTextField(reference, { reference = it.take(40) }, label = { Text(if (BuildConfig.ISOLATED_TEST_MODE) "Synthetic test reference" else "UPI reference / UTR") }, singleLine = true, enabled = owner && !busy && !stale, modifier = Modifier.fillMaxWidth())
                             Spacer(Modifier.height(8.dp))
-                            PrimaryButton("Report payment", { dialog = "submit" }, Modifier.fillMaxWidth(), enabled = owner && !busy && !stale && Regex("^[A-Za-z0-9-]{6,40}$").matches(reference.trim()))
+                            PrimaryButton(if (BuildConfig.ISOLATED_TEST_MODE) "Report simulated payment" else "Report payment", { dialog = "submit" }, Modifier.fillMaxWidth(), enabled = owner && !busy && !stale && Regex("^[A-Za-z0-9-]{6,40}$").matches(reference.trim()))
                             TextButton(enabled = owner && !busy && !stale, onClick = { cancelChecked = false; dialog = "cancel" }) { Text("Cancel unpaid request", color = Red) }
                         }
                     } else {
                         Spacer(Modifier.height(6.dp))
                         Text("Reference: ${purchase.text("utr", "—")}", color = Muted)
-                        Text("Do not pay again. Printly will verify the transfer before activating the term.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                        Text(if (BuildConfig.ISOLATED_TEST_MODE) "Test report only. Do not send money." else "Do not pay again. Printly will verify the transfer before activating the term.", color = Muted, style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
@@ -265,12 +275,13 @@ private fun validPurchase(purchase: JSONObject): Boolean {
         AlertDialog(onDismissRequest = { if (!busy) dialog = "" }, title = { Text(if (proposed.getLong("amount_paise") == 0L) "Activate this free term?" else "Create this payment request?") },
             text = { Text("${termLabel(proposed.text("term"))} · ${money(proposed.getLong("amount_paise"))}. " +
                 (if (pending != null) "An earlier response was uncertain; the same request key will be used and an existing request may be returned. Check history first. " else "") +
-                (if (proposed.getLong("amount_paise") == 0L) "If eligible, access will be extended immediately." else "No payment is sent by this action. Verify the payee before paying.")) },
+                (if (BuildConfig.ISOLATED_TEST_MODE) "Test request only. Do not send money." else if (proposed.getLong("amount_paise") == 0L) "If eligible, access will be extended immediately." else "No payment is sent by this action. Verify the payee before paying.")) },
             confirmButton = { TextButton(enabled = !busy, onClick = { dialog = ""; scope.launch { start() } }) { Text("Confirm request") } },
             dismissButton = { TextButton(enabled = !busy, onClick = { dialog = "" }) { Text("Go back") } })
     }
     if (dialog == "submit" && open != null) AlertDialog(onDismissRequest = { if (!busy) dialog = "" },
-        title = { Text("Report this transfer?") }, text = { Text("Only report an actual transfer of ${money(open.optLong("amount_paise", 0))} to ${open.text("payee_name")} (${open.text("upi_id")}). Reference: ${reference.trim()}. Printly will verify it before activating access.") },
+        title = { Text(if (BuildConfig.ISOLATED_TEST_MODE) "Report this simulated payment?" else "Report this transfer?") },
+        text = { Text(if (BuildConfig.ISOLATED_TEST_MODE) "Test only. Do not send money. Report the synthetic reference ${reference.trim()}?" else "Only report an actual transfer of ${money(open.optLong("amount_paise", 0))} to ${open.text("payee_name")} (${open.text("upi_id")}). Reference: ${reference.trim()}. Printly will verify it before activating access.") },
         confirmButton = { TextButton(enabled = !busy, onClick = { dialog = ""; scope.launch { updatePurchase("submit", open) } }) { Text("Submit reference") } },
         dismissButton = { TextButton(enabled = !busy, onClick = { dialog = "" }) { Text("Go back") } })
     if (dialog == "cancel" && open != null) AlertDialog(onDismissRequest = { if (!busy) dialog = "" }, title = { Text("Cancel unpaid request?") },

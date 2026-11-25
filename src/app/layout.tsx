@@ -11,6 +11,7 @@ export const metadata: Metadata = {
   title: 'Printly — Less waiting. More doing.',
   description: 'A simpler way to order from your local print shop. Scan, upload, pay the shop directly and follow your order—right from your browser.',
   applicationName: 'Printly',
+  ...(process.env.PRINTLY_ISOLATED_TEST === '1' ? { robots: { index: false, follow: false } } : {}),
   icons: {
     icon: [{ url: '/icon.svg', type: 'image/svg+xml' }, { url: '/favicon.ico', sizes: 'any' }],
     apple: '/apple-touch-icon.png',
@@ -30,7 +31,10 @@ export const viewport: Viewport = { width: 'device-width', initialScale: 1, them
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="min-h-screen antialiased"><MaintenanceGuard>{children}</MaintenanceGuard></body>
+      <body className="min-h-screen antialiased">
+        {process.env.PRINTLY_ISOLATED_TEST === '1' && <div role="status" className="sticky top-0 z-[100] bg-amber-300 px-4 py-2 text-center text-xs font-extrabold text-amber-950">ISOLATED TEST SITE · Synthetic data only. Do not use real shop accounts, files or payments.</div>}
+        <MaintenanceGuard>{children}</MaintenanceGuard>
+      </body>
     </html>
   );
 }

@@ -19,9 +19,9 @@ cd apps/printly-owner-native-android
 ./gradlew assembleQa -PprintlyQaSiteOrigin=https://verified-test-only.example
 ```
 
-QA refuses missing, malformed and known production website origins. It checks the Auth host returned by the website against the staging project (`rahfmpsdbwbktlobntkm.supabase.co`) before sign-in. This is not a substitute for verifying the website's server-side environment or for reviewing staging data. The debug signing identity and separate package cannot establish compatibility with an installed production APK.
+QA refuses missing, malformed and known production website origins. It checks the Auth host returned by the website against the staging project (`rahfmpsdbwbktlobntkm.supabase.co`) before sign-in. This is not a substitute for verifying the website's server-side environment or for reviewing staging data. The QA build does not launch a UPI app; use synthetic references and never send real money. This is not a payment sandbox. The debug signing identity and separate package cannot establish compatibility with an installed production APK; a new debug key may require replacing only a previous QA installation.
 
-The native CI workflow builds and tests the demo, inspects the merged manifest, tests the unsigned-release guard, and verifies the review signing path with a temporary CI-only key. The CI release APK is **not** uploaded. No real signing secrets or live customer data are used in this workflow. The separate protected native review workflow and the direct-download release gates are described in `docs/native-direct-distribution.md`.
+The native CI workflow builds and tests the demo and isolated QA variants, inspects their merged manifests, tests the unsigned-release guard, and verifies the review signing path with a temporary CI-only key. It uploads the demo and debug-signed QA as explicitly non-release, seven-day artifacts; the CI release APK is **not** uploaded. No real signing secrets or live customer data are used in this workflow. The separate protected native review workflow and the direct-download release gates are described in `docs/native-direct-distribution.md`.
 
 ## Current functionality
 

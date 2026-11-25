@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { portalDestination, type Portal } from '@/lib/portal-auth';
 import { isAdminApi, isAdminPage, MAINTENANCE_STATUS_PATH } from '@/lib/maintenance';
 import { maintenanceApiResponse, maintenancePageResponse, maintenanceStatusResponse, readMaintenanceState } from '@/lib/maintenance-server';
+import { isolatedTestRequestAllowed } from '@/lib/isolated-test-environment.mjs';
 
 // Browsers include Origin or Fetch Metadata on cross-site state-changing
 // requests. Never accept a different origin, including a sibling subdomain.
@@ -29,6 +30,27 @@ function isCrossOriginMutation(req: NextRequest, path: string) {
 }
 
 export async function middleware(req: NextRequest) {
+  // Fail before maintenance, Auth or any data access if the dedicated test
+  // project/hostname is misconfigured or points at an unexpected backend.
+  if (!isolatedTestRequestAllowed({
+    PRINTLY_ISOLATED_TEST: process.env.PRINTLY_ISOLATED_TEST,
+    NEXT_PUBLIC_PRINTLY_ISOLATED_TEST: process.env.NEXT_PUBLIC_PRINTLY_ISOLATED_TEST,
+    NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL,
+    NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
+    PRINTLY_REDIS_REST_URL: process.env.PRINTLY_REDIS_REST_URL,
+    PRINTLY_REDIS_REST_TOKEN: process.env.PRINTLY_REDIS_REST_TOKEN,
+    NEXT_PUBLIC_DROPBOX_APP_KEY: process.env.NEXT_PUBLIC_DROPBOX_APP_KEY,
+    PRINTLY_ANDROID_APK_URL: process.env.PRINTLY_ANDROID_APK_URL,
+    VERCEL_PROJECT_ID: process.env.VERCEL_PROJECT_ID,
+    VERCEL_PROJECT_PRODUCTION_URL: process.env.VERCEL_PROJECT_PRODUCTION_URL,
+    VERCEL_ENV: process.env.VERCEL_ENV,
+  }, req.headers.get('host') ?? req.nextUrl.host)) {
+    return NextResponse.json({ error: { code: 'test_environment_unavailable', message: 'The isolated test environment is not configured safely.' } }, {
+      status: 503, headers: { 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow' },
+    });
+  }
   const path = req.nextUrl.pathname.replace(/\/+$/, '') || '/';
   const adminPage = isAdminPage(path);
 

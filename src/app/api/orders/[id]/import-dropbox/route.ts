@@ -61,6 +61,11 @@ const MIME_BY_EXT: Record<string, string> = {
 };
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  // The phone-test environment is for synthetic files only. A pasted Dropbox
+  // URL can otherwise retrieve a real external file even without a chooser key.
+  if (process.env.PRINTLY_ISOLATED_TEST === '1') {
+    return jsonError(403, 'test_integration_disabled', 'Dropbox import is disabled on the isolated test site.');
+  }
   const { id } = await params;
   if (!requestHasDraftAccess(req, id)) return jsonError(403, 'draft_session', 'Your order session expired. Please start a new order.');
   const limited = await enforcePublicRateLimit(req, 'dropbox_import');

@@ -20,13 +20,15 @@ const purchaseText = { initiated: 'Payment not reported', submitted: 'Awaiting v
 
 function PaymentQr({ purchase, shopCode }: { purchase: SubscriptionPurchase; shopCode: string }) {
   const [qr, setQr] = useState('');
-  const intent = purchase.upi_id && purchase.payee_name && purchase.amount_paise > 0
+  const isolatedTest = process.env.NEXT_PUBLIC_PRINTLY_ISOLATED_TEST === '1';
+  const intent = !isolatedTest && purchase.upi_id && purchase.payee_name && purchase.amount_paise > 0
     ? buildUpiIntent({ upiId: purchase.upi_id, payeeName: purchase.payee_name, amountPaise: purchase.amount_paise, note: `Printly ${shopCode} ${purchase.id.slice(0, 8)}` }) : null;
   useEffect(() => {
     let alive = true;
     if (intent) QRCode.toDataURL(intent.link, { width: 280, margin: 3, errorCorrectionLevel: 'M' }).then((url) => { if (alive) setQr(url); }).catch(() => { if (alive) setQr(''); });
     return () => { alive = false; };
   }, [intent?.link]);
+  if (isolatedTest) return <p role="status" className="rounded-xl bg-white p-4 text-sm font-bold text-amber-950">SIMULATED PAYMENT ONLY. Do not send money. Payment QR and UPI app links are disabled on this test site.</p>;
   if (!intent) return <p className="rounded-xl bg-white p-4 text-sm text-red-800">Payment details are unavailable. Do not pay; contact Printly for help.</p>;
   return <div className="flex flex-col items-center gap-2 rounded-xl bg-white p-3 text-center">
     {qr ? <img src={qr} alt="UPI payment QR code" width={240} height={240} className="h-48 w-48 sm:h-60 sm:w-60" /> : <p className="py-4 text-xs text-neutral-500">Use the UPI ID or app link below.</p>}
@@ -35,6 +37,7 @@ function PaymentQr({ purchase, shopCode }: { purchase: SubscriptionPurchase; sho
 }
 
 export default function ShopSubscriptionPage() {
+  const isolatedTest = process.env.NEXT_PUBLIC_PRINTLY_ISOLATED_TEST === '1';
   const router = useRouter();
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState('');
@@ -145,7 +148,7 @@ export default function ShopSubscriptionPage() {
         : purchase.amount_paise === 0 && purchase.status === 'approved'
           ? `${termLabel(purchase.term)} access activated for free. Your new period is shown below.`
           : result.existing ? 'Your existing request is shown below. Check its status before taking any further action.'
-            : 'Request created. Review the recipient and exact amount before paying.');
+            : isolatedTest ? 'Test request created. Do not send a real payment.' : 'Request created. Review the recipient and exact amount before paying.');
       await load(); router.refresh();
     } catch (err) {
       // Keep the same key on an uncertain outcome. Refreshing or retrying can
@@ -186,23 +189,25 @@ export default function ShopSubscriptionPage() {
     {data.offers_unavailable && <p className="text-xs text-neutral-500">Offers and updates are temporarily unavailable. You can still review subscription terms.</p>}
     {!data.is_owner && <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-900">Only the shop owner can start a subscription or submit a payment reference. Please ask the owner to renew.</div>}
     {open && <section className="rounded-2xl border-2 border-orange-300 bg-orange-50 p-5">
-      <h2 className="flex items-center gap-2 text-lg font-extrabold"><CreditCard size={20} />{open.status === 'initiated' ? 'Complete your UPI payment' : 'Payment report submitted'}</h2>
+      <h2 className="flex items-center gap-2 text-lg font-extrabold"><CreditCard size={20} />{open.status === 'initiated' ? isolatedTest ? 'Simulate a payment' : 'Complete your UPI payment' : 'Payment report submitted'}</h2>
       <p className="mt-1 text-sm text-neutral-700">{termLabel(open.term)} · <strong>{formatPaiseExact(open.amount_paise)}</strong> · Request {open.id.slice(0, 8).toUpperCase()}</p>
       {open.promo_code && <p className="mt-1 text-xs font-semibold text-orange-800">Promo {open.promo_code} · {formatPaiseExact(open.discount_paise ?? 0)} off the term price</p>}
       {open.status === 'initiated' ? <div className="mt-4 grid gap-4 md:grid-cols-[240px_1fr]">
         {state.status === 'permanent' ? <div className="rounded-xl bg-white p-4 text-sm font-semibold text-green-800">Permanent access is now enabled. Do not pay for this request.</div> : data.is_owner ? <PaymentQr purchase={open} shopCode={data.shop.short_code} /> : <div className="rounded-xl bg-white p-4 text-sm text-neutral-700">The shop owner can complete this request.</div>}
         <div className="min-w-0 space-y-3 text-sm">
-          {state.status === 'permanent' ? <p>If you already paid before permanent access was granted, submit the reference below so Printly can review it. Otherwise cancel this unpaid request.</p> : data.is_owner ? <p>Pay <strong>{formatPaiseExact(open.amount_paise)}</strong> to the Printly UPI recipient below. Check the payee in your UPI app before sending.</p> : <p>Ask the shop owner to complete this request and submit the payment reference.</p>}
-          <div className="rounded-xl bg-white p-3"><div className="text-xs text-neutral-500">Recipient</div><div className="break-all font-bold">{open.payee_name} · {open.upi_id}</div></div>
-          <p className="text-xs leading-relaxed text-amber-950"><strong>Already paid?</strong> Do not pay again or cancel. Enter the transaction reference from your UPI app below. Submitting a reference does not activate access; Printly must verify the transfer independently.</p>
+          {isolatedTest ? <p className="font-bold text-amber-950">Test request only. Use a synthetic reference; do not send money.</p> : <>
+            {state.status === 'permanent' ? <p>If you already paid before permanent access was granted, submit the reference below so Printly can review it. Otherwise cancel this unpaid request.</p> : data.is_owner ? <p>Pay <strong>{formatPaiseExact(open.amount_paise)}</strong> to the Printly UPI recipient below. Check the payee in your UPI app before sending.</p> : <p>Ask the shop owner to complete this request and submit the payment reference.</p>}
+            <div className="rounded-xl bg-white p-3"><div className="text-xs text-neutral-500">Recipient</div><div className="break-all font-bold">{open.payee_name} · {open.upi_id}</div></div>
+            <p className="text-xs leading-relaxed text-amber-950"><strong>Already paid?</strong> Do not pay again or cancel. Enter the transaction reference from your UPI app below. Submitting a reference does not activate access; Printly must verify the transfer independently.</p>
+          </>}
           <form onSubmit={(event) => { event.preventDefault(); void act({ action: 'submit', purchase_id: open.id, utr: reference }, 'Payment report submitted. Your subscription will activate only after Printly verifies and approves it.'); }}>
-            <label htmlFor="subscription-reference" className="label">UPI transaction reference / UTR</label>
-            <input id="subscription-reference" className="input mt-1 w-full font-mono" required minLength={6} maxLength={40} value={reference} onChange={(event) => setReference(event.target.value)} placeholder="Reference from your UPI app" disabled={!data.is_owner || busy} />
+            <label htmlFor="subscription-reference" className="label">{isolatedTest ? 'Synthetic test reference' : 'UPI transaction reference / UTR'}</label>
+            <input id="subscription-reference" className="input mt-1 w-full font-mono" required minLength={6} maxLength={40} value={reference} onChange={(event) => setReference(event.target.value)} placeholder={isolatedTest ? 'e.g. TEST123456' : 'Reference from your UPI app'} disabled={!data.is_owner || busy} />
             <div className="mt-3 flex flex-wrap gap-2"><button disabled={!data.is_owner || busy} className="btn btn-primary min-h-11 px-4">{busy ? <Loader2 size={16} className="animate-spin" /> : 'Submit payment reference'}</button>
               <button type="button" disabled={!data.is_owner || busy} className="btn btn-ghost min-h-11 px-4 text-xs" onClick={() => { if (window.confirm('Cancel this request only if you have NOT sent a payment. If you already paid, submit the reference or contact Printly instead. Cancel?')) void act({ action: 'cancel', purchase_id: open.id }, 'Unpaid request cancelled.'); }}>Cancel unpaid request</button></div>
           </form>
         </div>
-      </div> : <div className="mt-4 rounded-xl bg-white p-4 text-sm"><p className="flex items-center gap-2 font-bold text-amber-800"><Clock3 size={16} />Awaiting independent verification</p><p className="mt-2">Reference: <strong className="break-all font-mono">{open.utr}</strong></p><p className="mt-2 text-xs text-neutral-600">Please do not pay again. Printly will compare the reference, amount and recipient with the actual transfer before activating the term. Refresh this page to check for a decision.</p></div>}
+      </div> : <div className="mt-4 rounded-xl bg-white p-4 text-sm"><p className="flex items-center gap-2 font-bold text-amber-800"><Clock3 size={16} />Awaiting independent verification</p><p className="mt-2">Reference: <strong className="break-all font-mono">{open.utr}</strong></p><p className="mt-2 text-xs text-neutral-600">{isolatedTest ? 'Test report only. No payment should have been sent.' : 'Please do not pay again. Printly will compare the reference, amount and recipient with the actual transfer before activating the term. Refresh this page to check for a decision.'}</p></div>}
     </section>}
 
     <section>
@@ -235,8 +240,8 @@ export default function ShopSubscriptionPage() {
         {quote ? <><div className="mt-4 flex justify-between gap-4 text-sm"><span className="text-neutral-600">Term base price</span><strong>{formatPaiseExact(quote.base_paise)}</strong></div>
           <div className="my-4"><SavingsBreakdown base={quote.base_paise} reference={quote.monthly_reference_paise} discount={quote.discount_paise} /></div>
           <div className="flex items-end justify-between gap-4 border-t border-orange-200 pt-4"><span className="text-sm font-bold">You pay</span><strong className="text-2xl font-extrabold">{formatPaiseExact(quote.amount_paise)}</strong></div>
-          <p className="mt-3 text-xs leading-5 text-neutral-600">{quote.amount_paise === 0 ? 'No UPI payment or manual approval needed. Confirming immediately adds this term.' : 'A one-time UPI payment and independent Printly verification are required before this term activates.'}</p>
-          <button onClick={() => void start()} disabled={busy || needsRefresh || (quote.amount_paise > 0 && !readyToPay)} className="btn btn-primary mt-4 min-h-11 w-full px-4 text-sm">{busy ? <Loader2 size={16} className="animate-spin" /> : quote.amount_paise === 0 ? 'Activate for free' : 'Continue to UPI payment'} <ArrowRight size={16} /></button>
+          <p className="mt-3 text-xs leading-5 text-neutral-600">{isolatedTest ? 'Test request only. Do not make a real payment.' : quote.amount_paise === 0 ? 'No UPI payment or manual approval needed. Confirming immediately adds this term.' : 'A one-time UPI payment and independent Printly verification are required before this term activates.'}</p>
+          <button onClick={() => void start()} disabled={busy || needsRefresh || (quote.amount_paise > 0 && !readyToPay)} className="btn btn-primary mt-4 min-h-11 w-full px-4 text-sm">{busy ? <Loader2 size={16} className="animate-spin" /> : quote.amount_paise === 0 ? 'Activate for free' : isolatedTest ? 'Continue to simulated payment' : 'Continue to UPI payment'} <ArrowRight size={16} /></button>
         </> : <p className="mt-4 text-sm text-neutral-500">Your current quote will appear here.</p>}
       </div>
     </section>}

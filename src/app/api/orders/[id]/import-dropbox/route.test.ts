@@ -54,9 +54,17 @@ beforeEach(() => {
   state.outcome = 'ok'; state.saved = null; state.lookupFails = false; state.discardOk = true; state.discardInUse = false; state.discardCalls = [];
   vi.stubGlobal('fetch', vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), { headers: { 'content-type': 'application/pdf', 'content-disposition': 'attachment; filename="document.pdf"' } })));
 });
-afterEach(() => { vi.unstubAllGlobals(); });
+afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe('Dropbox import cleanup', () => {
+  it('does not contact Dropbox in the isolated phone-test environment', async () => {
+    vi.stubEnv('PRINTLY_ISOLATED_TEST', '1');
+    const response = await POST(request(), params);
+    expect(response.status).toBe(403);
+    expect((await response.json()).error.code).toBe('test_integration_disabled');
+    expect(fetch).not.toHaveBeenCalled();
+    expect(state.saved).toBeNull();
+  });
   it('requires the draft session', async () => {
     expect((await POST(request(false), params)).status).toBe(403);
     expect(fetch).not.toHaveBeenCalled();

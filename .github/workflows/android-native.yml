@@ -64,7 +64,7 @@ jobs:
           if grep -R -E 'android\.webkit|TrustedWebActivity|androidbrowserhelper' app/src/main/java; then
             echo 'A browser-wrapper dependency was found in native source.' >&2; exit 1
           fi
-      - name: Guard and inspect isolated test build (never published)
+      - name: Guard, test and inspect the isolated QA build (not a release)
         working-directory: apps/printly-owner-native-android
         shell: bash
         run: |
@@ -80,21 +80,29 @@ jobs:
                 echo 'Expected the isolated-origin guard, but another failure occurred.' >&2; exit 1
               fi
             done
-            ./gradlew --no-daemon assembleQa '-PprintlyQaSiteOrigin=https://native-staging.example.invalid'
+            ./gradlew --no-daemon testQaUnitTest assembleQa '-PprintlyQaSiteOrigin=https://printly-native-test.vercel.app'
             QA=app/build/outputs/apk/qa/app-qa.apk
             "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest print "$QA" > "$RUNNER_TEMP/native-qa-manifest.xml"
             python3 check-manifest.py "$RUNNER_TEMP/native-qa-manifest.xml" io.github.dawartariq.printly.owner.native.qa
+            test "$("$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest version-code "$QA")" = '4'
+            test "$("$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest version-name "$QA")" = '2.0.1-isolated-test'
             "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$QA" > "$RUNNER_TEMP/native-qa-badging.txt"
             grep -F "application-label:'Printly Isolated Test'" "$RUNNER_TEMP/native-qa-badging.txt"
             grep -F 'application-debuggable' "$RUNNER_TEMP/native-qa-badging.txt"
-            "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$QA"
+            "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$QA"
+            sha256sum "$QA"
             CONFIG=$(find app/build/generated -name BuildConfig.java -path '*/qa/*' -print -quit)
             test -n "$CONFIG"
             grep -F 'ISOLATED_TEST_MODE = true' "$CONFIG"
             grep -F 'DEMO_MODE = false' "$CONFIG"
-            grep -F 'https://native-staging.example.invalid' "$CONFIG"
+            grep -F 'https://printly-native-test.vercel.app' "$CONFIG"
             grep -F 'rahfmpsdbwbktlobntkm.supabase.co' "$CONFIG"
             if grep -F 'lgfqetnfazawglwllymb.supabase.co' "$CONFIG"; then echo 'Production Auth host found in QA build.' >&2; exit 1; fi
+            # Inspect the actual package too, not just the generated source.
+            unzip -p "$QA" 'classes*.dex' > "$RUNNER_TEMP/native-qa.dex"
+            grep -aqF 'https://printly-native-test.vercel.app' "$RUNNER_TEMP/native-qa.dex"
+            grep -aqF 'rahfmpsdbwbktlobntkm.supabase.co' "$RUNNER_TEMP/native-qa.dex"
+            if grep -aqF 'printly-steel-three.vercel.app' "$RUNNER_TEMP/native-qa.dex" || grep -aqF 'lgfqetnfazawglwllymb.supabase.co' "$RUNNER_TEMP/native-qa.dex"; then echo 'Production host found in QA DEX.' >&2; exit 1; fi
           ) > "$RUNNER_TEMP/native-qa-check.log" 2>&1
           result=$?
           tail -n 160 "$RUNNER_TEMP/native-qa-check.log"
@@ -171,5 +179,13 @@ jobs:
         with:
           name: printly-native-DEMO-synthetic-data-NOT-FOR-RELEASE
           path: apps/printly-owner-native-android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
+      # Debug-signed QA only. Its site origin is public configuration; no keys,
+      # user data or production signing material belong in this artifact.
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: printly-native-QA-isolated-test-NOT-FOR-RELEASE
+          path: apps/printly-owner-native-android/app/build/outputs/apk/qa/app-qa.apk
           if-no-files-found: error
           retention-days: 7

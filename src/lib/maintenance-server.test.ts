@@ -40,6 +40,16 @@ describe('maintenance setting lookup', () => {
     expect(options.headers).toMatchObject({ apikey: 'private-test-key', Authorization: 'Bearer private-test-key' });
   });
 
+  it('sends a modern secret key as apikey, never as a bearer token', async () => {
+    const secret = `sb_secret_${'x'.repeat(30)}`;
+    vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', secret);
+    const fetcher = vi.fn().mockResolvedValue(Response.json([{ value: false }]));
+    vi.stubGlobal('fetch', fetcher);
+    expect(await readMaintenanceState()).toBe('off');
+    const [, options] = fetcher.mock.calls[0] as [URL, RequestInit];
+    expect(options.headers).toEqual({ apikey: secret, Accept: 'application/json' });
+  });
+
   it('fails closed for missing credentials, failed requests and malformed values', async () => {
     vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', '');
     expect(await readMaintenanceState()).toBe('unknown');

@@ -22,8 +22,11 @@ export async function readMaintenanceState(): Promise<MaintenanceState> {
     const endpoint = new URL('/rest/v1/platform_settings', url);
     endpoint.searchParams.set('select', 'value');
     endpoint.searchParams.set('key', 'eq.maintenance');
+    // New opaque secret keys are API keys, not JWTs. Keep the existing Bearer
+    // header for legacy service_role JWTs, but do not send sb_secret as one.
+    const headers = { apikey: key, Accept: 'application/json', ...(key.startsWith('sb_secret_') ? {} : { Authorization: `Bearer ${key}` }) };
     const response = await fetch(endpoint, {
-      headers: { apikey: key, Authorization: `Bearer ${key}`, Accept: 'application/json' },
+      headers,
       cache: 'no-store',
       signal: controller.signal,
     });

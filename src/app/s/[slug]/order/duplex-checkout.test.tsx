@@ -45,7 +45,7 @@ beforeEach(() => {
     throw new Error(`Unexpected fetch: ${url}`);
   }));
 });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 async function goToDuplex() {
   const view = render(<OrderWizard />);
@@ -70,6 +70,44 @@ async function goToDuplex() {
 }
 
 describe('customer duplex checkout', () => {
+  it('offers only device uploads, not Dropbox import, in the isolated rehearsal', async () => {
+    vi.stubEnv('NEXT_PUBLIC_PRINTLY_ISOLATED_TEST', '1');
+    vi.stubEnv('NEXT_PUBLIC_DROPBOX_APP_KEY', 'not-a-real-key');
+    render(<OrderWizard />);
+    fireEvent.click(await screen.findByRole('button', { name: /print pdf/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    await screen.findByText('Add your files');
+    expect(screen.getByText(/Use a synthetic file from this device/)).toBeTruthy();
+    expect(screen.queryByText('Import from Dropbox')).toBeNull();
+    expect(screen.queryByPlaceholderText('Paste a Dropbox share link…')).toBeNull();
+    expect(screen.queryByRole('button', { name: /Browse my Dropbox/ })).toBeNull();
+  });
+  it('simulates UPI without exposing a payment QR or app link on the isolated test site', async () => {
+    vi.stubEnv('NEXT_PUBLIC_PRINTLY_ISOLATED_TEST', '1');
+    const mock = vi.mocked(fetch);
+    const original = mock.getMockImplementation()!;
+    let reported: unknown = null;
+    mock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === `/api/orders/${order}/pay`) return Response.json({ mode: 'upi', link: 'upi://pay?pa=original%40upi', pa: 'original@upi', pn: 'Demo Prints', am: '28.32', tn: 'Printly', shop_name: 'Demo Prints', total_paise: 2832 });
+      if (url === `/api/orders/${order}/payment-submitted`) { reported = JSON.parse(String(init?.body)); return Response.json({ ok: true }); }
+      return original(input, init);
+    });
+    await goToDuplex();
+    fireEvent.change(screen.getByLabelText(/Your name/), { target: { value: 'Test Customer' } });
+    fireEvent.change(screen.getByLabelText(/^Phone/), { target: { value: '9797000000' } });
+    expect(screen.getByRole('button', { name: 'UPI simulation' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Continue to simulated payment' }));
+    expect(await screen.findByText(/SIMULATED PAYMENT ONLY/)).toBeTruthy();
+    expect(screen.getByText('Simulated checkout')).toBeTruthy();
+    expect(screen.getByText('No real payment')).toBeTruthy();
+    expect(screen.queryByRole('link', { name: /Open UPI app/i })).toBeNull();
+    expect(screen.queryByAltText('UPI QR')).toBeNull();
+    expect(screen.queryByText('original@upi')).toBeNull();
+    fireEvent.change(screen.getByPlaceholderText('e.g. TEST123456'), { target: { value: 'TEST123456' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Report simulated payment' }));
+    await waitFor(() => expect(reported).toEqual({ utr: 'TEST123456' }));
+  });
   it('shows files, odd-page sheet quantities and the actual per-sheet price before payment', async () => {
     await goToDuplex();
     expect(selectedItems).toMatchObject([

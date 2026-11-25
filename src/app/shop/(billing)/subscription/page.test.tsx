@@ -55,9 +55,24 @@ beforeEach(() => {
     return failGet ? Response.json({ error: { message: 'Could not load subscription details.' } }, { status: 503 }) : Response.json(data);
   }));
 });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); window.localStorage.clear(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.restoreAllMocks(); window.localStorage.clear(); });
 
 describe('shop subscription payment experience', () => {
+  it('allows a synthetic report but never offers a payment QR or UPI link on the isolated site', async () => {
+    vi.stubEnv('NEXT_PUBLIC_PRINTLY_ISOLATED_TEST', '1');
+    render(<ShopSubscriptionPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose monthly' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Continue to simulated payment' }));
+    expect(await screen.findByText('Simulate a payment')).toBeTruthy();
+    expect(screen.getByText(/SIMULATED PAYMENT ONLY/)).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'Open UPI app' })).toBeNull();
+    expect(screen.queryByAltText('UPI payment QR code')).toBeNull();
+    expect(screen.queryByText(/Printly · printly@upi/)).toBeNull();
+    fireEvent.change(screen.getByLabelText('Synthetic test reference'), { target: { value: 'TEST123456' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Submit payment reference' }));
+    expect(await screen.findByText('Payment report submitted')).toBeTruthy();
+    expect(posts.at(-1)).toMatchObject({ action: 'submit', utr: 'TEST123456' });
+  });
   it('keeps expired access locked while the owner reviews, pays, and reports a reference', async () => {
     render(<ShopSubscriptionPage />);
     expect(await screen.findByText('Expired')).toBeTruthy();

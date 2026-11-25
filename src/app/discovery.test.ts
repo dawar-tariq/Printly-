@@ -3,6 +3,12 @@ import robots from './robots';
 import sitemap from './sitemap';
 
 afterEach(() => vi.unstubAllEnvs());
+it('does not publish a sitemap or invite indexing for the isolated test site', () => {
+  vi.stubEnv('PRINTLY_ISOLATED_TEST', '1');
+  vi.stubEnv('NEXT_PUBLIC_SITE_URL', 'https://printly-native-test.vercel.app');
+  expect(sitemap()).toEqual([]);
+  expect(robots()).toEqual({ rules: { userAgent: '*', disallow: '/' } });
+});
 it('lists public information pages at the configured origin without tracking links', () => {
   vi.stubEnv('NEXT_PUBLIC_SITE_URL', 'https://printly.example');
   const urls = sitemap().map((entry) => entry.url);
