@@ -38,7 +38,11 @@ jobs:
           mkdir -p "$GNUPGHOME"
           chmod 700 "$PRINTLY_STAGING_PROBE_DIR" "$GNUPGHOME"
           printf 'PRINTLY_STAGING_PROBE_DIR=%s\nGNUPGHOME=%s\n' "$PRINTLY_STAGING_PROBE_DIR" "$GNUPGHOME" >> "$GITHUB_ENV"
-          gpg --batch --pinentry-mode loopback --passphrase '' --quick-generate-key 'Printly Synthetic Probe <synthetic-probe@example.invalid>' rsa2048 encr 0 >/dev/null 2>&1
+          gpg --batch --pinentry-mode loopback --passphrase '' --quick-generate-key 'Printly Synthetic Probe <synthetic-probe@example.invalid>' rsa2048 sign 0 >/dev/null 2>&1
+          fingerprint=$(gpg --batch --with-colons --list-keys 'synthetic-probe@example.invalid' 2>/dev/null | awk -F: '$1 == "fpr" {print $10; exit}')
+          test -n "$fingerprint"
+          # PostgreSQL pgcrypto expects an encryption subkey, not only a primary key.
+          gpg --batch --pinentry-mode loopback --passphrase '' --quick-add-key "$fingerprint" rsa2048 encr 0 >/dev/null 2>&1
           gpg --batch --armor --export 'synthetic-probe@example.invalid' > "$PRINTLY_STAGING_PROBE_DIR/public.asc"
           test -s "$PRINTLY_STAGING_PROBE_DIR/public.asc"
           node scripts/staging-realtime-probe.mjs > "$PRINTLY_STAGING_PROBE_DIR/probe.log" 2>&1 &
@@ -53,8 +57,8 @@ jobs:
           # Only the public key is exposed in the next step names. Private key
           # and login material stay on the runner and are never printed.
           public_key=$(base64 -w 0 "$PRINTLY_STAGING_PROBE_DIR/public.asc")
-          test "${#public_key}" -le 1800
-          for i in $(seq 1 10); do
+          test "${#public_key}" -le 2880
+          for i in $(seq 1 16); do
             offset=$(( (i - 1) * 180 ))
             printf 'part%s=%s\n' "$i" "${public_key:offset:180}" >> "$GITHUB_OUTPUT"
           done
@@ -77,6 +81,18 @@ jobs:
       - name: "Public key part 09 ${{ steps.listener.outputs.part9 }}"
         run: ':'
       - name: "Public key part 10 ${{ steps.listener.outputs.part10 }}"
+        run: ':'
+      - name: "Public key part 11 ${{ steps.listener.outputs.part11 }}"
+        run: ':'
+      - name: "Public key part 12 ${{ steps.listener.outputs.part12 }}"
+        run: ':'
+      - name: "Public key part 13 ${{ steps.listener.outputs.part13 }}"
+        run: ':'
+      - name: "Public key part 14 ${{ steps.listener.outputs.part14 }}"
+        run: ':'
+      - name: "Public key part 15 ${{ steps.listener.outputs.part15 }}"
+        run: ':'
+      - name: "Public key part 16 ${{ steps.listener.outputs.part16 }}"
         run: ':'
       - name: Wait for synthetic owner subscription
         shell: bash
