@@ -2,6 +2,9 @@
 name: Rehearse isolated QA order one-shot concurrency
 on:
   workflow_dispatch:
+  push:
+    branches: ['arena/309fdf51-printly']
+    paths: ['.github/workflows/qa-order-once-concurrency.yml']
 permissions:
   contents: read
 jobs:
