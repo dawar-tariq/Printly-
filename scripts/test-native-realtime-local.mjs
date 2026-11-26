@@ -88,6 +88,11 @@ export async function testNativeRealtimeLocal({ supabaseUrl, anonKey, admin, own
     await until(() => subscribers.some((state) => state.failed) ||
       (subscribers.every((state) => state.joined && state.ready) && customerReady && unrelatedReady), 'subscriptions');
     assert(subscribers.every((state) => !state.failed), 'local Realtime subscription failed');
+    const wrongNonce = `${guardNonce[0] === '0' ? '1' : '0'}${guardNonce.slice(1)}`;
+    const wrongGuard = await admin.rpc('native_integration_unpublish_orders', { p_nonce: wrongNonce });
+    assert.match(wrongGuard.error?.message || '', /INVALID_DISPOSABLE_STACK/, 'a wrong nonce must not change the publication');
+    const deniedGuard = await customer.rpc('native_integration_unpublish_orders', { p_nonce: guardNonce });
+    assert(deniedGuard.error, 'an anonymous client must not run the disposable-only publication helper');
     const anonymousOrders = await customer.from('orders').select('id').eq('id', orderId);
     assert(anonymousOrders.error || anonymousOrders.data?.length === 0, 'anonymous clients must not read order rows');
     const note = 'Synthetic private Realtime sentinel';
@@ -127,6 +132,9 @@ export async function testNativeRealtimeLocal({ supabaseUrl, anonKey, admin, own
     const anonymousDelete = anonymousUnfiltered.changes.filter(deleteMatches);
     for (const event of [...foreignDelete, ...anonymousDelete]) {
       assert.deepEqual(Object.keys(event.old_record).sort(), ['id'], 'unauthorized DELETE must not expose additional old-row fields');
+      assert(!event.record || Object.keys(event.record).length === 0, 'unauthorized DELETE must not contain a new row');
+      assert(!JSON.stringify(event).includes(note) && !JSON.stringify(event).includes('Synthetic Realtime probe'),
+        'unauthorized DELETE must not expose the synthetic private values');
     }
     if (foreignDelete.length || anonymousDelete.length) {
       const message = `Local DELETE primary-key metadata observed by foreign=${foreignDelete.length > 0}, anonymous=${anonymousDelete.length > 0}; this is not an isolation pass.`;
@@ -139,6 +147,42 @@ export async function testNativeRealtimeLocal({ supabaseUrl, anonKey, admin, own
       if (process.env.GITHUB_ACTIONS === 'true') console.log(`::notice title=Realtime DELETE diagnostic::${message}`);
       else console.log(`DIAGNOSTIC: ${message}`);
     }
+
+    // Rehearse one possible stopgap on this disposable stack only. Removing
+    // the table stops INSERT/UPDATE for legitimate Realtime consumers too;
+    // the owner API and tracking broadcast must still work. The app's actual
+    // phone polling and unknown third-party consumers need separate checks.
+    const unpublished = await admin.rpc('native_integration_unpublish_orders', { p_nonce: guardNonce });
+    assert(!unpublished.error && unpublished.data === true, 'local publication removal failed');
+    const signalCount = signals.length;
+    const afterRemoval = await admin.from('orders').update({ eta_minutes: 39 }).eq('id', orderId).eq('shop_id', shop);
+    assert(!afterRemoval.error, 'synthetic update after local unpublish failed');
+    await until(() => signals.length > signalCount, 'tracking invalidation after local unpublish');
+    const endpoint = new URL('/rest/v1/orders', origin);
+    endpoint.searchParams.set('select', 'id,eta_minutes');
+    endpoint.searchParams.set('id', `eq.${orderId}`);
+    const response = await fetch(endpoint, { headers: { apikey: anonKey, Authorization: `Bearer ${ownerToken}` }, signal: AbortSignal.timeout(10_000) });
+    assert.equal(response.status, 200, 'authorized owner REST must remain available after local unpublish');
+    const visible = await response.json();
+    assert(visible.length === 1 && visible[0].id === orderId && visible[0].eta_minutes === 39,
+      'authorized owner must be able to refresh the changed order');
+
+    const secondProbe = randomUUID();
+    const secondInsert = await admin.from('orders').insert({ id: secondProbe, shop_id: shop, customer_name: 'Synthetic unpublish probe' });
+    assert(!secondInsert.error, 'synthetic insert after local unpublish failed');
+    const secondDelete = await admin.from('orders').delete().eq('id', secondProbe).eq('shop_id', shop);
+    assert(!secondDelete.error, 'synthetic delete after local unpublish failed');
+    await new Promise((resolve) => setTimeout(resolve, 3500));
+    for (const state of subscribers) {
+      assert(!state.changes.some((event) => event?.record?.id === secondProbe || event?.old_record?.id === secondProbe ||
+        (event?.type === 'UPDATE' && event?.record?.id === orderId && event?.record?.eta_minutes === 39)),
+      'the removed orders publication must not emit the post-removal synthetic changes');
+    }
+    assert.equal(unrelatedSignals.length, 0, 'unrelated tracking topic must stay quiet after local unpublish');
+    const mitigationMessage = 'On the disposable stack, removing orders from the publication stopped the observed events while owner REST and tracking broadcast still worked; legitimate order Realtime also stopped. Phone polling and other consumers were not tested.';
+    if (process.env.GITHUB_ACTIONS === 'true') console.log(`::notice title=Local publication-removal rehearsal::${mitigationMessage}`);
+    else console.log(`REHEARSAL: ${mitigationMessage}`);
+
     for (const signal of signals) {
       // realtime.send adds a fresh random message ID to the empty payload in
       // newer Supabase versions. No order fields or tracking ID may appear.

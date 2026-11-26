@@ -70,6 +70,27 @@ jobs:
           insert into public.native_integration_guard (nonce) values ('$nonce');
           revoke all on public.native_integration_guard from public, anon, authenticated;
           grant select on public.native_integration_guard to service_role;
+          -- Disposable-only mitigation rehearsal: this helper exists only in
+          -- this runner's fresh local stack and requires the per-run nonce.
+          create function public.native_integration_unpublish_orders(p_nonce text)
+          returns boolean language plpgsql security definer set search_path = pg_catalog, public, pg_temp as \$\$
+          begin
+            if p_nonce is null or not exists (select 1 from public.native_integration_guard where nonce = p_nonce) then
+              raise exception 'INVALID_DISPOSABLE_STACK';
+            end if;
+            if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime'
+                and schemaname = 'public' and tablename = 'orders') then
+              raise exception 'ORDERS_NOT_PUBLISHED';
+            end if;
+            alter publication supabase_realtime drop table public.orders;
+            if exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime'
+                and schemaname = 'public' and tablename = 'orders') then
+              raise exception 'ORDERS_STILL_PUBLISHED';
+            end if;
+            return true;
+          end \$\$;
+          revoke all on function public.native_integration_unpublish_orders(text) from public, anon, authenticated;
+          grant execute on function public.native_integration_unpublish_orders(text) to service_role;
           notify pgrst, 'reload schema';
           SQL
           set +e
