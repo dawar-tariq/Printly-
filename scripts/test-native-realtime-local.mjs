@@ -129,9 +129,15 @@ export async function testNativeRealtimeLocal({ supabaseUrl, anonKey, admin, own
       assert.deepEqual(Object.keys(event.old_record).sort(), ['id'], 'unauthorized DELETE must not expose additional old-row fields');
     }
     if (foreignDelete.length || anonymousDelete.length) {
-      console.warn(`SECURITY REVIEW REQUIRED: local DELETE primary-key metadata observed by foreign=${foreignDelete.length > 0}, anonymous=${anonymousDelete.length > 0}; this is not an isolation pass.`);
+      const message = `Local DELETE primary-key metadata observed by foreign=${foreignDelete.length > 0}, anonymous=${anonymousDelete.length > 0}; this is not an isolation pass.`;
+      // An annotation exposes this security observation even when CI log
+      // downloads are unavailable. It contains no IDs, tokens or row data.
+      if (process.env.GITHUB_ACTIONS === 'true') console.log(`::warning title=Realtime DELETE security review required::${message}`);
+      else console.warn(`SECURITY REVIEW REQUIRED: ${message}`);
     } else {
-      console.log('DIAGNOSTIC: no foreign or anonymous DELETE was observed in the bounded local test; this is not proof of production isolation.');
+      const message = 'No foreign or anonymous DELETE was observed in the bounded local test; this is not proof of production isolation.';
+      if (process.env.GITHUB_ACTIONS === 'true') console.log(`::notice title=Realtime DELETE diagnostic::${message}`);
+      else console.log(`DIAGNOSTIC: ${message}`);
     }
     for (const signal of signals) {
       // realtime.send adds a fresh random message ID to the empty payload in
