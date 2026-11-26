@@ -75,6 +75,12 @@ describe('isolated order one-shot', () => {
     await query('select public.sweep_native_push()');
     expect((await query("select count(*)::int as n from public.native_push_deliveries where state='pending'")).rows[0].n).toBe(0);
   });
+  it('fails closed if the target opts out before claiming', async () => {
+    await v1(); await v2();
+    await query('select public.unregister_native_push_device($1,$2)', [owner,binding]);
+    expect((await claim()).rows).toEqual([]);
+    expect((await query('select count(*)::int as n from public.orders')).rows[0].n).toBe(0);
+  });
   it('rolls back order when the order trigger fails to enqueue', async () => {
     await v1(); await v2(); await db.exec('alter table public.orders disable trigger native_push_order_event');
     try { await expect(claim()).rejects.toThrow(/QA_ORDER_SNAPSHOT_MISMATCH/); }
