@@ -106,6 +106,17 @@ class NativeUpdateInstrumentedTest {
         assertFalse(JSONObject(prefs.getString("policy", null)!!).getBoolean("available"))
     }
 
+    @Test fun optionalUpdateDoesNotBlockOrShowAnAutomaticDialog() {
+        assertTrue(prefs.edit().putString("policy", policy().put("mandatory", false).toString()).commit())
+        val api = FakeApi()
+        compose.setContent { PrintlyTheme { PrintlyApp(api) } }
+        compose.waitUntil(10_000) { api.checks.get() >= 1 }
+        compose.waitForIdle()
+        compose.onNodeWithText("Update required").assertDoesNotExist()
+        compose.onNodeWithText("An app update is available").assertDoesNotExist()
+        compose.onNodeWithText("Download verified update").assertDoesNotExist()
+    }
+
     @Test fun mandatoryScreenRequiresDownloadConfirmationAndInterceptsBack() {
         val release = (parseNativeUpdatePolicy(policy()) as NativeUpdatePolicy.Available).release
         compose.setContent { PrintlyTheme { NativeUpdateScreen(release, false, "", true, refresh = {}, close = {}) } }

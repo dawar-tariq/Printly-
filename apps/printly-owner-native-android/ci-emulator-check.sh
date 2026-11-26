@@ -13,6 +13,7 @@ require_case() { python3 "$SCRIPT_DIR/ci-verify-instrumented-case.py" "$1" "$2";
   require_case io.github.dawartariq.printly.owner.nativeapp.SessionStoreInstrumentedTest concurrentLegacyRestoresShareOneIdentityAndCanBeCleared
   require_case io.github.dawartariq.printly.owner.nativeapp.DemoFlowTest nativeShopNavigationAndExplicitPaymentReview
   require_case io.github.dawartariq.printly.owner.nativeapp.NativeUpdateInstrumentedTest cachedMandatoryPolicySurvivesOfflineAndMalformedUntilExplicitUnpublish
+  require_case io.github.dawartariq.printly.owner.nativeapp.NativeUpdateInstrumentedTest optionalUpdateDoesNotBlockOrShowAnAutomaticDialog
   require_case io.github.dawartariq.printly.owner.nativeapp.NativeUpdateInstrumentedTest mandatoryScreenRequiresDownloadConfirmationAndInterceptsBack
   # The guard removed the isolated QA package from this disposable AVD before
   # the debug suite. Verify default-off consent and synthetic tap/session gates;

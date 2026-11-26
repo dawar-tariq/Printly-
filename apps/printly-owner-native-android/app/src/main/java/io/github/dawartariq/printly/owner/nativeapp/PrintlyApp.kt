@@ -55,7 +55,6 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
     var updateChecking by remember { mutableStateOf(false) }
     var updateError by remember { mutableStateOf("") }
     var updateScreen by remember { mutableStateOf(false) }
-    var dismissedUpdate by remember { mutableIntStateOf(0) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     suspend fun checkUpdates() {
         if (api.isDemo || updateChecking) return
@@ -131,13 +130,9 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
             }
         }
     }
-    if (!api.isDemo && release != null && requirement == UpdateRequirement.OPTIONAL && dismissedUpdate != release.versionCode && !updateChecking && phase != Phase.STARTING) {
-        AlertDialog(onDismissRequest = { dismissedUpdate = release.versionCode },
-            title = { Text("An app update is available") },
-            text = { Text("Printly for Shops ${release.versionName} is available. Review the notes and install whenever you are ready.") },
-            confirmButton = { TextButton(onClick = { dismissedUpdate = release.versionCode; openUpdates() }) { Text("View update") } },
-            dismissButton = { TextButton(onClick = { dismissedUpdate = release.versionCode }) { Text("Later") } })
-    }
+    // Optional releases never interrupt the workspace. A separately enabled
+    // update announcement can open the same review screen, and the user can
+    // also reach it from More. Mandatory releases are gated above.
 }
 
 /** Shown only while secure local session restoration is actually in progress. */
