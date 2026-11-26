@@ -89,10 +89,12 @@ export async function testNativeRealtimeLocal({ supabaseUrl, anonKey, admin, own
       (subscribers.every((state) => state.joined && state.ready) && customerReady && unrelatedReady), 'subscriptions');
     assert(subscribers.every((state) => !state.failed), 'local Realtime subscription failed');
     const wrongNonce = `${guardNonce[0] === '0' ? '1' : '0'}${guardNonce.slice(1)}`;
-    const wrongGuard = await admin.rpc('native_integration_unpublish_orders', { p_nonce: wrongNonce });
-    assert.match(wrongGuard.error?.message || '', /INVALID_DISPOSABLE_STACK/, 'a wrong nonce must not change the publication');
-    const deniedGuard = await customer.rpc('native_integration_unpublish_orders', { p_nonce: guardNonce });
-    assert(deniedGuard.error, 'an anonymous client must not run the disposable-only publication helper');
+    for (const helper of ['native_integration_pause_delete_events', 'native_integration_resume_delete_events', 'native_integration_unpublish_orders']) {
+      const wrongGuard = await admin.rpc(helper, { p_nonce: wrongNonce });
+      assert.match(wrongGuard.error?.message || '', /INVALID_DISPOSABLE_STACK/, 'a wrong nonce must not change the publication');
+      const deniedGuard = await customer.rpc(helper, { p_nonce: guardNonce });
+      assert(deniedGuard.error, 'an anonymous client must not run a disposable-only publication helper');
+    }
     const anonymousOrders = await customer.from('orders').select('id').eq('id', orderId);
     assert(anonymousOrders.error || anonymousOrders.data?.length === 0, 'anonymous clients must not read order rows');
     const note = 'Synthetic private Realtime sentinel';
@@ -148,7 +150,52 @@ export async function testNativeRealtimeLocal({ supabaseUrl, anonKey, admin, own
       else console.log(`DIAGNOSTIC: ${message}`);
     }
 
-    // Rehearse one possible stopgap on this disposable stack only. Removing
+    // Compare a second stopgap on this disposable publication only: preserving
+    // INSERT/UPDATE/TRUNCATE but pausing DELETE across every published table.
+    // This can disrupt unrelated DELETE consumers and is not production approval.
+    const pause = await admin.rpc('native_integration_pause_delete_events', { p_nonce: guardNonce });
+    assert(!pause.error && pause.data === true, 'local publication DELETE pause failed');
+    const pausedProbe = randomUUID();
+    const pausedInsert = await admin.from('orders').insert({ id: pausedProbe, shop_id: shop, customer_name: 'Synthetic pause probe' });
+    assert(!pausedInsert.error, 'synthetic insert after local DELETE pause failed');
+    const pausedInsertMatches = (event) => event?.type === 'INSERT' && event?.record?.id === pausedProbe;
+    await until(() => owner.changes.some(pausedInsertMatches) && ownerUnfiltered.changes.some(pausedInsertMatches),
+      'authorized insert after local DELETE pause');
+    const pausedUpdate = await admin.from('orders').update({ eta_minutes: 41 }).eq('id', pausedProbe).eq('shop_id', shop);
+    assert(!pausedUpdate.error, 'synthetic update after local DELETE pause failed');
+    const pausedUpdateMatches = (event) => event?.type === 'UPDATE' && event?.record?.id === pausedProbe && event?.record?.eta_minutes === 41;
+    await until(() => owner.changes.some(pausedUpdateMatches) && ownerUnfiltered.changes.some(pausedUpdateMatches),
+      'authorized update after local DELETE pause');
+    const pausedDelete = await admin.from('orders').delete().eq('id', pausedProbe).eq('shop_id', shop);
+    assert(!pausedDelete.error, 'synthetic delete after local DELETE pause failed');
+    await new Promise((resolve) => setTimeout(resolve, 3500));
+    for (const state of subscribers) {
+      assert(!state.changes.some((event) => event?.type === 'DELETE' && event?.old_record?.id === pausedProbe),
+        'the local publication must not emit DELETE after its event flag is paused');
+    }
+    for (const state of [foreign, foreignUnfiltered, anonymousUnfiltered]) {
+      assert(!state.changes.some((event) => pausedInsertMatches(event) || pausedUpdateMatches(event)),
+        'foreign and anonymous subscribers must not receive the synthetic post-pause INSERT/UPDATE');
+    }
+    const pauseMessage = 'On the disposable stack, globally pausing publication DELETE events stopped the observed delete while authorized order INSERT/UPDATE still arrived. Other consumers were not tested.';
+    if (process.env.GITHUB_ACTIONS === 'true') console.log(`::notice title=Local DELETE-pause rehearsal::${pauseMessage}`);
+    else console.log(`REHEARSAL: ${pauseMessage}`);
+
+    // Restore the baseline before comparing table removal, and require an
+    // actual DELETE positive control so the two rehearsals are independent.
+    const resumed = await admin.rpc('native_integration_resume_delete_events', { p_nonce: guardNonce });
+    assert(!resumed.error && resumed.data === true, 'local publication DELETE restore failed');
+    const resumedProbe = randomUUID();
+    const resumedInsert = await admin.from('orders').insert({ id: resumedProbe, shop_id: shop, customer_name: 'Synthetic restore probe' });
+    assert(!resumedInsert.error, 'synthetic insert after local DELETE restore failed');
+    await until(() => ownerUnfiltered.changes.some((event) => event?.type === 'INSERT' && event?.record?.id === resumedProbe),
+      'insert after local DELETE restore');
+    const resumedDelete = await admin.from('orders').delete().eq('id', resumedProbe).eq('shop_id', shop);
+    assert(!resumedDelete.error, 'synthetic delete after local DELETE restore failed');
+    await until(() => ownerUnfiltered.changes.some((event) => event?.type === 'DELETE' && event?.old_record?.id === resumedProbe),
+      'DELETE positive control after local restore');
+
+    // Rehearse another possible stopgap on this disposable stack only. Removing
     // the table stops INSERT/UPDATE for legitimate Realtime consumers too;
     // the owner API and tracking broadcast must still work. The app's actual
     // phone polling and unknown third-party consumers need separate checks.
