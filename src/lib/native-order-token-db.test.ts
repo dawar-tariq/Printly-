@@ -51,6 +51,16 @@ describe('native order-token migration', () => {
     expect((await query('select public.native_push_order_token($1,$2) as value',[rows[0].delivery_id,rows[0].lease_token])).rows[0].value).toBeNull();
     expect((await query("select has_function_privilege('anon','public.native_push_order_token(uuid,uuid)','execute') as anon, has_function_privilege('authenticated','public.native_push_order_token(uuid,uuid)','execute') as authenticated, has_function_privilege('service_role','public.native_push_order_token(uuid,uuid)','execute') as service")).rows[0]).toEqual({anon:false,authenticated:false,service:true});
   });
+  it('rejects an expired or rotated lease before exposing any token', async () => {
+    await query('select public.register_native_push_device_v2($1,$2,$3,$4,6,$5)',[owner,shop,current,'B'.repeat(22),'2.1.1']);
+    await query("insert into public.orders(id,shop_id,status,token) values($1,$2,'queued','A-123')",[order,shop]);
+    const row = (await query('select * from public.claim_native_push_deliveries_budgeted(30)')).rows[0];
+    await query("update public.native_push_deliveries set lease_until=clock_timestamp()-interval '1 second' where id=$1",[row.delivery_id]);
+    expect((await query('select public.native_push_order_token($1,$2) as value',[row.delivery_id,row.lease_token])).rows[0].value).toBeNull();
+    await query("update public.native_push_deliveries set lease_until=clock_timestamp()+interval '2 minutes' where id=$1",[row.delivery_id]);
+    await query('select public.register_native_push_device_v2($1,$2,$3,$4,6,$5)',[owner,shop,current,'B'.repeat(22),'2.1.1']);
+    expect((await query('select public.native_push_order_token($1,$2) as value',[row.delivery_id,row.lease_token])).rows[0].value).toBeNull();
+  });
   it('does not put malformed tokens or names into events and leaves order creation working', async () => {
     await query('select public.register_native_push_device_v2($1,$2,$3,$4,6,$5)',[owner,shop,current,'B'.repeat(22),'2.1.1']);
     await query("insert into public.orders(id,shop_id,status,token) values($1,$2,'queued','PRIVATE NAME')",[order,shop]);
