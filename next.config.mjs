@@ -63,12 +63,8 @@ const nextConfig = {
     }];
   },
   images: { remotePatterns: [{ protocol: 'https', hostname: '*.supabase.co' }] },
-  // The standee renderer loads local fonts. The temporary isolated-QA source
-  // transport reads only the reviewed migration, whose hash is pinned in code.
-  outputFileTracingIncludes: {
-    '/api/shop/standee': ['./src/assets/standee-fonts/*.ttf'],
-    '/api/native/v1/qa-migration-source': ['./supabase/migrations/0027_native_notification_management.sql'],
-  },
+  // The standee renderer loads local font files at runtime in the serverless function.
+  outputFileTracingIncludes: { '/api/shop/standee': ['./src/assets/standee-fonts/*.ttf'] },
   serverExternalPackages: ['@resvg/resvg-js', 'pdfkit', 'svg-to-pdfkit', 'fontkit', 'bidi-js'],
   experimental: {},
 };
