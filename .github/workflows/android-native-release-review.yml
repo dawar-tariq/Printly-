@@ -68,6 +68,10 @@ jobs:
         run: |
           set -eu -o pipefail
           ../../scripts/check-native-review-request.sh signed-review-request.json
+          # A previous review request must not authorize signing a newer local
+          # candidate. Check the literal candidate version before reading any
+          # signing secret; a new review requires a separately approved request.
+          node ../../scripts/check-native-review-version.mjs signed-review-request.json app/build.gradle
           echo "::notice title=Native review build::Encrypted review-only APK requested from commit $GITHUB_SHA; this does not publish or deploy."
       # Refuse to touch signing secrets unless a harmless sample can be encrypted
       # and decrypted using the separately stored artifact passphrase.
@@ -125,7 +129,7 @@ jobs:
           umask 077
           # Keep the identical verified bytes on the ephemeral runner for the
           # draft-release step; only encrypted bytes go to Actions artifacts.
-          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/Printly-for-Shops-2.0.1.apk"
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/Printly-for-Shops-2.1.0.apk"
           ../../scripts/encrypt-android-review.sh app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/app-release.apk.gpg
           rm -f app/build/outputs/apk/release/app-release.apk
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -149,6 +153,6 @@ jobs:
           REQUESTED_VERSION_NAME: ${{ steps.request.outputs.version_name }}
         run: |
           set -eu -o pipefail
-          APK="$RUNNER_TEMP/Printly-for-Shops-2.0.1.apk"
+          APK="$RUNNER_TEMP/Printly-for-Shops-2.1.0.apk"
           trap 'rm -f -- "$APK"' EXIT
           ../../scripts/create-native-draft-review.sh "$APK" sha256-evidence.txt

@@ -37,6 +37,19 @@ class NativePushPolicyTest {
         assertNull(nativePushNotice(payload, pushSessionMatches(true, first, second), binding, true))
     }
 
+    @Test fun pendingTapCannotCrossSessionOrBindingChanges() {
+        val first = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        val second = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+        val replacementBinding = "33333333-3333-4333-8333-333333333333"
+        val tap = PushTap(event, "Notice", "Private to the original session", "announcement", binding, first)
+        assertTrue(pushTapMatchesSession(tap, true, binding, first, first))
+        assertFalse(pushTapMatchesSession(tap, false, binding, first, first))
+        assertFalse(pushTapMatchesSession(tap, true, binding, first, second))
+        assertFalse(pushTapMatchesSession(tap, true, binding, second, second))
+        assertFalse(pushTapMatchesSession(tap, true, replacementBinding, first, first))
+        assertFalse(pushTapMatchesSession(tap.copy(event = "bad"), true, binding, first, first))
+    }
+
     @Test fun lateFirebaseCallbacksReconcileWithCurrentConsent() {
         val first = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
         val second = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
@@ -46,6 +59,22 @@ class NativePushPolicyTest {
         assertEquals(PushCallbackAction.REREGISTER, pushCallbackAction(false, true, first, first, true))
         assertEquals(PushCallbackAction.STOP, pushCallbackAction(true, true, first, second, true))
         assertEquals(PushCallbackAction.STOP, pushCallbackAction(false, true, first, first, false))
+    }
+
+    @Test fun managedNoticesRequireTheCurrentBindingAndOnlyAllowFixedActionsAndImages() {
+        val managed = mapOf("version" to "2", "kind" to "maintenance", "event" to event, "binding" to binding,
+            "title" to "Maintenance", "body" to "Back shortly", "action" to "maintenance", "image" to "")
+        val notice = nativePushNotice(managed, true, binding, true)!!
+        assertEquals("Maintenance", notice.title)
+        assertEquals("maintenance", notice.action)
+        assertNull(nativePushNotice(managed, false, binding, true))
+        assertNull(nativePushNotice(managed + ("action" to "https://evil.test"), true, binding, true))
+        assertNull(nativePushNotice(managed + ("title" to "Bad\nheadline"), true, binding, true))
+        assertNull(nativePushNotice(managed + ("image" to "https://127.0.0.1/a.png"), true, binding, true))
+        val goodImage = "https://raw.githubusercontent.com/dawar-tariq/Printly-/main/public/notice.png"
+        assertEquals(goodImage, nativePushNotice(managed + ("image" to goodImage), true, binding, true)!!.image)
+        assertFalse(validNoticeImage("$goodImage?private=1"))
+        assertFalse(validNoticeImage("https://raw.githubusercontent.com/other/repo/main/image.png"))
     }
 
     @Test fun unexpectedOrMalformedDataIsRejected() {

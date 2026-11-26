@@ -3,7 +3,7 @@
   "variant": "native",
   "package": "io.github.dawartariq.printly.owner",
   "request_id": "native-review-replace-this-id",
-  "version_code": 4,
-  "version_name": "2.0.1",
+  "version_code": 5,
+  "version_name": "2.1.0",
   "reference_certificate_sha256": "REPLACE_WITH_INDEPENDENTLY_VERIFIED_PUBLIC_CERTIFICATE_SHA256"
 }

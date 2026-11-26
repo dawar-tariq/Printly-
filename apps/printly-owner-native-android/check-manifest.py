@@ -35,6 +35,10 @@ push_enabled = sys.argv[2] in (production_package, qa_package)
 if push_enabled:
     if 'android.permission.POST_NOTIFICATIONS' not in permissions or len(services) != 1 or services[0].get(ANDROID + 'exported') != 'false':
         raise SystemExit('Push-enabled variants need notification permission and one internal messaging service.')
+    if 'android.permission.REQUEST_INSTALL_PACKAGES' not in permissions:
+        raise SystemExit('Push-enabled variants need the user-initiated update installation permission.')
+    if 'android.permission.ACCESS_NETWORK_STATE' not in permissions:
+        raise SystemExit('Push-enabled variants need network-state access for constrained work and offline checks.')
     if metadata.get('firebase_messaging_auto_init_enabled') != 'false' or metadata.get('firebase_messaging_installation_id_enabled') != 'true':
         raise SystemExit('Firebase auto-init must default off and FID registration must be enabled.')
     if not any(p.get(ANDROID + 'name') == 'com.google.firebase.provider.FirebaseInitProvider' and p.get(ANDROID + 'exported') == 'false' for p in app.findall('provider')):
@@ -66,6 +70,6 @@ if push_enabled:
             raise SystemExit('Another messaging service can outrank the native handler.')
 else:
     components = app.findall('provider') + app.findall('service') + app.findall('receiver')
-    if services or 'android.permission.POST_NOTIFICATIONS' in permissions or any('firebase' in c.get(ANDROID + 'name', '').lower() for c in components):
-        raise SystemExit('The synthetic demo must not include Firebase or push permissions.')
+    if services or 'android.permission.POST_NOTIFICATIONS' in permissions or 'android.permission.REQUEST_INSTALL_PACKAGES' in permissions or any('firebase' in c.get(ANDROID + 'name', '').lower() for c in components):
+        raise SystemExit('The synthetic demo must not include Firebase, push or update-install permissions.')
 print('Native launcher, privacy flags, file provider and variant-specific push manifest verified.')

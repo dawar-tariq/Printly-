@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- WorkManager and offline QA checks need to inspect network state. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Installation is user initiated and always requires the system prompt. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <application>
         <!-- Nothing registers with FCM until a shop user opts in. -->
         <meta-data android:name="firebase_messaging_auto_init_enabled" android:value="false" />

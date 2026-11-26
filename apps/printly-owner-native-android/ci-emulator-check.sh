@@ -2,41 +2,29 @@
 # Disposable offline emulator only. Preserve actionable test diagnostics in a
 # check annotation if the GitHub Actions log archive cannot be downloaded.
 set +e
-require_case() {
-  python3 - "$1" "$2" <<'PY'
-import glob
-import sys
-import xml.etree.ElementTree as ET
-
-expected_class, expected_name = sys.argv[1:]
-for path in glob.glob('app/build/outputs/androidTest-results/connected/**/TEST-*.xml', recursive=True):
-    root = ET.parse(path).getroot()
-    for case in root.iter('testcase'):
-        if case.get('classname') == expected_class and case.get('name') == expected_name:
-            if any(case.find(tag) is not None for tag in ('failure', 'error', 'skipped')):
-                raise SystemExit(f'{expected_class}.{expected_name} did not pass')
-            print(f'Verified instrumented test: {expected_class}.{expected_name}')
-            raise SystemExit(0)
-raise SystemExit(f'Missing instrumented test result: {expected_class}.{expected_name}')
-PY
-}
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd) || exit 1
+source "$SCRIPT_DIR/ci-emulator-common.sh" || exit 1
+require_case() { python3 "$SCRIPT_DIR/ci-verify-instrumented-case.py" "$1" "$2"; }
 (
   set -e -o pipefail
-  adb shell svc wifi disable
-  adb shell svc data disable
+  prepare_disposable_emulator
   rm -rf app/build/outputs/androidTest-results/connected
   ./gradlew --no-daemon connectedDebugAndroidTest --stacktrace
   require_case io.github.dawartariq.printly.owner.nativeapp.SessionStoreInstrumentedTest concurrentLegacyRestoresShareOneIdentityAndCanBeCleared
   require_case io.github.dawartariq.printly.owner.nativeapp.DemoFlowTest nativeShopNavigationAndExplicitPaymentReview
-  # The QA install is fresh and network-disabled. Verify actual Firebase options
-  # and default-off consent; no device is registered and no push is sent.
-  adb uninstall io.github.dawartariq.printly.owner.native.qa > /dev/null 2>&1 || true
+  require_case io.github.dawartariq.printly.owner.nativeapp.NativeUpdateInstrumentedTest cachedMandatoryPolicySurvivesOfflineAndMalformedUntilExplicitUnpublish
+  require_case io.github.dawartariq.printly.owner.nativeapp.NativeUpdateInstrumentedTest mandatoryScreenRequiresDownloadConfirmationAndInterceptsBack
+  # The guard removed the isolated QA package from this disposable AVD before
+  # the debug suite. Verify default-off consent and synthetic tap/session gates;
+  # no registration or send takes place.
   rm -rf app/build/outputs/androidTest-results/connected
   ./gradlew --no-daemon connectedQaAndroidTest --stacktrace \
     '-PprintlyQaSiteOrigin=https://printly-native-test.vercel.app' \
     '-PprintlyInstrumentationBuildType=qa' \
-    '-Pandroid.testInstrumentationRunnerArguments.class=io.github.dawartariq.printly.owner.nativeapp.QaFirebaseInstrumentedTest'
+    '-Pandroid.testInstrumentationRunnerArguments.class=io.github.dawartariq.printly.owner.nativeapp.QaFirebaseInstrumentedTest,io.github.dawartariq.printly.owner.nativeapp.QaPushTapInstrumentedTest'
   require_case io.github.dawartariq.printly.owner.nativeapp.QaFirebaseInstrumentedTest isolatedClientStartsWithTheTestProjectAndNoNotificationOptIn
+  require_case io.github.dawartariq.printly.owner.nativeapp.QaPushTapInstrumentedTest staleTapCannotCrossSessionOrEraseANewerBinding
+  require_case io.github.dawartariq.printly.owner.nativeapp.QaPushTapInstrumentedTest storedTapsRequireFreshOptedInStateAndAnExistingEvent
 ) > "${RUNNER_TEMP:?}/native-emulator.log" 2>&1
 result=$?
 tail -n 250 "$RUNNER_TEMP/native-emulator.log"

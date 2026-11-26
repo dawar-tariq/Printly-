@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.os.Build
 import android.os.ParcelFileDescriptor
 import androidx.core.content.ContextCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -15,6 +17,7 @@ import androidx.test.uiautomator.Until
 import com.google.firebase.messaging.FirebaseMessaging
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -33,6 +36,18 @@ class QaNotificationPermissionInstrumentedTest {
         val deny = By.res(Pattern.compile(".*:id/permission_deny_button"))
 
         assertEquals("io.github.dawartariq.printly.owner.native.qa", context.packageName)
+        assertTrue(BuildConfig.ISOLATED_TEST_MODE)
+        assertFalse(BuildConfig.DEMO_MODE)
+        assertTrue("This test requires a disposable Android emulator", Build.HARDWARE in setOf("ranchu", "goldfish"))
+        val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        assertNull("This test requires a network-disabled emulator", connectivity.activeNetwork)
+        // The activity and shell permission reset below are destructive to a
+        // real install. Refuse to start unless the app's private state is fresh.
+        assertTrue("This test requires fresh permission preferences", prefs.all.isEmpty())
+        assertTrue("This test requires fresh push preferences", context.getSharedPreferences("native_push_v1", Context.MODE_PRIVATE).all.isEmpty())
+        assertTrue("This test requires fresh session storage", context.getSharedPreferences("native_session_v1", Context.MODE_PRIVATE).all.isEmpty())
+        assertFalse("This test requires Firebase auto-init to be off", context.getSharedPreferences("com.google.firebase.messaging", Context.MODE_PRIVATE).getBoolean("auto_init", false))
+        assertTrue("This test requires fresh app preferences", context.getSharedPreferences("native_preferences", Context.MODE_PRIVATE).all.isEmpty())
         assertEquals(PackageManager.PERMISSION_DENIED, ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS))
         assertFalse(prefs.getBoolean(FIRST_OPEN_PERMISSION_HANDLED, false))
         fun assertPushStillOff() {

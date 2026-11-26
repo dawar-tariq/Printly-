@@ -1,8 +1,5 @@
 package io.github.dawartariq.printly.owner.nativeapp
 
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -13,27 +10,20 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** A direct-install update is an explicit browser action, never a silent install. */
+/** Update checks open the native review flow; they do not install anything. */
 @RunWith(AndroidJUnit4::class)
 class UpdateLinkTest {
     @get:Rule val compose = createComposeRule()
 
-    @Test fun liveAppOpensOnlyTheFixedSignedInWebsitePage() {
-        val opened = mutableListOf<String>()
-        val handler = object : UriHandler { override fun openUri(uri: String) { opened.add(uri) } }
-        compose.setContent {
-            PrintlyTheme {
-                CompositionLocalProvider(LocalUriHandler provides handler) {
-                    MoreScreen(restricted = false, isDemo = false, onOpen = {}, onSignOut = {})
-                }
-            }
-        }
+    @Test fun liveAppOpensTheNativeUpdateReview() {
+        var opened = 0
+        compose.setContent { PrintlyTheme { MoreScreen(restricted = false, isDemo = false, onOpen = {}, onSignOut = {}, onCheckUpdates = { opened++ }) } }
         compose.onNodeWithText("Check for app updates").performScrollTo().performClick()
-        assertEquals(listOf("${BuildConfig.SITE_ORIGIN}/shop/app"), opened)
+        assertEquals(1, opened)
     }
 
     @Test fun demoDoesNotOfferLiveUpdates() {
-        compose.setContent { PrintlyTheme { MoreScreen(restricted = false, isDemo = true, onOpen = {}, onSignOut = {}) } }
+        compose.setContent { PrintlyTheme { MoreScreen(restricted = false, isDemo = true, onOpen = {}, onSignOut = {}, onCheckUpdates = {}) } }
         compose.onNodeWithText("Check for app updates").assertDoesNotExist()
     }
 }

@@ -8,6 +8,8 @@ on:
       - '.github/workflows/android-native.yml'
       - '.github/workflows/android-native-release-review.yml'
       - 'scripts/check-native-review-request.*'
+      - 'scripts/check-native-review-version.*'
+      - 'scripts/test-native-emulator-check.test.mjs'
       - 'scripts/create-native-draft-review.*'
       - 'scripts/check-android-review-request.sh'
       - 'scripts/sign-android-review.sh'
@@ -23,11 +25,17 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-      - name: Test unpublished native draft safeguards
-        run: node --test scripts/create-native-draft-review.test.mjs
+      - name: Test unpublished draft and review-version safeguards
+        run: node --test scripts/create-native-draft-review.test.mjs scripts/check-native-review-version.test.mjs
       - name: Test the native manifest guard with synthetic XML
         working-directory: apps/printly-owner-native-android
         run: python3 -m unittest test_check_manifest.py
+      - name: Test disposable-emulator safeguards and result verification with synthetic results
+        run: |
+          for script in ci-emulator-common.sh ci-emulator-check.sh ci-notification-permission-check.sh; do
+            bash -n "apps/printly-owner-native-android/$script"
+          done
+          node --test scripts/test-native-emulator-check.test.mjs
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
@@ -146,8 +154,8 @@ jobs:
               if grep -qF "$value" "$RUNNER_TEMP/native-qa-resources.txt"; then echo 'Production Firebase identity found in QA resources.' >&2; exit 1; fi
             done
             for name in google_app_id google_api_key gcm_defaultSenderId project_id; do grep -qF "string/$name" "$RUNNER_TEMP/native-qa-resources.txt"; done
-            test "$("$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest version-code "$QA")" = '4'
-            test "$("$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest version-name "$QA")" = '2.0.1-isolated-test'
+            test "$("$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest version-code "$QA")" = '5'
+            test "$("$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest version-name "$QA")" = '2.1.0-isolated-test'
             "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$QA" > "$RUNNER_TEMP/native-qa-badging.txt"
             grep -F "application-label:'Printly Isolated Test'" "$RUNNER_TEMP/native-qa-badging.txt"
             grep -F 'application-debuggable' "$RUNNER_TEMP/native-qa-badging.txt"
@@ -235,14 +243,14 @@ jobs:
           PASSWORD=$(openssl rand -hex 32)
           keytool -genkeypair -noprompt -keystore "$KEY" -storetype PKCS12 -storepass "$PASSWORD" -keypass "$PASSWORD" -alias printly-owner-release -keyalg RSA -keysize 2048 -validity 1 -dname 'CN=Disposable Native Review CI'
           CERT=$(keytool -exportcert -keystore "$KEY" -storetype PKCS12 -storepass "$PASSWORD" -alias printly-owner-release | sha256sum | cut -d' ' -f1)
-          jq -n --arg cert "$CERT" '{purpose:"signed-review-only",variant:"native",package:"io.github.dawartariq.printly.owner",request_id:"native-ci-review-1234",version_code:4,version_name:"2.0.1",reference_certificate_sha256:$cert}' > "$REQUEST"
+          jq -n --arg cert "$CERT" '{purpose:"signed-review-only",variant:"native",package:"io.github.dawartariq.printly.owner",request_id:"native-ci-review-1234",version_code:5,version_name:"2.1.0",reference_certificate_sha256:$cert}' > "$REQUEST"
           : > "$OUTPUT"
           GITHUB_OUTPUT="$OUTPUT" EXPECTED_CERTIFICATE="$CERT" ../../scripts/check-native-review-request.sh "$REQUEST"
-          grep -qx 'version_code=4' "$OUTPUT"
-          grep -qx 'version_name=2.0.1' "$OUTPUT"
-          KEYSTORE_BASE64="$(base64 -w0 < "$KEY")" PRINTLY_ANDROID_KEYSTORE_PASSWORD="$PASSWORD" EXPECTED_CERTIFICATE="$CERT" REQUESTED_VERSION_CODE=4 GITHUB_EVENT_NAME=push ../../scripts/sign-android-review.sh
+          grep -qx 'version_code=5' "$OUTPUT"
+          grep -qx 'version_name=2.1.0' "$OUTPUT"
+          KEYSTORE_BASE64="$(base64 -w0 < "$KEY")" PRINTLY_ANDROID_KEYSTORE_PASSWORD="$PASSWORD" EXPECTED_CERTIFICATE="$CERT" REQUESTED_VERSION_CODE=5 GITHUB_EVENT_NAME=push ../../scripts/sign-android-review.sh
           APK=app/build/outputs/apk/release/app-release.apk
-          test "$("$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest version-name "$APK")" = '2.0.1'
+          test "$("$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest version-name "$APK")" = '2.1.0'
           "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest print "$APK" > "$RUNNER_TEMP/native-review-manifest.xml"
           python3 check-manifest.py "$RUNNER_TEMP/native-review-manifest.xml" io.github.dawartariq.printly.owner
           unset PASSWORD CERT
@@ -252,14 +260,14 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - name: Exercise demo and QA Firebase initialization on an offline Android emulator
+      - name: Exercise demo update policy and QA push taps on an offline Android emulator
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: 31
           target: google_apis
           arch: x86_64
           working-directory: apps/printly-owner-native-android
-          script: bash ci-emulator-check.sh
+          script: PRINTLY_DISPOSABLE_EMULATOR=1 bash ci-emulator-check.sh
       - name: Exercise first-open notification permission on an offline Android 13+ emulator
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
@@ -267,6 +275,6 @@ jobs:
           target: google_apis
           arch: x86_64
           working-directory: apps/printly-owner-native-android
-          script: bash ci-notification-permission-check.sh
+          script: PRINTLY_DISPOSABLE_EMULATOR=1 bash ci-notification-permission-check.sh
       # This check builds temporary demo/QA packages but uploads no APKs. A
       # phone-test artifact or production release requires a separate decision.

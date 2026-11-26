@@ -37,9 +37,9 @@ import kotlinx.coroutines.supervisorScope
 import org.json.JSONObject
 
 private enum class Phase { STARTING, INTRO, LOGIN, WORKSPACE }
-enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RATES, SUBSCRIPTION, RECOVERY, QR, NOTIFICATIONS }
+enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RATES, SUBSCRIPTION, RECOVERY, QR, NOTIFICATIONS, NOTICE }
 
-@Composable fun PrintlyApp(api: OwnerApi) {
+@Composable internal fun PrintlyApp(api: OwnerApi, pushTap: PushTap? = null, onPushConsumed: () -> Unit = {}) {
     val context = LocalContext.current
     val preferences = remember { context.getSharedPreferences("native_preferences", 0) }
     val scope = rememberCoroutineScope()
@@ -48,6 +48,33 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
     var signingOut by remember { mutableStateOf(false) }
     var workspaceEpoch by remember { mutableIntStateOf(0) }
     var loginNotice by remember { mutableStateOf("") }
+    val updatePreferences = remember { context.getSharedPreferences("native_update_policy_v1", 0) }
+    var updatePolicy by remember {
+        mutableStateOf<NativeUpdatePolicy?>(try { updatePreferences.getString("policy", null)?.let { parseNativeUpdatePolicy(JSONObject(it)) } } catch (_: Exception) { null })
+    }
+    var updateChecking by remember { mutableStateOf(false) }
+    var updateError by remember { mutableStateOf("") }
+    var updateScreen by remember { mutableStateOf(false) }
+    var dismissedUpdate by remember { mutableIntStateOf(0) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    suspend fun checkUpdates() {
+        if (api.isDemo || updateChecking) return
+        updateChecking = true
+        try {
+            val raw = api.updatePolicy()
+            val resolved = resolveNativeUpdatePolicy(updatePolicy, raw)
+            if (!resolved.accepted || raw == null) throw AppError("update_invalid", "The update information could not be verified.")
+            updatePolicy = resolved.policy; updateError = ""
+            updatePreferences.edit().putString("policy", raw.toString()).apply()
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { updateError = "Could not check app updates. Check your connection and try again." }
+        finally { updateChecking = false }
+    }
+    LaunchedEffect(api, lifecycle) {
+        if (!api.isDemo) lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (isActive) { checkUpdates(); delay(15 * 60_000L) }
+        }
+    }
     val workspaceApi = remember(api) {
         ExpiryHandlingApi(api) {
             if (phase == Phase.WORKSPACE && !signingOut) {
@@ -62,6 +89,16 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
         if (hadSession) workspaceEpoch++
         phase = if (!preferences.getBoolean("onboarding_done", false)) Phase.INTRO else if (hadSession) Phase.WORKSPACE else Phase.LOGIN
     }
+    val release = (updatePolicy as? NativeUpdatePolicy.Available)?.release
+    val requirement = release?.let { updateRequirement(it, BuildConfig.VERSION_CODE) } ?: UpdateRequirement.NONE
+    val mustUpdate = !api.isDemo && requirement == UpdateRequirement.MANDATORY
+    val openUpdates: () -> Unit = { updateScreen = true; scope.launch { checkUpdates() } }
+    if (mustUpdate || updateScreen) {
+        Surface(Modifier.fillMaxSize(), color = Cream) {
+            NativeUpdateScreen(release, updateChecking, updateError, mustUpdate, refresh = { scope.launch { checkUpdates() } }, close = { updateScreen = false })
+        }
+        return
+    }
     Surface(Modifier.fillMaxSize(), color = Cream) {
         when (phase) {
             Phase.STARTING -> StartingScreen()
@@ -72,7 +109,7 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
             Phase.LOGIN -> LoginScreen(api, loginNotice) { loginNotice = ""; workspaceEpoch++; phase = Phase.WORKSPACE }
             Phase.WORKSPACE -> key(workspaceEpoch) {
                 val epoch = workspaceEpoch
-                Workspace(workspaceApi, signingOut) {
+                Workspace(workspaceApi, signingOut, pushTap, onPushConsumed, openUpdates) {
                     if (!signingOut) {
                         signingOut = true
                         // Begin local cleanup before a click/navigation can
@@ -93,6 +130,13 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
                 }
             }
         }
+    }
+    if (!api.isDemo && release != null && requirement == UpdateRequirement.OPTIONAL && dismissedUpdate != release.versionCode && !updateChecking && phase != Phase.STARTING) {
+        AlertDialog(onDismissRequest = { dismissedUpdate = release.versionCode },
+            title = { Text("An app update is available") },
+            text = { Text("Printly for Shops ${release.versionName} is available. Review the notes and install whenever you are ready.") },
+            confirmButton = { TextButton(onClick = { dismissedUpdate = release.versionCode; openUpdates() }) { Text("View update") } },
+            dismissButton = { TextButton(onClick = { dismissedUpdate = release.versionCode }) { Text("Later") } })
     }
 }
 
@@ -200,9 +244,10 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
     }
 }
 
-@Composable private fun Workspace(api: OwnerApi, signingOut: Boolean, onSignOut: () -> Unit) {
+@Composable private fun Workspace(api: OwnerApi, signingOut: Boolean, pushTap: PushTap?, onPushConsumed: () -> Unit, onCheckUpdates: () -> Unit, onSignOut: () -> Unit) {
     val context = LocalContext.current
     var screen by remember { mutableStateOf(Screen.HOME) }
+    var displayedNotice by remember { mutableStateOf<PushTap?>(null) }
     var detailId by remember { mutableStateOf("") }
     var detailParent by remember { mutableStateOf(Screen.ORDERS) }
     var me by remember { mutableStateOf<JSONObject?>(null) }
@@ -268,6 +313,24 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
             NativePush.refresh(context, api, notificationShopId)
         }
     }
+    LaunchedEffect(pushTap, accessLoading, accessError, restricted) {
+        if (pushTap != null) {
+            // The activity may have captured this tap before login, an account
+            // switch or a mandatory-update screen. Recheck the original binding
+            // and session before showing its content or navigating.
+            val current = NativePush.currentTap(context, pushTap)
+            if (current == null) onPushConsumed()
+            else if ((!accessLoading && accessError.isBlank()) || current.action in setOf("announcement", "maintenance", "update")) {
+                when (current.action) {
+                    "orders" -> screen = if (restricted) Screen.RECOVERY else Screen.ORDERS
+                    "announcement", "maintenance" -> { displayedNotice = current; screen = Screen.NOTICE }
+                    "update" -> onCheckUpdates()
+                    "home" -> screen = if (restricted) Screen.RECOVERY else Screen.HOME
+                }
+                onPushConsumed()
+            }
+        }
+    }
     val main = setOf(Screen.HOME, Screen.ORDERS, Screen.INVENTORY, Screen.REPORTS, Screen.MORE)
     BackHandler(enabled = screen !in main && !accessLoading) {
         screen = if (screen == Screen.DETAIL) detailParent else if (restricted) Screen.RECOVERY else Screen.MORE
@@ -276,7 +339,7 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
         Screen.HOME -> "Home"; Screen.ORDERS -> "Orders"; Screen.INVENTORY -> "Inventory"; Screen.REPORTS -> "Reports"
         Screen.MORE -> "More"; Screen.DETAIL -> "Order details"; Screen.PROFILE -> "Shop settings"; Screen.RATES -> "Rate card"
         Screen.SUBSCRIPTION -> "Subscription"; Screen.RECOVERY -> "Open orders"; Screen.QR -> "Your shop QR"
-        Screen.NOTIFICATIONS -> "Notifications"
+        Screen.NOTIFICATIONS -> "Notifications"; Screen.NOTICE -> "Printly notice"
     }
     Scaffold(
         containerColor = Cream,
@@ -320,6 +383,10 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             when {
+                screen == Screen.NOTICE -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Heading(displayedNotice?.title ?: "Printly notice", "A notification received on this device.")
+                    SurfaceCard(Modifier.fillMaxWidth()) { Text(displayedNotice?.body ?: "This notice is no longer available.", color = Ink) }
+                }
                 accessLoading -> Column(Modifier.padding(24.dp)) { LoadingPanel("Checking your shop access…") }
                 accessError.isNotBlank() -> Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Heading("Can’t open your shop", "Your account or shop access could not be checked.")
@@ -335,7 +402,7 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
                         onOpen = { detailId = it; detailParent = Screen.ORDERS; screen = Screen.DETAIL })
                     Screen.INVENTORY -> InventoryScreen(api)
                     Screen.REPORTS -> ReportsScreen(api)
-                    Screen.MORE -> MoreScreen(restricted, api.isDemo, onOpen = { screen = it }, onSignOut = onSignOut)
+                    Screen.MORE -> MoreScreen(restricted, api.isDemo, onOpen = { screen = it }, onSignOut = onSignOut, onCheckUpdates = onCheckUpdates)
                     Screen.DETAIL -> OrderDetailScreen(api, detailId, onBack = { screen = detailParent })
                     Screen.PROFILE -> ProfileScreen(api, me, meFresh,
                         onInvalidated = { meFresh = false }, onSaved = { updated -> me = updated; meFresh = true },
@@ -345,6 +412,7 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
                     Screen.RECOVERY -> RecoveryScreen(api, onOpen = { detailId = it; detailParent = Screen.RECOVERY; screen = Screen.DETAIL })
                     Screen.QR -> QrScreen(api, me)
                     Screen.NOTIFICATIONS -> NativePush.Settings(api, notificationShopId)
+                    Screen.NOTICE -> Unit // Rendered above even when maintenance blocks shop APIs.
                 }
             }
         }

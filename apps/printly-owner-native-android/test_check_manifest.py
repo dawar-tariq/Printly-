@@ -12,8 +12,12 @@ QA = 'io.github.dawartariq.printly.owner.native.qa'
 DEMO = 'io.github.dawartariq.printly.owner.native.debug'
 
 
-def manifest(package, *, receiver_permission='com.google.android.c2dm.permission.SEND', fallback_priority='-500', extra_service='', auto_init='false', own_exported='false', push=True):
+def manifest(package, *, receiver_permission='com.google.android.c2dm.permission.SEND', fallback_priority='-500', extra_service='', auto_init='false', own_exported='false', push=True, install=True, network_state=True):
     permission = '<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>' if push else ''
+    if push and network_state:
+        permission += '<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>'
+    if push and install:
+        permission += '<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>'
     messaging = f'''
       <provider android:name="com.google.firebase.provider.FirebaseInitProvider" android:exported="false"/>
       <receiver android:name="com.google.firebase.iid.FirebaseInstanceIdReceiver" android:exported="true" android:permission="{receiver_permission}"/>
@@ -60,6 +64,8 @@ class ManifestGuardTest(unittest.TestCase):
                 self.check_xml(manifest(package, extra_service=rival), package, False)
                 self.check_xml(manifest(package, auto_init='true'), package, False)
                 self.check_xml(manifest(package, own_exported='true'), package, False)
+                self.check_xml(manifest(package, install=False), package, False)
+                self.check_xml(manifest(package, network_state=False), package, False)
 
     def test_demo_has_no_firebase_or_notification_permission(self):
         self.check_xml(manifest(DEMO, push=False), DEMO, True)

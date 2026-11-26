@@ -1,32 +1,19 @@
 #!/usr/bin/env bash
 # Fresh, offline Android 13+ emulator only. No Firebase registration or sends.
 set +e
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd) || exit 1
+source "$SCRIPT_DIR/ci-emulator-common.sh" || exit 1
 (
   set -e -o pipefail
-  adb shell svc wifi disable
-  adb shell svc data disable
-  adb uninstall io.github.dawartariq.printly.owner.native.qa > /dev/null 2>&1 || true
+  prepare_disposable_emulator
   rm -rf app/build/outputs/androidTest-results/connected
   ./gradlew --no-daemon connectedQaAndroidTest --stacktrace \
     '-PprintlyQaSiteOrigin=https://printly-native-test.vercel.app' \
     '-PprintlyInstrumentationBuildType=qa' \
     '-Pandroid.testInstrumentationRunnerArguments.class=io.github.dawartariq.printly.owner.nativeapp.QaNotificationPermissionInstrumentedTest'
-  python3 - <<'PY'
-import glob
-import xml.etree.ElementTree as ET
-
-expected_class = 'io.github.dawartariq.printly.owner.nativeapp.QaNotificationPermissionInstrumentedTest'
-expected_name = 'firstOpenAsksOnceAndPermissionAloneDoesNotEnablePush'
-for path in glob.glob('app/build/outputs/androidTest-results/connected/**/TEST-*.xml', recursive=True):
-    root = ET.parse(path).getroot()
-    for case in root.iter('testcase'):
-        if case.get('classname') == expected_class and case.get('name') == expected_name:
-            if any(case.find(tag) is not None for tag in ('failure', 'error', 'skipped')):
-                raise SystemExit('First-open permission test did not pass')
-            print(f'Verified instrumented test: {expected_class}.{expected_name}')
-            raise SystemExit(0)
-raise SystemExit('Missing first-open permission test result')
-PY
+  python3 "$SCRIPT_DIR/ci-verify-instrumented-case.py" \
+    io.github.dawartariq.printly.owner.nativeapp.QaNotificationPermissionInstrumentedTest \
+    firstOpenAsksOnceAndPermissionAloneDoesNotEnablePush
 ) > "${RUNNER_TEMP:?}/native-notification-permission.log" 2>&1
 result=$?
 tail -n 180 "$RUNNER_TEMP/native-notification-permission.log"

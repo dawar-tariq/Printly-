@@ -1,6 +1,7 @@
 package io.github.dawartariq.printly.owner.nativeapp
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -9,12 +10,16 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 
 class MainActivity : ComponentActivity() {
     // Permission alone never opts a shop into FCM or starts device registration.
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    private var pushTap by mutableStateOf<PushTap?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
@@ -23,7 +28,14 @@ class MainActivity : ComponentActivity() {
         // mode, so status-bar icons must remain dark and legible on that header.
         enableEdgeToEdge(statusBarStyle = SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT))
         val api: OwnerApi = if (BuildConfig.DEMO_MODE) DemoOwnerApi() else OwnerApiProvider.live(applicationContext)
-        setContent { PrintlyTheme { PrintlyApp(api) } }
+        pushTap = NativePush.consumeTap(applicationContext, intent)
+        setContent { PrintlyTheme { PrintlyApp(api, pushTap) { pushTap?.let { NativePush.clearTap(applicationContext, it) }; pushTap = null } } }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        pushTap = NativePush.consumeTap(applicationContext, intent)
     }
 
     override fun onPostResume() {

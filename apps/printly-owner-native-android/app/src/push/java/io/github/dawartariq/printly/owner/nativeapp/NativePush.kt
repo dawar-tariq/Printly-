@@ -8,6 +8,8 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings as AndroidSettings
@@ -36,6 +38,7 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import androidx.work.workDataOf
 import com.google.android.gms.tasks.Tasks
 import com.google.firebase.messaging.FirebaseMessaging
 import com.google.firebase.messaging.FirebaseMessagingService
@@ -51,6 +54,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import okhttp3.Request
+import java.io.ByteArrayOutputStream
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
@@ -62,7 +67,7 @@ private const val SYNC_INTERVAL = 12 * 60 * 60 * 1000L
 
 private data class PushState(
     val enabled: Boolean, val binding: String, val shop: String, val sessionId: String, val fid: String,
-    val syncedFid: String, val syncedAt: Long, val problem: String,
+    val syncedFid: String, val syncedAt: Long, val syncedVersion: Int, val problem: String,
 ) {
     val connected: Boolean get() = enabled && fid.isNotBlank() && fid == syncedFid && syncedAt > 0
 }
@@ -85,7 +90,7 @@ internal object NativePush {
         val p = prefs(context)
         PushState(p.getBoolean("enabled", false), p.getString("binding", "") ?: "", p.getString("shop", "") ?: "",
             p.getString("session_id", "") ?: "", p.getString("fid", "") ?: "", p.getString("synced_fid", "") ?: "",
-            p.getLong("synced_at", 0), p.getString("problem", "") ?: "")
+            p.getLong("synced_at", 0), p.getInt("synced_version", 0), p.getString("problem", "") ?: "")
     }
     private fun problem(context: Context, binding: String, value: String) {
         synchronized(stateLock) {
@@ -101,8 +106,8 @@ internal object NativePush {
     }
     private fun createChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= 26) {
-            val channel = NotificationChannel(CHANNEL, "New orders", NotificationManager.IMPORTANCE_HIGH).apply {
-                description = "New order and payment-review alerts"
+            val channel = NotificationChannel(CHANNEL, "Printly alerts", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "Orders, announcements, maintenance and app updates"
                 lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE
             }
             context.getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
@@ -257,7 +262,7 @@ internal object NativePush {
                     val edit = prefs(context).edit().putString("fid", fid)
                     if (changed) edit.remove("synced_fid").putLong("synced_at", 0)
                     if (!edit.commit()) { problem(context, state.binding, "Could not save notification setup. Please try again."); return@synchronized }
-                    if (changed || state.syncedFid != fid || System.currentTimeMillis() - state.syncedAt >= SYNC_INTERVAL) {
+                    if (changed || state.syncedFid != fid || state.syncedVersion != BuildConfig.VERSION_CODE || System.currentTimeMillis() - state.syncedAt >= SYNC_INTERVAL) {
                         try { enqueueSync(context) }
                         catch (_: Exception) { problem(context, state.binding, "Could not connect notifications. Open the app to retry.") }
                     }
@@ -311,18 +316,20 @@ internal object NativePush {
             return@withLock true
         }
         if (!validPushUuid(state.binding) || !validPushUuid(state.shop) || !validPushFid(state.fid)) return@withLock true
-        if (state.fid == state.syncedFid && state.syncedAt > 0 && System.currentTimeMillis() - state.syncedAt < SYNC_INTERVAL) return@withLock true
+        if (state.fid == state.syncedFid && state.syncedVersion == BuildConfig.VERSION_CODE && state.syncedAt > 0 && System.currentTimeMillis() - state.syncedAt < SYNC_INTERVAL) return@withLock true
         val api = OwnerApiProvider.live(context)
         try {
             if (!api.restore()) return@withLock true
             // Bind the request to the same local session, then re-verify its
             // bearer and membership for this exact shop on the server.
-            api.registerPush(state.sessionId, JSONObject().put("shop_id", state.shop).put("binding_id", state.binding).put("fid", state.fid))
+            api.registerPush(state.sessionId, JSONObject().put("shop_id", state.shop).put("binding_id", state.binding).put("fid", state.fid)
+                .put("version_code", BuildConfig.VERSION_CODE).put("version_name", BuildConfig.VERSION_NAME))
             synchronized(stateLock) {
                 val current = read(context)
                 if (current.enabled && current.binding == state.binding && current.shop == state.shop &&
                     current.sessionId == state.sessionId && current.fid == state.fid) {
-                    prefs(context).edit().putString("synced_fid", state.fid).putLong("synced_at", System.currentTimeMillis()).remove("problem").commit()
+                    prefs(context).edit().putString("synced_fid", state.fid).putLong("synced_at", System.currentTimeMillis())
+                        .putInt("synced_version", BuildConfig.VERSION_CODE).remove("problem").commit()
                 }
             }
             true
@@ -346,21 +353,122 @@ internal object NativePush {
         catch (_: Exception) { false }
     }
 
-    @SuppressLint("MissingPermission")
-    fun deliver(context: Context, data: Map<String, String>) = synchronized(stateLock) {
-        val state = read(context)
-        val sessionMatches = pushSessionMatches(state.enabled, state.sessionId, SessionStore(context).localIdOrNull())
-        val notice = nativePushNotice(data, sessionMatches, state.binding, allowed(context)) ?: return@synchronized
-        createChannel(context)
-        if (!allowed(context)) return@synchronized
-        val intent = Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        val open = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        val notification = NotificationCompat.Builder(context, CHANNEL).setSmallIcon(R.drawable.ic_push_printer)
+    private fun notification(context: Context, notice: PushNotice, picture: Bitmap? = null): android.app.Notification {
+        // Explicit immutable intents contain only a random event ID. MainActivity
+        // retrieves the text and destination from this app's private storage,
+        // not from potentially forged exported-activity extras.
+        val intent = Intent(context, MainActivity::class.java)
+            .setData(Uri.parse("printly-internal://notice/${notice.tag}"))
+            .putExtra("printly_event", notice.tag)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        val open = PendingIntent.getActivity(context, notice.tag.hashCode(), intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val builder = NotificationCompat.Builder(context, CHANNEL).setSmallIcon(R.drawable.ic_push_printer)
             .setContentTitle(notice.title).setContentText(notice.body).setContentIntent(open)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE).setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setAutoCancel(true).setOnlyAlertOnce(true).build()
-        try { NotificationManagerCompat.from(context).notify(notice.tag, 0, notification) }
-        catch (_: SecurityException) { /* Permission was revoked between the check and display. */ }
+            .setAutoCancel(true).setOnlyAlertOnce(true)
+        if (picture == null) builder.setStyle(NotificationCompat.BigTextStyle().bigText(notice.body))
+        else builder.setStyle(NotificationCompat.BigPictureStyle().bigPicture(picture).setSummaryText(notice.body))
+        return builder.build()
+    }
+
+    private fun image(value: String): Bitmap? {
+        if (!validNoticeImage(value)) return null
+        val client = secureHttpClient.newBuilder().connectTimeout(3, TimeUnit.SECONDS).readTimeout(5, TimeUnit.SECONDS).callTimeout(8, TimeUnit.SECONDS).build()
+        return try {
+            client.newCall(Request.Builder().url(value).get().build()).execute().use { response ->
+                if (!response.isSuccessful) return null
+                val body = response.body ?: return null
+                if (body.contentLength() > 1_000_000) return null
+                val bytes = ByteArrayOutputStream()
+                body.byteStream().use { input ->
+                    val buffer = ByteArray(8192)
+                    while (true) {
+                        val n = input.read(buffer)
+                        if (n < 0) break
+                        if (bytes.size() + n > 1_000_000) return null
+                        bytes.write(buffer, 0, n)
+                    }
+                }
+                val raw = bytes.toByteArray()
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeByteArray(raw, 0, raw.size, bounds)
+                if (bounds.outWidth !in 1..2048 || bounds.outHeight !in 1..2048 || bounds.outWidth.toLong() * bounds.outHeight > 4_000_000L) return null
+                BitmapFactory.decodeByteArray(raw, 0, raw.size)
+            }
+        } catch (_: Exception) { null }
+    }
+
+    /** Read only a notice previously stored for the current opted-in session.
+     * Random IDs from the exported activity are not authority. Caller holds the
+     * state lock, including when a queued tap is revalidated before navigation. */
+    private fun storedTapLocked(context: Context, event: String): PushTap? {
+        if (!validPushUuid(event)) return null
+        val state = read(context)
+        val key = "notice_${event.lowercase()}"
+        val stored = try { JSONObject(prefs(context).getString(key, null) ?: return null) } catch (_: Exception) { return null }
+        val age = System.currentTimeMillis() - stored.optLong("at", 0)
+        val action = stored.optString("action", "")
+        val tap = PushTap(event, stored.optString("title", ""), stored.optString("body", ""), action,
+            stored.optString("binding", ""), stored.optString("session", ""))
+        if (age !in 0..172_800_000L || !validPushAction(action) ||
+            !pushTapMatchesSession(tap, state.enabled, state.binding, state.sessionId, SessionStore(context).localIdOrNull())) return null
+        return tap
+    }
+    fun consumeTap(context: Context, intent: Intent?): PushTap? = synchronized(stateLock) {
+        intent?.getStringExtra("printly_event")?.let { storedTapLocked(context, it) }
+    }
+    fun currentTap(context: Context, tap: PushTap): PushTap? = synchronized(stateLock) {
+        storedTapLocked(context, tap.event)?.takeIf { it == tap }
+    }
+    fun clearTap(context: Context, tap: PushTap) = synchronized(stateLock) {
+        if (validPushUuid(tap.event)) {
+            val key = "notice_${tap.event.lowercase()}"
+            val stored = try { JSONObject(prefs(context).getString(key, null) ?: return@synchronized) } catch (_: Exception) { return@synchronized }
+            // Do not delete a same-event notice stored after an account switch.
+            if (stored.optString("binding", "") == tap.binding && stored.optString("session", "") == tap.sessionId) prefs(context).edit().remove(key).apply()
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    fun deliver(context: Context, data: Map<String, String>) {
+        val delivered = synchronized(stateLock) {
+            val state = read(context)
+            val sessionMatches = pushSessionMatches(state.enabled, state.sessionId, SessionStore(context).localIdOrNull())
+            val notice = nativePushNotice(data, sessionMatches, state.binding, allowed(context)) ?: return@synchronized null
+            val p = prefs(context)
+            if (p.contains("seen_${notice.tag}")) return@synchronized null
+            createChannel(context)
+            if (!allowed(context)) return@synchronized null
+            val record = JSONObject().put("title", notice.title).put("body", notice.body).put("action", notice.action)
+                .put("session", state.sessionId).put("binding", state.binding).put("at", System.currentTimeMillis())
+            val edit = p.edit().putString("notice_${notice.tag}", record.toString())
+            // Bounded, non-sensitive local history, cleared on sign-out/opt-out.
+            p.all.filterKeys { it.startsWith("notice_") && it != "notice_${notice.tag}" }.keys.take((p.all.keys.count { it.startsWith("notice_") } - 49).coerceAtLeast(0)).forEach { edit.remove(it) }
+            p.all.filterKeys { it.startsWith("seen_") }.entries.sortedBy { (it.value as? Long) ?: 0L }.take((p.all.keys.count { it.startsWith("seen_") } - 99).coerceAtLeast(0)).forEach { edit.remove(it.key) }
+            if (!edit.commit()) return@synchronized null
+            try {
+                NotificationManagerCompat.from(context).notify(notice.tag, 0, notification(context, notice))
+                p.edit().putLong("seen_${notice.tag}", System.currentTimeMillis()).apply()
+                val work = OneTimeWorkRequestBuilder<PushDisplayWorker>().setConstraints(constraints())
+                    .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 1, TimeUnit.MINUTES)
+                    .setInputData(workDataOf("event" to notice.tag, "binding" to state.binding, "session" to state.sessionId)).build()
+                try { manager(context).enqueueUniqueWork("printly_push_display_${notice.tag}", ExistingWorkPolicy.KEEP, work) } catch (_: Exception) { /* Receipt is optional. */ }
+                Triple(notice, state.binding, state.sessionId)
+            } catch (_: SecurityException) { p.edit().remove("notice_${notice.tag}").apply(); null }
+        } ?: return
+        val picture = delivered.first.image?.let(::image) ?: return
+        synchronized(stateLock) {
+            val state = read(context)
+            // Do not deliberately recreate an alert the person dismissed while
+            // its image was downloading. The system can still race this check.
+            val stillVisible = try {
+                context.getSystemService(NotificationManager::class.java).activeNotifications.any { it.tag == delivered.first.tag && it.id == 0 }
+            } catch (_: Exception) { false }
+            if (stillVisible && state.binding == delivered.second && state.sessionId == delivered.third && pushSessionMatches(state.enabled, state.sessionId, SessionStore(context).localIdOrNull()) &&
+                allowed(context) && prefs(context).contains("notice_${delivered.first.tag}")) {
+                try { NotificationManagerCompat.from(context).notify(delivered.first.tag, 0, notification(context, delivered.first, picture)) } catch (_: SecurityException) { }
+            }
+        }
     }
 
     @Composable fun Settings(api: OwnerApi, shopId: String?) {
@@ -390,11 +498,11 @@ internal object NativePush {
             }
         }
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Heading("Order notifications", "Get an alert when a new order or payment needs your attention, even when the app is closed.")
+            Heading("Printly notifications", "Get orders, announcements, maintenance and update alerts, even when the app is closed.")
             SurfaceCard(Modifier.fillMaxWidth()) {
                 Text(if (!state.enabled) "Off on this phone" else if (state.connected) "Enabled on this phone" else "Connecting…", fontWeight = FontWeight.ExtraBold)
                 Spacer(Modifier.height(6.dp))
-                Text("Alerts contain no customer or order details. Internet and Google Play services are needed; delivery can be delayed. Signing out turns them off on this phone.", color = Muted)
+                Text("Order alerts contain no customer details. General announcements may include a message or public image. Internet and Google Play services are needed; delivery can be delayed. Signing out turns alerts off on this phone.", color = Muted)
                 if (state.problem.isNotBlank()) { Spacer(Modifier.height(8.dp)); Text(state.problem, color = OrangeDark) }
             }
             if (notice.isNotBlank()) InfoBanner(notice)
@@ -444,6 +552,24 @@ class NativeMessagingService : FirebaseMessagingService() {
     override fun onRegistered(installationId: String) { NativePush.registered(applicationContext, installationId) }
     override fun onUnregistered(installationId: String) { NativePush.unregistered(applicationContext) }
     override fun onMessageReceived(message: RemoteMessage) { NativePush.deliver(applicationContext, message.data) }
+}
+
+class PushDisplayWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
+    override suspend fun doWork(): Result {
+        val event = inputData.getString("event") ?: return Result.success()
+        val binding = inputData.getString("binding") ?: return Result.success()
+        val session = inputData.getString("session") ?: return Result.success()
+        if (!validPushUuid(event) || !validPushUuid(binding) || !validPushUuid(session)) return Result.success()
+        return try {
+            val api = OwnerApiProvider.live(applicationContext)
+            if (!api.restore()) return Result.success()
+            api.reportPushDisplay(session, binding, event)
+            Result.success()
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (error: AppError) {
+            if (error.httpStatus == 401 || error.httpStatus == 403 || error.code == "session_changed" || runAttemptCount >= 3) Result.success() else Result.retry()
+        } catch (_: Exception) { if (runAttemptCount >= 3) Result.success() else Result.retry() }
+    }
 }
 
 class FcmRegisterWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {

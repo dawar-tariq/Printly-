@@ -43,6 +43,8 @@ interface OwnerApi {
     suspend fun file(path: String): ByteArray
     /** Safe presentation settings; null means retain the current defaults. */
     suspend fun experience(): OwnerExperience? = null
+    /** Public update configuration, independent of sign-in and push. */
+    suspend fun updatePolicy(): JSONObject? = null
     /** Advisory invalidations only; the board API remains authoritative. */
     fun orderUpdates(shopId: String): Flow<Unit> = emptyFlow()
 }
@@ -79,6 +81,12 @@ class LiveOwnerApi(context: Context) : OwnerApi {
     override suspend fun experience(): OwnerExperience? {
         val response = http("${BuildConfig.SITE_ORIGIN}/api/native/v1/experience", "GET", maxBytes = 8_192)
         return if (response.status == 200) parseOwnerExperience(response.json()) else null
+    }
+
+    override suspend fun updatePolicy(): JSONObject {
+        val response = http("${BuildConfig.SITE_ORIGIN}/api/native/v1/app-release", "GET", maxBytes = 8_192)
+        if (response.status != 200) throw AppError("update_unavailable", "Could not check app updates. Check your connection and try again.", response.status)
+        return response.json()
     }
 
     override fun orderUpdates(shopId: String): Flow<Unit> = observeOrderChanges(shopId, BuildConfig.SUPABASE_HOST, {
@@ -234,6 +242,9 @@ class LiveOwnerApi(context: Context) : OwnerApi {
      * newer account that happened to sign in while work was queued. */
     internal suspend fun registerPush(expectedLocalId: String, body: JSONObject): JSONObject =
         requestForSession("POST", "push-device", body, expectedLocalId)
+
+    internal suspend fun reportPushDisplay(expectedLocalId: String, binding: String, event: String): JSONObject =
+        requestForSession("POST", "push-display", JSONObject().put("binding_id", binding).put("event_id", event), expectedLocalId)
 
     override suspend fun requestWithProof(method: String, path: String, body: JSONObject, photo: ProofPhoto?): JSONObject {
         if (!((method == "PUT" && path == "settings") || (method == "POST" && path == "name-proof"))) {
