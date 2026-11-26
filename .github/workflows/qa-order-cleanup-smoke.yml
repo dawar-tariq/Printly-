@@ -1,0 +1,40 @@
+# TEMPORARY: no sends. Verify isolated one-shot cleanup and disabled worker.
+name: Verify isolated order test cleanup
+on:
+  push:
+    branches: ['arena/309fdf51-printly']
+    paths: ['.github/workflows/qa-order-cleanup-smoke.yml']
+permissions: {}
+jobs:
+  no-send:
+    if: github.repository == 'dawar-tariq/Printly-' && github.ref == 'refs/heads/arena/309fdf51-printly'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify isolation, removed route and disabled worker
+        env:
+          QA_WORKER_SECRET: ${{ secrets.PRINTLY_QA_CRON_E54FF1CB5D3D }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          const site='https://printly-native-test.vercel.app';
+          const secret=process.env.QA_WORKER_SECRET||'';
+          if (!/^[A-Za-z0-9_-]{32,128}$/.test(secret)) throw new Error('QA credential unavailable');
+          const opts={redirect:'error',signal:AbortSignal.timeout(30000)};
+          const diagnostic=await fetch(`${site}/api/native/v1/test-environment`,opts);
+          const info=await diagnostic.json();
+          if (!diagnostic.ok || info.isolated_test!==true || info.supabase_url!=='https://rahfmpsdbwbktlobntkm.supabase.co' || info.server_database_read!=='ok' || info.public_auth_check!=='ok') throw new Error('Isolation check failed');
+          const headers={authorization:`Bearer ${secret}`};
+          const worker=await fetch(`${site}/api/cron/native-order-push`,{...opts,headers});
+          if(worker.status!==503) throw new Error('Worker not disabled');
+          let status;
+          for(let i=0;i<36;i++) {
+            const response=await fetch(`${site}/api/cron/native-qa-order-test`,{redirect:'error',signal:AbortSignal.timeout(30000),headers});
+            status=response.status;
+            if(status===404) break;
+            await new Promise(resolve=>setTimeout(resolve,5000));
+          }
+          if(status!==404) throw new Error('Temporary test route remains deployed');
+          console.log('No-send isolation and cleanup checks passed.');
+          NODE
