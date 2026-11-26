@@ -1,7 +1,7 @@
 // Disposable LOCAL-ONLY Realtime/RLS exercise for the native Phoenix v2 wire
 // format. No production credentials or data may be passed to this helper.
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 
 function localOrigin(value) {
@@ -21,14 +21,16 @@ async function until(check, label, timeout = 20_000) {
   throw new Error(`Timed out waiting for local Realtime ${label}`);
 }
 
-function subscribe(url, anonKey, accessToken, shop) {
+function subscribe(url, anonKey, accessToken, shop, events = ['INSERT', 'UPDATE']) {
   const endpoint = new URL('/realtime/v1/websocket', url);
   endpoint.protocol = 'ws:';
   endpoint.searchParams.set('apikey', anonKey);
   endpoint.searchParams.set('vsn', '2.0.0');
   const socket = new WebSocket(endpoint);
-  const topic = `realtime:printly-orders:${shop}`;
-  const bindings = ['INSERT', 'UPDATE'].map((event) => ({ event, schema: 'public', table: 'orders', filter: `shop_id=eq.${shop}` }));
+  const topic = `realtime:printly-orders:${shop || 'unfiltered'}`;
+  const bindings = events.map((event) => ({
+    event, schema: 'public', table: 'orders', ...(shop ? { filter: `shop_id=eq.${shop}` } : {}),
+  }));
   const state = { socket, joined: false, ready: false, failed: false, ids: [], changes: [] };
   socket.addEventListener('open', () => {
     socket.send(JSON.stringify(['1', '1', topic, 'phx_join', {
@@ -45,9 +47,9 @@ function subscribe(url, anonKey, accessToken, shop) {
     if (event === 'phx_reply' && frame[1] === '1') {
       if (payload.status !== 'ok' || !Array.isArray(payload.response?.postgres_changes)) { state.failed = true; return; }
       const confirmed = payload.response.postgres_changes;
-      if (confirmed.length !== 2 || confirmed.some((entry, index) =>
+      if (confirmed.length !== bindings.length || confirmed.some((entry, index) =>
         entry.event !== bindings[index].event || entry.schema !== 'public' || entry.table !== 'orders' ||
-        entry.filter !== bindings[index].filter || !Number.isInteger(entry.id))) { state.failed = true; return; }
+        (entry.filter || '') !== (bindings[index].filter || '') || !Number.isInteger(entry.id))) { state.failed = true; return; }
       state.ids = confirmed.map((entry) => entry.id); state.joined = true;
     }
     if (event === 'system' && payload.extension === 'postgres_changes') {
@@ -67,8 +69,13 @@ export async function testNativeRealtimeLocal({ supabaseUrl, anonKey, admin, own
   assert(!guard.error && guard.data?.nonce === guardNonce, 'refusing realtime writes without the matching disposable stack guard');
   assert.match(shop, /^[0-9a-f-]{36}$/i); assert.match(orderId, /^[0-9a-f-]{36}$/i);
   const owner = subscribe(origin, anonKey, ownerToken, shop);
-  // An authenticated owner from another shop maliciously asks for this shop.
+  // A foreign owner can request this shop directly or omit the app's filter.
   const foreign = subscribe(origin, anonKey, otherToken, shop);
+  const events = ['INSERT', 'UPDATE', 'DELETE'];
+  const ownerUnfiltered = subscribe(origin, anonKey, ownerToken, null, events);
+  const foreignUnfiltered = subscribe(origin, anonKey, otherToken, null, events);
+  const anonymousUnfiltered = subscribe(origin, anonKey, anonKey, null, events);
+  const subscribers = [owner, foreign, ownerUnfiltered, foreignUnfiltered, anonymousUnfiltered];
   const customer = createClient(origin.toString(), anonKey, { auth: { persistSession: false, autoRefreshToken: false } });
   const topic = `printly-track:${createHash('sha256').update(orderId.toLowerCase()).digest('hex')}`;
   let customerReady = false; let unrelatedReady = false;
@@ -78,20 +85,54 @@ export async function testNativeRealtimeLocal({ supabaseUrl, anonKey, admin, own
   const unrelatedChannel = customer.channel(`printly-track:${'a'.repeat(64)}`).on('broadcast', { event: 'changed' }, (message) => unrelatedSignals.push(message))
     .subscribe((status) => { if (status === 'SUBSCRIBED') unrelatedReady = true; });
   try {
-    await until(() => owner.failed || foreign.failed || (owner.joined && owner.ready && foreign.joined && foreign.ready && customerReady && unrelatedReady), 'subscriptions');
-    assert(!owner.failed && !foreign.failed, 'local Realtime subscription failed');
+    await until(() => subscribers.some((state) => state.failed) ||
+      (subscribers.every((state) => state.joined && state.ready) && customerReady && unrelatedReady), 'subscriptions');
+    assert(subscribers.every((state) => !state.failed), 'local Realtime subscription failed');
     const anonymousOrders = await customer.from('orders').select('id').eq('id', orderId);
     assert(anonymousOrders.error || anonymousOrders.data?.length === 0, 'anonymous clients must not read order rows');
-    const update = await admin.from('orders').update({ notes: 'Synthetic local Realtime test', eta_minutes: 37 }).eq('id', orderId).eq('shop_id', shop);
+    const note = 'Synthetic private Realtime sentinel';
+    const update = await admin.from('orders').update({ notes: note, eta_minutes: 37 }).eq('id', orderId).eq('shop_id', shop);
     assert(!update.error, 'synthetic local order update failed');
-    await until(() => owner.changes.some((event) => event?.type === 'UPDATE' && event?.record?.shop_id === shop), 'authorized update');
+    const updateMatches = (event) => event?.type === 'UPDATE' && event?.record?.id === orderId;
+    await until(() => owner.changes.some(updateMatches) && ownerUnfiltered.changes.some(updateMatches), 'authorized filtered and unfiltered updates');
+    assert.equal(ownerUnfiltered.changes.find(updateMatches)?.record?.notes, note, 'positive control must include the synthetic private field');
     await until(() => signals.length > 0, 'customer tracking invalidation');
     const second = await admin.from('orders').update({ eta_minutes: 38 }).eq('id', orderId).eq('shop_id', shop);
     assert(!second.error, 'second synthetic local order update failed');
     await until(() => signals.length >= 2, 'second customer tracking invalidation');
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-    assert.equal(foreign.changes.length, 0, 'Realtime must not expose another shop’s order');
+
+    // Exercise INSERT as well as UPDATE with no business data or payment.
+    const probe = randomUUID();
+    const inserted = await admin.from('orders').insert({ id: probe, shop_id: shop, customer_name: 'Synthetic Realtime probe', notes: note });
+    assert(!inserted.error, 'synthetic local insert failed');
+    const insertMatches = (event) => event?.type === 'INSERT' && event?.record?.id === probe;
+    await until(() => owner.changes.some(insertMatches) && ownerUnfiltered.changes.some(insertMatches), 'authorized filtered and unfiltered inserts');
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    for (const state of [foreign, foreignUnfiltered, anonymousUnfiltered]) {
+      assert(!state.changes.some((event) => updateMatches(event) || insertMatches(event)),
+        'foreign and anonymous subscribers must not receive the synthetic INSERT/UPDATE');
+    }
     assert.equal(unrelatedSignals.length, 0, 'a different tracking topic must not receive the event');
+
+    // This is a diagnostic, not a cross-shop DELETE security assertion. RLS
+    // handling of deletes differs from inserts/updates, and real deployments
+    // can use different Realtime versions or replica identities. A positive
+    // owner control and bounded wait make the observation useful, not proof.
+    const deleted = await admin.from('orders').delete().eq('id', probe).eq('shop_id', shop);
+    assert(!deleted.error, 'synthetic local delete failed');
+    const deleteMatches = (event) => event?.type === 'DELETE' && event?.old_record?.id === probe;
+    await until(() => ownerUnfiltered.changes.some(deleteMatches), 'unfiltered owner delete positive control');
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    const foreignDelete = foreignUnfiltered.changes.filter(deleteMatches);
+    const anonymousDelete = anonymousUnfiltered.changes.filter(deleteMatches);
+    for (const event of [...foreignDelete, ...anonymousDelete]) {
+      assert.deepEqual(Object.keys(event.old_record).sort(), ['id'], 'unauthorized DELETE must not expose additional old-row fields');
+    }
+    if (foreignDelete.length || anonymousDelete.length) {
+      console.warn(`SECURITY REVIEW REQUIRED: local DELETE primary-key metadata observed by foreign=${foreignDelete.length > 0}, anonymous=${anonymousDelete.length > 0}; this is not an isolation pass.`);
+    } else {
+      console.log('DIAGNOSTIC: no foreign or anonymous DELETE was observed in the bounded local test; this is not proof of production isolation.');
+    }
     for (const signal of signals) {
       // realtime.send adds a fresh random message ID to the empty payload in
       // newer Supabase versions. No order fields or tracking ID may appear.
@@ -101,9 +142,9 @@ export async function testNativeRealtimeLocal({ supabaseUrl, anonKey, admin, own
       assert(!JSON.stringify(signal).includes(orderId), 'tracking ID must not be sent in the event');
     }
     if (signals[0].payload.id && signals[1].payload.id) assert.notEqual(signals[0].payload.id, signals[1].payload.id, 'message IDs must be fresh, not a stable order identifier');
-    console.log('PASS: local owner Realtime and cross-shop RLS; anonymous tracking invalidation contains no order data');
+    console.log('PASS: local filtered/unfiltered INSERT and UPDATE isolation; anonymous tracking invalidation contains no order data. DELETE is a separate diagnostic.');
   } finally {
-    owner.socket.close(); foreign.socket.close();
+    for (const state of subscribers) state.socket.close();
     await customer.removeChannel(customerChannel); await customer.removeChannel(unrelatedChannel);
   }
 }
