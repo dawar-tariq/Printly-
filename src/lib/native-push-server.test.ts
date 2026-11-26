@@ -121,6 +121,15 @@ describe('native FCM sender', () => {
     expect(await sendNativePush(delivery, 'private-access-token', target, fetcher)).toBe('sent');
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
+  it('uses token-only v3 for a valid eligible order and generic v1 otherwise', () => {
+    const order: NativePushDelivery = { ...delivery, kind: 'order', orderToken: 'A-012' };
+    const data = (item: NativePushDelivery) => (nativePushMessage(item, 'production')! as { message: { data: Record<string, string> } }).message.data;
+    expect(data(order)).toEqual({ version: '3', kind: 'order', event: order.event_id, binding: order.binding_id, token: 'A-012' });
+    for (const value of [null, undefined, 'A-1\nName', 'name', 'A-12345678901']) {
+      expect(data({ ...order, orderToken: value })).toEqual({ version: '1', kind: 'order', event: order.event_id, binding: order.binding_id });
+    }
+    expect(data({ ...order, kind: 'payment' }).version).toBe('1');
+  });
   it('sends validated managed content only with a fixed action and safe image', () => {
     const campaign = { title: 'Scheduled notice', message: 'Hello shops', notification_type: 'maintenance', tap_action: 'maintenance', image_url: null };
     const managed: NativePushDelivery = { ...delivery, kind: 'maintenance', campaign };

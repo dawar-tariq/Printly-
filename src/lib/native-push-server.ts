@@ -26,6 +26,8 @@ export type NativePushDelivery = {
   fid: string; kind: 'order' | 'payment' | NotificationType; expires_at: string;
   // Loaded by the worker only while this delivery's lease and membership are valid.
   campaign?: unknown;
+  // Loaded only through the lease- and app-version-checked token RPC.
+  orderToken?: unknown;
 };
 export type PushOutcome = 'sent' | 'gone' | 'retry' | 'drop';
 
@@ -114,7 +116,11 @@ export function nativePushMessage(delivery: NativePushDelivery, target: NativePu
       !uuid.test(delivery.binding_id) || !fidPattern.test(delivery.fid) || !Number.isFinite(seconds) || seconds <= 0) return null;
   let data: Record<string, string>;
   if (delivery.kind === 'order' || delivery.kind === 'payment') {
-    data = { version: '1', kind: delivery.kind, event: delivery.event_id, binding: delivery.binding_id };
+    if (delivery.kind === 'order' && typeof delivery.orderToken === 'string' && /^A-[0-9]{1,10}$/.test(delivery.orderToken)) {
+      data = { version: '3', kind: 'order', event: delivery.event_id, binding: delivery.binding_id, token: delivery.orderToken };
+    } else {
+      data = { version: '1', kind: delivery.kind, event: delivery.event_id, binding: delivery.binding_id };
+    }
   } else {
     if (!notificationTypes.includes(delivery.kind)) return null;
     const payload = contentSchema.safeParse(delivery.campaign);

@@ -60,10 +60,10 @@ android {
         applicationId 'io.github.dawartariq.printly.owner'
         minSdk 24
         targetSdk 36
-        versionCode 5
+        versionCode 6
         // This candidate is newer than the previously reviewed code 4. It is
         // not a release until separately signed, upgrade-tested and approved.
-        versionName '2.1.0'
+        versionName '2.1.1'
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
         buildConfigField 'String', 'SITE_ORIGIN', '"https://printly0.vercel.app"'
         buildConfigField 'String', 'SUPABASE_HOST', '"lgfqetnfazawglwllymb.supabase.co"'

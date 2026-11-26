@@ -37,6 +37,13 @@ async function run(request: Request): Promise<Response> {
           if (payload.error) outcome = 'retry';
           else if (!payload.data) outcome = 'drop';
           else outcome = await sendNativePush({ ...delivery, campaign: payload.data }, accessToken, config.target);
+        } else if (delivery.kind === 'order') {
+          const token = await admin.rpc('native_push_order_token', { p_delivery: delivery.delivery_id, p_lease: delivery.lease_token });
+          // A failed lookup may be transient; a missing lease must not send.
+          // A valid older app or absent token still gets the generic notice.
+          if (token.error) outcome = 'retry';
+          else if (!token.data || typeof token.data !== 'object' || Array.isArray(token.data) || !('token' in token.data)) outcome = 'drop';
+          else outcome = await sendNativePush({ ...delivery, orderToken: token.data.token }, accessToken, config.target);
         } else outcome = await sendNativePush(delivery, accessToken, config.target);
       } catch { outcome = 'retry'; }
       try {

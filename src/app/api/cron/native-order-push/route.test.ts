@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({
   config: true, authorize: true, tokenFails: false, sweepFails: false, staleGone: false, payloadFails: false, payloadMissing: false,
+  orderTokenFails: false, orderTokenMissing: false,
   target: 'production' as 'production' | 'isolated', tokenCalls: 0,
   calls: [] as Array<{ name: string; args?: Record<string, unknown> }>,
   sentTargets: [] as string[],
@@ -24,12 +25,13 @@ vi.mock('@/lib/supabase', () => ({ createAdminSupabase: () => ({ rpc: async (nam
     { delivery_id: 'delivery-c', lease_token: 'lease-c', kind: 'general' },
   ], error: null };
   if (name === 'native_push_campaign_payload') return { data: state.payloadMissing ? null : { title: 'Notice' }, error: state.payloadFails ? { message: 'failed' } : null };
+  if (name === 'native_push_order_token') return { data: state.orderTokenMissing ? null : { token: null }, error: state.orderTokenFails ? { message: 'failed' } : null };
   if (name === 'finish_native_push_delivery_logged') return { data: state.staleGone && args?.p_outcome === 'gone' ? 'retry' : args?.p_outcome, error: null };
   return { data: null, error: state.sweepFails ? { message: 'failed' } : null };
 } }) }));
 import { GET, POST } from './route';
 const request = () => new Request('https://printly.test/api/cron/native-order-push', { headers: { authorization: 'Bearer test' } });
-beforeEach(() => { state.config = true; state.authorize = true; state.tokenFails = false; state.sweepFails = false; state.staleGone = false; state.payloadFails = false; state.payloadMissing = false; state.target = 'production'; state.tokenCalls = 0; state.calls = []; state.sentTargets = []; vi.stubEnv('PRINTLY_ISOLATED_NATIVE_PUSH_DELIVERY_ENABLED', ''); });
+beforeEach(() => { state.config = true; state.authorize = true; state.tokenFails = false; state.sweepFails = false; state.staleGone = false; state.payloadFails = false; state.payloadMissing = false; state.orderTokenFails = false; state.orderTokenMissing = false; state.target = 'production'; state.tokenCalls = 0; state.calls = []; state.sentTargets = []; vi.stubEnv('PRINTLY_ISOLATED_NATIVE_PUSH_DELIVERY_ENABLED', ''); });
 afterEach(() => vi.unstubAllEnvs());
 
 describe('private native notification worker', () => {
@@ -59,6 +61,14 @@ describe('private native notification worker', () => {
     vi.stubEnv('PRINTLY_ISOLATED_NATIVE_PUSH_DELIVERY_ENABLED', '1');
     expect((await POST(request())).status).toBe(200);
     expect(state.sentTargets).toEqual(['isolated', 'isolated', 'isolated']);
+  });
+  it('does not send an order if the lease lookup fails or is no longer valid', async () => {
+    state.orderTokenFails = true;
+    expect(await (await GET(request())).json()).toMatchObject({ retried: 1 });
+    expect(state.sentTargets).toHaveLength(2);
+    state.orderTokenFails = false; state.orderTokenMissing = true; state.sentTargets = [];
+    expect(await (await GET(request())).json()).toMatchObject({ discarded: 1 });
+    expect(state.sentTargets).toHaveLength(2);
   });
   it('does not send managed content without a valid leased payload', async () => {
     state.payloadFails = true;

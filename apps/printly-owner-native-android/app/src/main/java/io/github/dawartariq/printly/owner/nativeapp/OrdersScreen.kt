@@ -118,7 +118,7 @@ import java.util.Date
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(order.text("token").ifBlank { "Payment review" }, fontWeight = FontWeight.Black, fontSize = 16.sp, color = Ink)
+                    Text(order.text("token").ifBlank { "Token unavailable" }, fontWeight = FontWeight.Black, fontSize = 16.sp, color = Ink)
                     if (order.optBoolean("rush", false)) StatusPill("RUSH", positive = false)
                 }
                 Spacer(Modifier.height(4.dp))

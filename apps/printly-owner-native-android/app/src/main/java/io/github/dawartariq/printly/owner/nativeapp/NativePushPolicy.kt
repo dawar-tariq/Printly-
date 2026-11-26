@@ -58,6 +58,12 @@ internal fun nativePushNotice(data: Map<String, String>, enabled: Boolean, bindi
         }
         return PushNotice(tag, title, "Open Printly for Shops to view your orders.")
     }
+    if (data["version"] == "3") {
+        if (data.keys != setOf("version", "kind", "event", "binding", "token") || data["kind"] != "order") return null
+        val token = data["token"] ?: return null
+        if (!Regex("^A-[0-9]{1,10}$").matches(token)) return null
+        return PushNotice(tag, "New Printly order", "Token $token. Open Printly for Shops to view the order.")
+    }
     if (data["version"] != "2" || data.keys != setOf("version", "kind", "event", "binding", "title", "body", "action", "image")) return null
     val kind = data["kind"] ?: return null
     if (kind !in setOf("general", "important", "feature", "maintenance", "promotion", "update")) return null

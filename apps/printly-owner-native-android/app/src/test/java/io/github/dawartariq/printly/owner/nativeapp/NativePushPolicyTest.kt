@@ -17,6 +17,18 @@ class NativePushPolicyTest {
         assertEquals("Printly order needs attention", nativePushNotice(payload + ("kind" to "payment"), true, binding, true)!!.title)
     }
 
+    @Test fun tokenNoticeContainsNoCustomerNameAndRequiresValidBindingAndToken() {
+        val tokenNotice = payload + mapOf("version" to "3", "token" to "A-012")
+        val notice = nativePushNotice(tokenNotice, true, binding, true)!!
+        assertEquals("New Printly order", notice.title)
+        assertEquals("Token A-012. Open Printly for Shops to view the order.", notice.body)
+        assertNull(nativePushNotice(tokenNotice + ("customer" to "Private Name"), true, binding, true))
+        assertNull(nativePushNotice(tokenNotice + ("token" to "A-1\nPrivate Name"), true, binding, true))
+        assertNull(nativePushNotice(tokenNotice + ("kind" to "payment"), true, binding, true))
+        assertNull(nativePushNotice(tokenNotice, false, binding, true))
+        assertNull(nativePushNotice(tokenNotice, true, "33333333-3333-4333-8333-333333333333", true))
+    }
+
     @Test fun signedOutOrReboundDevicesIgnoreLateMessages() {
         assertNull(nativePushNotice(payload, false, binding, true))
         assertNull(nativePushNotice(payload, true, binding, false))
