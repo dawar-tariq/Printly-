@@ -12,13 +12,15 @@ const sourceDir = resolve('apps/printly-owner-native-android');
 const prefix = 'io.github.dawartariq.printly.owner.nativeapp';
 const qaPackage = 'io.github.dawartariq.printly.owner.native.qa';
 
-function fixture({ script = 'ci-emulator-check.sh', ack = true, device = 'emulator', user = '0', uninstall = 'removed', badCase = '', badState = '' } = {}) {
+function fixture({ script = 'ci-emulator-check.sh', ack = true, device = 'emulator', user = '0', uninstall = 'removed', badCase = '', badState = '', airplane = 'ok', connectivity = 'offline' } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'printly-emulator-harness-'));
   try {
     const bin = join(root, 'bin'), runner = join(root, 'runner');
-    const calls = join(root, 'adb-calls'), gradleCalls = join(root, 'gradle-calls');
+    const calls = join(root, 'adb-calls'), gradleCalls = join(root, 'gradle-calls'), networkChecks = join(root, 'network-checks');
     mkdirSync(bin); mkdirSync(runner);
-    writeFileSync(calls, ''); writeFileSync(gradleCalls, '');
+    writeFileSync(calls, ''); writeFileSync(gradleCalls, ''); writeFileSync(networkChecks, '0');
+    // Offline-preflight retries are synthetic and must not slow the unit tests.
+    writeFileSync(join(bin, 'sleep'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     for (const file of [script, 'ci-emulator-common.sh', 'ci-verify-instrumented-case.py']) {
       copyFileSync(join(sourceDir, file), join(root, file));
     }
@@ -43,6 +45,20 @@ case "$*" in
     echo "$MOCK_USER" ;;
   'shell svc wifi disable'|'shell svc data disable')
     [ "\${ANDROID_SERIAL:-}" = emulator-5554 ] || exit 3 ;;
+  'shell cmd connectivity airplane-mode enable')
+    [ "\${ANDROID_SERIAL:-}" = emulator-5554 ] || exit 3
+    [ "$MOCK_AIRPLANE" != command-error ] || exit 4 ;;
+  'shell settings get global airplane_mode_on')
+    [ "\${ANDROID_SERIAL:-}" = emulator-5554 ] || exit 3
+    [ "$MOCK_AIRPLANE" != setting-error ] || exit 4
+    if [ "$MOCK_AIRPLANE" = setting-off ]; then echo 0; else echo 1; fi ;;
+  'shell dumpsys connectivity')
+    [ "\${ANDROID_SERIAL:-}" = emulator-5554 ] || exit 3
+    [ "$MOCK_CONNECTIVITY" != error ] || exit 4
+    n=$(cat "$MOCK_NETWORK_CHECKS"); n=$((n+1)); echo "$n" > "$MOCK_NETWORK_CHECKS"
+    if [ "$MOCK_CONNECTIVITY" = offline ] || { [ "$MOCK_CONNECTIVITY" = transient ] && [ "$n" -ge 3 ]; }; then
+      echo 'Active default network: none'
+    else echo 'Active default network: 100'; fi ;;
   'uninstall ${qaPackage}')
     [ "\${ANDROID_SERIAL:-}" = emulator-5554 ] || exit 3
     [ "$MOCK_UNINSTALL" != retained ] && [ "$MOCK_UNINSTALL" != absent-failure ] || exit 4 ;;
@@ -112,6 +128,7 @@ PY
 `, { mode: 0o755 });
     const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, RUNNER_TEMP: runner,
       MOCK_ADB_CALLS: calls, MOCK_GRADLE_CALLS: gradleCalls, MOCK_DEVICE: device, MOCK_USER: user, MOCK_UNINSTALL: uninstall,
+      MOCK_AIRPLANE: airplane, MOCK_CONNECTIVITY: connectivity, MOCK_NETWORK_CHECKS: networkChecks,
       MOCK_BAD_CASE: badCase, MOCK_BAD_STATE: badState };
     delete env.ANDROID_SERIAL;
     if (ack) env.PRINTLY_DISPOSABLE_EMULATOR = '1'; else delete env.PRINTLY_DISPOSABLE_EMULATOR;
@@ -128,11 +145,16 @@ test('offline harnesses target one acknowledged disposable emulator and require 
   for (const script of ['ci-emulator-check.sh', permissionScript]) {
     const { result, adbCalls, gradleCalls } = fixture({ script });
     assert.equal(result.status, 0, result.stdout + result.stderr);
-    assert.deepEqual(adbCalls, [
+    const commonCalls = [
       '|devices', '|-s emulator-5554 shell getprop ro.kernel.qemu', 'emulator-5554|shell am get-current-user',
       'emulator-5554|shell svc wifi disable', 'emulator-5554|shell svc data disable',
       `emulator-5554|uninstall ${qaPackage}`, 'emulator-5554|shell pm list packages --user 0',
-    ]);
+    ];
+    const permissionCalls = [
+      'emulator-5554|shell cmd connectivity airplane-mode enable', 'emulator-5554|shell settings get global airplane_mode_on',
+      'emulator-5554|shell svc wifi disable', 'emulator-5554|shell svc data disable', 'emulator-5554|shell dumpsys connectivity',
+    ];
+    assert.deepEqual(adbCalls, [...commonCalls, ...(script === permissionScript ? permissionCalls : [])]);
     assert.equal(gradleCalls.length, script === permissionScript ? 1 : 2);
     assert.equal((result.stdout.match(/Verified instrumented test:/g) ?? []).length, script === permissionScript ? 1 : 7);
   }
@@ -150,9 +172,26 @@ test('offline harnesses refuse phones, multiple devices, unverified AVDs and ret
       assert.notEqual(result.status, 0, `${script}: ${JSON.stringify(options)}`);
       assert.equal(gradleCalls.length, 0, `${script}: ${JSON.stringify(options)}`);
       if (options.ack === false) assert.equal(adbCalls.length, 0);
-      if (options.device || options.user) assert.ok(adbCalls.every(call => !/svc |uninstall|pm list/.test(call)), adbCalls.join('\n'));
+      if (options.device || options.user) assert.ok(adbCalls.every(call => !/svc |uninstall|pm list|cmd connectivity|settings get global|dumpsys connectivity/.test(call)), adbCalls.join('\n'));
     }
   }
+});
+
+test('permission harness refuses to start unless airplane mode and an offline default network are verified', () => {
+  for (const options of [
+    { airplane: 'command-error' }, { airplane: 'setting-error' }, { airplane: 'setting-off' },
+    { connectivity: 'error' }, { connectivity: 'online' },
+  ]) {
+    const { result, adbCalls, gradleCalls } = fixture({ script: permissionScript, ...options });
+    assert.notEqual(result.status, 0, JSON.stringify(options));
+    assert.equal(gradleCalls.length, 0, JSON.stringify(options));
+    assert.match(result.stdout + result.stderr, /Could not|Refusing tests/);
+    if (options.connectivity === 'online') assert.equal(adbCalls.filter(call => call.endsWith('shell dumpsys connectivity')).length, 20);
+  }
+  const transient = fixture({ script: permissionScript, connectivity: 'transient' });
+  assert.equal(transient.result.status, 0, transient.result.stdout + transient.result.stderr);
+  assert.equal(transient.adbCalls.filter(call => call.endsWith('shell dumpsys connectivity')).length, 3);
+  assert.equal(transient.gradleCalls.length, 1);
 });
 
 test('QA instrumentation sources guard offline, emulator and fresh-state assumptions before changes', () => {

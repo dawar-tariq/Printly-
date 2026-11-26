@@ -6,6 +6,34 @@ source "$SCRIPT_DIR/ci-emulator-common.sh" || exit 1
 (
   set -e -o pipefail
   prepare_disposable_emulator
+  # API 35 can report an active cellular default network even after svc data
+  # disable. Airplane mode plus both radio switches is a stronger preflight;
+  # the instrumentation still independently requires activeNetwork == null.
+  if ! adb shell cmd connectivity airplane-mode enable > /dev/null; then
+    echo 'Could not enable airplane mode on the disposable emulator.' >&2
+    exit 1
+  fi
+  airplane=$(adb shell settings get global airplane_mode_on) || { echo 'Could not verify emulator airplane mode.' >&2; exit 1; }
+  airplane=${airplane//$'\r'/}
+  if [[ "$airplane" != 1 ]]; then
+    echo 'Refusing tests: emulator airplane mode is not enabled.' >&2
+    exit 1
+  fi
+  adb shell svc wifi disable || { echo 'Could not disable emulator Wi-Fi.' >&2; exit 1; }
+  adb shell svc data disable || { echo 'Could not disable emulator mobile data.' >&2; exit 1; }
+  # Wait for the default network to disappear before installing the QA test
+  # package. Never use this host-side check instead of the in-app offline guard.
+  offline=0
+  for ((attempt=0; attempt<20; attempt++)); do
+    status=$(adb shell dumpsys connectivity) || { echo 'Could not verify emulator connectivity.' >&2; exit 1; }
+    status=${status//$'\r'/}
+    if grep -Eq '^[[:space:]]*Active default network:[[:space:]]*none[[:space:]]*$' <<< "$status"; then offline=1; break; fi
+    sleep 1
+  done
+  if [[ "$offline" != 1 ]]; then
+    echo 'Refusing tests: the disposable emulator still has an active default network.' >&2
+    exit 1
+  fi
   rm -rf app/build/outputs/androidTest-results/connected
   ./gradlew --no-daemon connectedQaAndroidTest --stacktrace \
     '-PprintlyQaSiteOrigin=https://printly-native-test.vercel.app' \
