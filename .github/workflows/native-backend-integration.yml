@@ -13,6 +13,7 @@ on:
       - 'src/lib/**'
       - 'src/middleware.ts'
       - 'supabase/migrations/**'
+      - 'supabase/candidates/**'
       - 'package.json'
       - 'pnpm-lock.yaml'
       - 'scripts/test-native-integration.mjs'
@@ -58,6 +59,20 @@ jobs:
           # Only tracked migrations present in this checked-out commit; never
           # connect to a hosted project or include deferred worktree migrations.
           cp "$GITHUB_WORKSPACE"/supabase/migrations/*.sql supabase/migrations/
+          # Exercise the exact containment candidate and verify its flags on the
+          # fresh local database, then restore the disposable baseline so the
+          # harness can first demonstrate the DELETE positive control. Its
+          # later pause rehearsal uses the same resulting publication options.
+          cp "$GITHUB_WORKSPACE/supabase/candidates/realtime_pause_delete.sql" supabase/migrations/9998_candidate_rehearsal.sql
+          cat >> supabase/migrations/9998_candidate_rehearsal.sql <<'SQL'
+          do $$ begin
+            if not exists (select 1 from pg_publication where pubname='supabase_realtime'
+              and pubinsert and pubupdate and not pubdelete and pubtruncate) then
+              raise exception 'CANDIDATE_PUBLICATION_FLAGS_INCORRECT';
+            end if;
+            alter publication supabase_realtime set (publish = 'insert, update, delete, truncate');
+          end $$;
+          SQL
           # Do not add orders to Realtime in a test helper. Migration 0025
           # itself must establish the publication used by the live-event test.
           # Loopback can also be a tunnel to another database. Add a unique,
