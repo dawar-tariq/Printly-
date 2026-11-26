@@ -128,6 +128,7 @@ export function PromotionManager({ plan }: { plan: SubscriptionPlan }) {
       const code = announcement.promoCode.trim().toUpperCase();
       if (code && !/^[A-Z0-9][A-Z0-9_-]{2,31}$/.test(code)) throw new Error('Use a saved promo code with 3–32 letters, numbers, hyphens or underscores.');
       const dates = dateRange(announcement.starts, announcement.ends);
+      if (announcement.enabled && !window.confirm('Saving an enabled announcement may queue a notification to opted-in native app devices when it becomes available. Delivery is best-effort; a send already in flight cannot be recalled. Continue?')) return;
       const ok = await save({ action: 'save_announcement', id: announcement.id, expected_version: announcement.version, announcement: {
         title: announcement.title.trim(), message: announcement.message.trim(), promo_code: code || null,
         ...dates, enabled: announcement.enabled, public_visible: announcement.publicVisible,
@@ -157,6 +158,7 @@ export function PromotionManager({ plan }: { plan: SubscriptionPlan }) {
     } }, `${item.code} ${item.enabled ? 'paused' : 'enabled'} for new requests.`);
   };
   const toggleAnnouncement = (item: SubscriptionAnnouncement) => {
+    if (!item.enabled && !window.confirm('Enabling this announcement may queue a notification to opted-in native app devices when it becomes available. A send already in flight cannot be recalled. Continue?')) return;
     void save({ action: 'save_announcement', id: item.id, expected_version: item.version, announcement: {
       title: item.title, message: item.message, promo_code: item.promo_code, starts_at: item.starts_at, ends_at: item.ends_at,
       enabled: !item.enabled, public_visible: item.public_visible,
@@ -188,6 +190,7 @@ export function PromotionManager({ plan }: { plan: SubscriptionPlan }) {
           <label className={`block ${field}`}>Announcement message<textarea className={control} rows={3} value={announcement.message} maxLength={400} required onChange={(event) => setAnnouncement({ ...announcement, message: event.target.value })} placeholder="Tell shop owners about this update or offer." /></label>
           <div className="grid gap-3 sm:grid-cols-2"><label className={field}>Announcement starts at (IST)<input type="datetime-local" className={control} value={announcement.starts} onChange={(event) => setAnnouncement({ ...announcement, starts: event.target.value })} /></label><label className={field}>Announcement ends at (IST)<input type="datetime-local" className={control} value={announcement.ends} onChange={(event) => setAnnouncement({ ...announcement, ends: event.target.value })} /></label></div>
           <p className="text-xs leading-5 text-neutral-500">Enter any saved code, including an older one not in the suggestions. Its actual discount is shown automatically. The announcement hides when that promo is paused, expired or fully reserved. Use neutral message text so it stays accurate if you change the discount.</p>
+          <p className="text-xs leading-5 text-neutral-500">Saving or enabling an announcement can also queue a best-effort native app notification. Delivery requires an enabled worker and independent scheduler; linked promos are rechecked before sending. Pausing stops remaining work where possible, but sends already in flight cannot be recalled.</p>
           <div className="flex flex-wrap gap-4"><label className="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={announcement.enabled} onChange={(event) => setAnnouncement({ ...announcement, enabled: event.target.checked })} />Announcement enabled</label><label className="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={announcement.publicVisible} onChange={(event) => setAnnouncement({ ...announcement, publicVisible: event.target.checked })} />Show on public pricing page</label></div>
           <button disabled={busy || loading} className="btn btn-primary min-h-11 px-5 text-sm">{announcement.id ? 'Save announcement changes' : 'Create announcement'}</button>
         </form>

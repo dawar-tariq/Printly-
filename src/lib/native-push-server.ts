@@ -1,6 +1,7 @@
 import 'server-only';
 import { createHash, createPrivateKey, createSign, timingSafeEqual } from 'node:crypto';
 import { ISOLATED_TEST_PROJECT, ISOLATED_TEST_SITE, ISOLATED_TEST_SUPABASE, isolatedTestDeploymentAllowed } from './isolated-test-environment.mjs';
+import { contentSchema, notificationTypes, type NotificationType } from './native-notification-management';
 
 // Fixed, separate identities: a QA installation must never register with or
 // receive messages from the production Firebase project.
@@ -22,7 +23,9 @@ type Credentials = { clientEmail: string; privateKey: string };
 export type NativePushConfig = { credentials: Credentials; cronSecret: string; target: NativePushTarget };
 export type NativePushDelivery = {
   delivery_id: string; lease_token: string; event_id: string; binding_id: string;
-  fid: string; kind: 'order' | 'payment'; expires_at: string;
+  fid: string; kind: 'order' | 'payment' | NotificationType; expires_at: string;
+  // Loaded by the worker only while this delivery's lease and membership are valid.
+  campaign?: unknown;
 };
 export type PushOutcome = 'sent' | 'gone' | 'retry' | 'drop';
 
@@ -103,16 +106,25 @@ export async function nativePushAccessToken(credentials: Credentials, fetcher: t
   return result.access_token;
 }
 
-/** Generic data-only notifications let the app reject messages after sign-out. */
+/** Data-only messages preserve the app's consent and session display gate. */
 export function nativePushMessage(delivery: NativePushDelivery, target: NativePushTarget, now = Date.now()): Record<string, unknown> | null {
   if (target !== 'production' && target !== 'isolated') return null;
   const seconds = Math.min(86_400, Math.floor((Date.parse(delivery.expires_at) - now) / 1000));
   if (!uuid.test(delivery.delivery_id) || !uuid.test(delivery.lease_token) || !uuid.test(delivery.event_id) ||
-      !uuid.test(delivery.binding_id) || !fidPattern.test(delivery.fid) || !['order', 'payment'].includes(delivery.kind) ||
-      !Number.isFinite(seconds) || seconds <= 0) return null;
+      !uuid.test(delivery.binding_id) || !fidPattern.test(delivery.fid) || !Number.isFinite(seconds) || seconds <= 0) return null;
+  let data: Record<string, string>;
+  if (delivery.kind === 'order' || delivery.kind === 'payment') {
+    data = { version: '1', kind: delivery.kind, event: delivery.event_id, binding: delivery.binding_id };
+  } else {
+    if (!notificationTypes.includes(delivery.kind)) return null;
+    const payload = contentSchema.safeParse(delivery.campaign);
+    if (!payload.success || payload.data.notification_type !== delivery.kind) return null;
+    data = { version: '2', kind: delivery.kind, event: delivery.event_id, binding: delivery.binding_id,
+      title: payload.data.title, body: payload.data.message, action: payload.data.tap_action, image: payload.data.image_url ?? '' };
+  }
+  if (Buffer.byteLength(JSON.stringify(data), 'utf8') > 3_500) return null;
   return { message: {
-    fid: delivery.fid,
-    data: { version: '1', kind: delivery.kind, event: delivery.event_id, binding: delivery.binding_id },
+    fid: delivery.fid, data,
     android: { priority: 'HIGH', ttl: `${seconds}s`, restricted_package_name: targets[target].androidPackage },
   } };
 }

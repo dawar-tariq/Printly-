@@ -48,6 +48,7 @@ function endpoint(method: string, p: string[]): Handler | null {
     if (method === 'GET' && key === 'recovery') return recovery.GET;
     if (method === 'POST' && key === 'push-device') return pushDevice.POST;
     if (method === 'DELETE' && key === 'push-device') return pushDevice.DELETE;
+    if (method === 'POST' && key === 'push-display') return pushDevice.POST_DISPLAY;
     if (method === 'PUT' && key === 'availability') return availability.PUT;
     if (method === 'GET' && key === 'qr') return qr.GET;
     if (method === 'GET' && key === 'standee') return standee.GET;

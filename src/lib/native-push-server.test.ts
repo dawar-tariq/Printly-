@@ -121,6 +121,17 @@ describe('native FCM sender', () => {
     expect(await sendNativePush(delivery, 'private-access-token', target, fetcher)).toBe('sent');
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
+  it('sends validated managed content only with a fixed action and safe image', () => {
+    const campaign = { title: 'Scheduled notice', message: 'Hello shops', notification_type: 'maintenance', tap_action: 'maintenance', image_url: null };
+    const managed: NativePushDelivery = { ...delivery, kind: 'maintenance', campaign };
+    const message = nativePushMessage(managed, 'production')! as { message: { data: Record<string, string> } };
+    expect(message.message.data).toEqual({ version: '2', kind: 'maintenance', event: delivery.event_id, binding: delivery.binding_id,
+      title: 'Scheduled notice', body: 'Hello shops', action: 'maintenance', image: '' });
+    expect(nativePushMessage({ ...managed, campaign: { ...campaign, tap_action: 'https://attacker.test' } }, 'production')).toBeNull();
+    expect(nativePushMessage({ ...managed, campaign: { ...campaign, notification_type: 'update' } }, 'production')).toBeNull();
+    expect(nativePushMessage({ ...managed, campaign: { ...campaign, image_url: 'http://localhost/private.png' } }, 'production')).toBeNull();
+    expect(nativePushMessage({ ...managed, campaign: undefined }, 'production')).toBeNull();
+  });
   it('rejects an unknown target rather than sending to either project', async () => {
     const target = 'unexpected' as NativePushTarget;
     const fetcher = vi.fn() as unknown as typeof fetch;

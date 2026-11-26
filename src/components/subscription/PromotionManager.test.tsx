@@ -68,6 +68,7 @@ describe('promotion manager', () => {
     expect(writes[0].promo).toMatchObject({ discount_value: 12500, terms: ['yearly'], max_uses_per_shop: null });
   });
   it('creates a public announcement linked to an existing code', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
     offers.promos = [{ id: promoId, code: 'THANKS', discount_type: 'percent', discount_value: 25, terms: ['monthly'],
       starts_at: null, ends_at: null, max_uses: null, max_uses_per_shop: 1, enabled: true, version: 0, approved_uses: 0, reserved_uses: 0 }];
     render(<PromotionManager plan={plan} />);
@@ -82,7 +83,21 @@ describe('promotion manager', () => {
       starts_at: null, ends_at: null, enabled: true, public_visible: true,
     } });
   });
+  it('requires confirmation before saving an enabled native-push announcement', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    render(<PromotionManager plan={plan} />);
+    await screen.findByText('No announcements yet.');
+    fireEvent.change(screen.getByLabelText('Announcement title'), { target: { value: 'Notice' } });
+    fireEvent.change(screen.getByLabelText('Announcement message'), { target: { value: 'Hello shops' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create announcement' }));
+    expect(confirm).toHaveBeenCalledWith(expect.stringMatching(/may queue a notification/i));
+    expect(writes).toEqual([]);
+    confirm.mockReturnValue(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Create announcement' }));
+    await waitFor(() => expect(writes).toHaveLength(1));
+  });
   it('keeps an older linked code when editing or pausing its announcement', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
     offers.announcements = [{ id: '22222222-2222-4222-8222-222222222222', title: 'Older offer', message: 'Hello', promo_id: promoId,
       promo_code: 'OLDSALE', starts_at: null, ends_at: null, enabled: true, public_visible: true, version: 3 }];
     render(<PromotionManager plan={plan} />);

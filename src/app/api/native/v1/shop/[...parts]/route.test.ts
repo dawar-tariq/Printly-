@@ -164,6 +164,17 @@ describe('native bearer gateway', () => {
       expect(fixture.rpcCalls.find((call) => call.name === 'register_native_push_device')?.args).toEqual({
         p_user: fixture.userA, p_shop: fixture.shopA, p_binding: binding, p_fid: 'A'.repeat(22),
       });
+      const v2 = { ...body, version_code: 5, version_name: '2.1.0' };
+      expect((await POST(request(path, 'tokenA', 'POST', v2), context(path))).status).toBe(200);
+      expect(fixture.rpcCalls.find((call) => call.name === 'register_native_push_device_v2')?.args).toEqual({
+        p_user: fixture.userA, p_shop: fixture.shopA, p_binding: binding, p_fid: 'A'.repeat(22), p_version_code: 5, p_version_name: '2.1.0',
+      });
+      expect((await POST(request(path, 'tokenA', 'POST', { ...v2, version_code: -1 }), context(path))).status).toBe(422);
+      const receipt = { binding_id: binding, event_id: fixture.orderA };
+      expect((await POST(request('push-display', null, 'POST', receipt), context('push-display'))).status).toBe(401);
+      expect((await DELETE(request(path, null, 'DELETE', { binding_id: binding }), context(path))).status).toBe(401);
+      expect((await POST(request('push-display', 'tokenA', 'POST', receipt), context('push-display'))).status).toBe(200);
+      expect(fixture.rpcCalls.find((call) => call.name === 'record_native_push_display')?.args).toEqual({ p_user: fixture.userA, p_binding: binding, p_event: fixture.orderA });
       fixture.pushConfigured = false;
       expect((await POST(request(path, 'tokenA', 'POST', body), context(path))).status).toBe(503);
       fixture.pushRateAllowed = false;

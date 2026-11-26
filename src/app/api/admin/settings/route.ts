@@ -27,7 +27,7 @@ export async function PUT(req: Request) {
   if (!parsed.success) return jsonError(422, 'validation', 'Invalid settings');
   const rows = Object.entries(parsed.data)
     .filter((entry): entry is [string, number | boolean] => entry[1] !== undefined)
-    .map(([key, value]) => ({ key, value }));
+    .map(([key, value]) => ({ key, value, updated_by: session.user.id }));
   if (!rows.length) return jsonOk({ ok: true });
   const admin = createAdminSupabase();
   // One statement makes the settings update atomic. Values are JSON numbers or

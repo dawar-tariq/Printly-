@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const getStaffContext = vi.hoisted(() => vi.fn());
+const currentNativeAppRelease = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/native-app-update-server', () => ({ currentNativeAppRelease }));
 vi.mock('@/lib/api', () => ({
   getStaffContext,
   jsonError: (status: number, code: string, message: string) => Response.json({ error: { code, message } }, { status }),
@@ -18,7 +20,8 @@ const configured = {
 };
 
 beforeEach(() => {
-  getStaffContext.mockReset();
+  getStaffContext.mockReset(); currentNativeAppRelease.mockReset();
+  vi.stubEnv('PRINTLY_NATIVE_RELEASE_MANAGER_ENABLED', '0');
   for (const [key, value] of Object.entries(configured)) vi.stubEnv(key, value);
 });
 afterEach(() => vi.unstubAllEnvs());
@@ -56,9 +59,22 @@ describe('shop Android release metadata', () => {
     const response = await GET();
     expect(response.status).toBe(200); await checkPrivate(response);
     expect(await response.json()).toMatchObject({ available: true, versionCode: 4, sha256: 'a'.repeat(64), downloadUrl: configured.PRINTLY_ANDROID_APK_URL });
+    expect(currentNativeAppRelease).not.toHaveBeenCalled();
     vi.stubEnv('PRINTLY_ANDROID_APK_SHA256', '');
     const unavailable = await GET();
     expect(await unavailable.json()).toEqual({ available: false });
     await checkPrivate(unavailable);
+  });
+  it('never resurrects the legacy release after managed unpublish or a database failure', async () => {
+    vi.stubEnv('PRINTLY_NATIVE_RELEASE_MANAGER_ENABLED', '1');
+    getStaffContext.mockResolvedValue({ isAdmin: false, membershipError: false, shopIds: ['shop'] });
+    currentNativeAppRelease.mockResolvedValueOnce({ available: false }).mockResolvedValueOnce(null);
+    const unpublished = await GET();
+    expect(await unpublished.json()).toEqual({ available: false });
+    await checkPrivate(unpublished);
+    const error = await GET();
+    expect(error.status).toBe(503);
+    expect((await error.json()).error.code).toBe('unavailable');
+    await checkPrivate(error);
   });
 });

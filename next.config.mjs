@@ -19,7 +19,9 @@ const contentSecurityPolicy = [
   "frame-ancestors 'none'",
   "script-src 'self' 'unsafe-inline' https://www.dropbox.com",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https://*.supabase.co https://*.dropbox.com https://*.dropboxusercontent.com",
+  // The admin preview accepts only public images in this repository; pin the
+  // CSP to the same repository prefix rather than allowing all GitHub images.
+  "img-src 'self' data: blob: https://*.supabase.co https://*.dropbox.com https://*.dropboxusercontent.com https://raw.githubusercontent.com/dawar-tariq/Printly-/",
   "font-src 'self' data:",
   "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.dropbox.com https://*.dropboxapi.com https://*.dropboxusercontent.com",
   "frame-src 'self' blob: https://www.dropbox.com https://*.dropbox.com",
@@ -61,8 +63,12 @@ const nextConfig = {
     }];
   },
   images: { remotePatterns: [{ protocol: 'https', hostname: '*.supabase.co' }] },
-  // The standee renderer loads local font files at runtime in the serverless function.
-  outputFileTracingIncludes: { '/api/shop/standee': ['./src/assets/standee-fonts/*.ttf'] },
+  // The standee renderer loads local fonts. The temporary isolated-QA source
+  // transport reads only the reviewed migration, whose hash is pinned in code.
+  outputFileTracingIncludes: {
+    '/api/shop/standee': ['./src/assets/standee-fonts/*.ttf'],
+    '/api/native/v1/qa-migration-source': ['./supabase/migrations/0027_native_notification_management.sql'],
+  },
   serverExternalPackages: ['@resvg/resvg-js', 'pdfkit', 'svg-to-pdfkit', 'fontkit', 'bidi-js'],
   experimental: {},
 };

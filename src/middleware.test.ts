@@ -85,6 +85,33 @@ describe('cross-origin mutation protection', () => {
 });
 
 describe('platform maintenance', () => {
+  it('exempts the public update feed and the separately authenticated native worker', async () => {
+    for (const maintenance of ['on', 'unknown'] as const) {
+      state.maintenance = maintenance;
+      for (const path of ['/api/native/v1/app-release', '/api/cron/native-order-push']) {
+        expect((await visit(path)).headers.get('x-middleware-next'), path).toBe('1');
+        expect((await visit(`${path}/extra`)).status, `${path}/extra`).toBe(503);
+      }
+      const crossOrigin = await middleware(new NextRequest('https://printly.test/api/cron/native-order-push', {
+        method: 'POST', headers: { origin: 'https://evil.test', 'sec-fetch-site': 'cross-site' },
+      }));
+      expect(crossOrigin.status).toBe(403);
+    }
+  });
+  it('allows only authenticated-gateway opt-out and display receipts through maintenance, not registration or shop access', async () => {
+    for (const maintenance of ['on', 'unknown'] as const) {
+      state.maintenance = maintenance;
+      for (const [path, method] of [['push-device', 'DELETE'], ['push-display', 'POST']]) {
+        const url = `https://printly.test/api/native/v1/shop/${path}`;
+        expect((await middleware(new NextRequest(url, { method }))).headers.get('x-middleware-next')).toBe('1');
+        expect((await middleware(new NextRequest(`${url}/extra`, { method }))).status).toBe(503);
+        expect((await middleware(new NextRequest(url, { method, headers: { origin: 'https://evil.test', 'sec-fetch-site': 'cross-site' } }))).status).toBe(403);
+      }
+      expect((await middleware(new NextRequest('https://printly.test/api/native/v1/shop/push-device', { method: 'POST' }))).status).toBe(503);
+      expect((await middleware(new NextRequest('https://printly.test/api/native/v1/shop/push-display', { method: 'GET' }))).status).toBe(503);
+      expect((await visit('/api/native/v1/shop/me')).status).toBe(503);
+    }
+  });
   it('keeps the public Android association reachable even if maintenance is on or its state is unknown', async () => {
     for (const maintenance of ['on', 'unknown'] as const) {
       state.maintenance = maintenance;

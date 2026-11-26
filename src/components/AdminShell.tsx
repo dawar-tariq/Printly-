@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Logo } from '@/components/Logo';
 import { SignOutButton } from '@/components/SignOutButton';
-import { LayoutDashboard, Store, ShieldAlert, CreditCard, Settings, MessageCircle } from 'lucide-react';
+import { LayoutDashboard, Store, ShieldAlert, CreditCard, Settings, MessageCircle, BellRing } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const TABS = [
@@ -13,6 +13,7 @@ const TABS = [
   { href: '/admin/disputes', label: 'Disputes', icon: ShieldAlert },
   { href: '/admin/support', label: 'Support', icon: MessageCircle },
   { href: '/admin/subscriptions', label: 'Subscription', icon: CreditCard },
+  { href: '/admin/notifications', label: 'Notifications & updates', icon: BellRing },
   { href: '/admin/settings', label: 'Settings', icon: Settings },
 ];
 

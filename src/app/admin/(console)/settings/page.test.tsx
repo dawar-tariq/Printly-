@@ -13,6 +13,7 @@ let writes: Array<Record<string, unknown>>;
 beforeEach(() => {
   maintenance = false;
   writes = [];
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
   vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
     if (init?.method === 'PUT') {
       const body = JSON.parse(String(init.body));
@@ -23,7 +24,7 @@ beforeEach(() => {
     return Response.json({ settings: { ...defaults, maintenance } });
   }));
 });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('admin maintenance settings', () => {
   it('shows the saved state and applies both enable and disable only after saving', async () => {
@@ -39,6 +40,17 @@ describe('admin maintenance settings', () => {
     fireEvent.click(screen.getByRole('button', { name: /saved|save settings/i }));
     expect(await screen.findByText('Currently off')).toBeTruthy();
     expect(writes[1]).toEqual({ maintenance: false });
+  });
+
+  it('requires confirmation before enabling maintenance and its possible native notice', async () => {
+    vi.mocked(window.confirm).mockReturnValue(false);
+    render(<AdminSettingsPage />);
+    await screen.findByText('Currently off');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Enable maintenance mode' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save settings' }));
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringMatching(/may also queue a notification/i));
+    expect(writes).toEqual([]);
+    expect(maintenance).toBe(false);
   });
 
   it('does not overwrite a maintenance change made by another admin when saving rates', async () => {

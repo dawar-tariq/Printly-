@@ -53,13 +53,20 @@ export async function middleware(req: NextRequest) {
   }
   const path = req.nextUrl.pathname.replace(/\/+$/, '') || '/';
   const adminPage = isAdminPage(path);
+  // These exact native calls still pass through the bearer-verifying gateway.
+  // Opt-out must be possible during maintenance; a best-effort display receipt
+  // may also arrive while a maintenance notification is being shown.
+  const nativePushCleanup = path === '/api/native/v1/shop/push-device' && req.method === 'DELETE';
+  const nativePushReceipt = path === '/api/native/v1/shop/push-display' && req.method === 'POST';
 
   // Android verifies this public, non-secret association even during maintenance.
   if (path === '/.well-known/assetlinks.json') return NextResponse.next();
 
   // Admin sign-in, console and APIs remain available so maintenance can always
   // be turned off. Their existing authentication and authorization still apply.
-  if (!adminPage && !isAdminApi(path)) {
+  if (!adminPage && !isAdminApi(path) && path !== '/api/native/v1/app-release' && path !== '/api/cron/native-order-push' && !nativePushCleanup && !nativePushReceipt) {
+    // The public update policy, authenticated worker and narrow native
+    // cleanup/receipt calls must remain reachable during maintenance.
     const maintenance = await readMaintenanceState();
     if (path === MAINTENANCE_STATUS_PATH) return maintenanceStatusResponse(maintenance);
     if (maintenance !== 'off') {

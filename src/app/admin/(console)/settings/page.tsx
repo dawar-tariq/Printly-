@@ -52,6 +52,7 @@ export default function AdminSettingsPage() {
 
   const save = async () => {
     if (saving || savedMaintenance === null || !savedRates) return;
+    if (maintenance && !savedMaintenance && !window.confirm('Enable maintenance for customers and shops? This may also queue a notification to opted-in native devices. A send already in flight cannot be recalled.')) return;
     setSaving(true); setSaved(false); setSaveError(null);
     try {
       // Save only fields changed on this page. A maintenance toggle must not
@@ -113,7 +114,7 @@ export default function AdminSettingsPage() {
               <b className="text-sm">Maintenance mode</b>
               <span className={savedMaintenance ? 'chip bg-amber-100 text-amber-800' : 'chip bg-green-100 text-green-800'}>Currently {savedMaintenance ? 'on' : 'off'}</span>
             </div>
-            <p className="mt-2 text-xs leading-relaxed text-neutral-600">When enabled, customers and shops see a maintenance page and cannot use the site. The admin console stays available.</p>
+            <p className="mt-2 text-xs leading-relaxed text-neutral-600">When enabled, customers and shops see a maintenance page and cannot use the site. The admin console stays available. Enabling maintenance may queue a best-effort native notice; delivery requires an enabled worker and independent scheduler. Turning it off stops remaining work where possible; sends already in flight or accepted cannot be recalled.</p>
             <p className="mt-2 text-xs leading-relaxed text-neutral-500">Requests already in progress may still finish. Payments made outside Printly cannot be stopped.</p>
             <label className="mt-3 flex cursor-pointer items-center gap-2 text-sm font-semibold">
               <input type="checkbox" checked={maintenance} onChange={(e) => setMaintenance(e.target.checked)} className="h-4 w-4 accent-orange-600" />
