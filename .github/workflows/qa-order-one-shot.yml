@@ -1,0 +1,40 @@
+# TEMPORARY isolated QA preflight, no live delivery. Remove after test.
+name: Check isolated order notification preflight
+on:
+  push:
+    branches: ['arena/309fdf51-printly']
+    paths: ['.github/workflows/qa-order-one-shot.yml']
+permissions: {}
+jobs:
+  preflight:
+    if: github.repository == 'dawar-tariq/Printly-' && github.ref == 'refs/heads/arena/309fdf51-printly'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check isolation, disabled worker and validation-only Firebase access
+        env:
+          QA_WORKER_SECRET: ${{ secrets.PRINTLY_QA_CRON_E54FF1CB5D3D }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          const site = 'https://printly-native-test.vercel.app';
+          const secret = process.env.QA_WORKER_SECRET || '';
+          if (!/^[A-Za-z0-9_-]{32,128}$/.test(secret)) throw new Error('QA secret is missing or invalid');
+          const options = { redirect: 'error', signal: AbortSignal.timeout(30000) };
+          const diagnostic = await fetch(`${site}/api/native/v1/test-environment`, options);
+          const isolation = await diagnostic.json();
+          if (!diagnostic.ok || isolation.isolated_test !== true || isolation.supabase_url !== 'https://rahfmpsdbwbktlobntkm.supabase.co' || isolation.public_auth_check !== 'ok' || isolation.server_database_read !== 'ok') throw new Error('Isolation check failed');
+          const headers = { Authorization: `Bearer ${secret}` };
+          const worker = await fetch(`${site}/api/cron/native-order-push`, { ...options, headers });
+          if (worker.status !== 503) throw new Error('General worker is not safely disabled');
+          let preflight;
+          for (let i = 0; i < 24; i++) {
+            preflight = await fetch(`${site}/api/cron/native-qa-order-test`, { redirect: 'error', signal: AbortSignal.timeout(30000), headers });
+            if (preflight.status !== 404) break;
+            await new Promise(resolve => setTimeout(resolve, 5000));
+          }
+          const validation = await preflight.json();
+          if (!preflight.ok || validation.oauth !== 'ok' || validation.validation !== 'ok') throw new Error('QA OAuth/FCM validation failed');
+          console.log('Isolated target, disabled worker and no-send FCM validation passed.');
+          NODE
