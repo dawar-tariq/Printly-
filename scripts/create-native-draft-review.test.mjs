@@ -13,8 +13,8 @@ const test = process.env.VITEST ? (await import('vitest')).test : nodeTest;
 const script = resolve('scripts/create-native-draft-review.sh');
 const commit = 'a'.repeat(40);
 const certificate = 'c'.repeat(64);
-const tag = 'native-v2.1.0';
-const file = 'Printly-for-Shops-2.1.0.apk';
+const tag = 'native-v2.1.1';
+const file = 'Printly-for-Shops-2.1.1.apk';
 
 function fixture({ before = [], tagStatus = 2, corruptEvidence = false, corruptUploadedDigest = false, corruptDownload = false, wrongSigner = false, debuggable = false, repository = 'dawar-tariq/Printly-' } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'printly-draft-test-'));
@@ -45,7 +45,7 @@ esac
 `, { mode: 0o755 });
   writeFileSync(join(tools, 'apksigner'), '#!/bin/sh\nprintf "Signer #1 certificate SHA-256 digest: %s\\n" "$MOCK_CERT"\n', { mode: 0o755 });
   writeFileSync(join(tools, 'aapt'), `#!/bin/sh
-printf "package: name='io.github.dawartariq.printly.owner' versionCode='5' versionName='2.1.0' platformBuildVersionName='16'\\n"
+printf "package: name='io.github.dawartariq.printly.owner' versionCode='6' versionName='2.1.1' platformBuildVersionName='16'\\n"
 if [ "$MOCK_DEBUGGABLE" = 1 ]; then echo application-debuggable; fi
 `, { mode: 0o755 });
   const result = spawnSync('bash', [script, apk, evidence], {
@@ -53,8 +53,8 @@ if [ "$MOCK_DEBUGGABLE" = 1 ]; then echo application-debuggable; fi
     env: {
       ...process.env, PATH: `${bin}:${process.env.PATH}`, RUNNER_TEMP: root, ANDROID_HOME: android,
       GITHUB_REPOSITORY: repository, GITHUB_REF: 'refs/heads/arena/309fdf51-printly',
-      GITHUB_EVENT_NAME: 'push', GITHUB_SHA: commit, REQUESTED_VERSION_NAME: '2.1.0',
-      REQUESTED_VERSION_CODE: '5', EXPECTED_CERTIFICATE: certificate, GH_TOKEN: 'fake-test-only',
+      GITHUB_EVENT_NAME: 'push', GITHUB_SHA: commit, REQUESTED_VERSION_NAME: '2.1.1',
+      REQUESTED_VERSION_CODE: '6', EXPECTED_CERTIFICATE: certificate, GH_TOKEN: 'fake-test-only',
       MOCK_TAG_STATUS: String(tagStatus), MOCK_CERT: wrongSigner ? 'e'.repeat(64) : certificate,
       MOCK_DEBUGGABLE: debuggable ? '1' : '0', MOCK_DOWNLOAD: join(root, 'downloaded.apk'),
       MOCK_CREATED: join(root, 'created'), MOCK_CALL: join(root, 'call'),
