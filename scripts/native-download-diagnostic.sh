@@ -27,4 +27,5 @@ if not failed:
     print(f'::notice title=Download diagnostic status::{text}')
 PY
 [ "$result" -eq 0 ] || exit "$result"
-python3 ci-verify-instrumented-case.py io.github.dawartariq.printly.owner.nativeapp.NativeDownloadDiagnostic downloadPublicAssetWithUpdaterNetworkPath
+python3 ci-verify-instrumented-case.py io.github.dawartariq.printly.owner.nativeapp.NativeDownloadDiagnostic downloadPublicAssetWithUpdaterNetworkPath || exit 1
+python3 ci-verify-instrumented-case.py io.github.dawartariq.printly.owner.nativeapp.NativeDownloadDiagnostic updaterDownloadsAndRejectsMismatchedDebugIdentity

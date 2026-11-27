@@ -13,6 +13,24 @@ import org.junit.runner.RunWith
 /** Public APK read-only network diagnostic. Never signs in or uses shop data. */
 @RunWith(AndroidJUnit4::class)
 class NativeDownloadDiagnostic {
+    @Test fun updaterDownloadsAndRejectsMismatchedDebugIdentity() = runBlocking {
+        val context = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
+        val release = NativeAppRelease(
+            9, "2.1.3", 1, context.packageName,
+            "https://github.com/dawar-tariq/Printly-/releases/download/native-v2.1.3/Printly-for-Shops-2.1.3.apk",
+            "afb2a2e0eb27a0ff40033772e46a4a0764def12baafd5866947d8c687536e356",
+            "", false, "2026-01-01T00:00:00Z"
+        )
+        try {
+            downloadVerifiedUpdate(context, release)
+            throw AssertionError("Mismatched debug identity must be rejected")
+        } catch (error: AppError) {
+            // The debug app has a different package/signature and the test release
+            // code differs from the archive. All must fail closed after download.
+            assertEquals("Expected identity rejection after full download", "update_identity", error.code)
+        }
+    }
+
     @Test fun downloadPublicAssetWithUpdaterNetworkPath() = runBlocking {
         val expected = "afb2a2e0eb27a0ff40033772e46a4a0764def12baafd5866947d8c687536e356"
         val client = secureHttpClient.newBuilder().connectTimeout(15, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).callTimeout(180, TimeUnit.SECONDS).build()
