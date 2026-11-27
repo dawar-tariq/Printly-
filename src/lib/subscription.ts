@@ -48,7 +48,7 @@ export interface SubscriptionPurchase {
 }
 
 export function termLabel(term: EntitlementTerm | null | undefined): string {
-  return term === 'grace' ? '30-day transition' : SUBSCRIPTION_TERMS.find((item) => item.value === term)?.label ?? 'Not subscribed';
+  return term === 'grace' ? '30-day free access' : SUBSCRIPTION_TERMS.find((item) => item.value === term)?.label ?? 'Not subscribed';
 }
 
 /** Fail closed on missing or malformed expiry. Permanent access is an explicit admin grant. */

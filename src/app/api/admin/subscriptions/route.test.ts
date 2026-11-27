@@ -10,6 +10,7 @@ vi.mock('@/lib/supabase', () => ({ createAdminSupabase: () => ({
 import { PUT } from './route';
 import { POST as review } from './review/route';
 import { POST as permanent } from './permanent/route';
+import { POST as pilot } from './pilot/route';
 
 const id = '11111111-1111-4111-8111-111111111111';
 const request = (body: unknown, method = 'POST') => new Request('https://printly.test/api', { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
@@ -21,6 +22,7 @@ describe('admin subscription APIs', () => {
     expect((await PUT(request({ expected_version: 0, monthly_paise: 100 }, 'PUT'))).status).toBe(403);
     expect((await review(request({ purchase_id: id, action: 'approve' }))).status).toBe(403);
     expect((await permanent(request({ shop_id: id, enabled: true }))).status).toBe(403);
+    expect((await pilot(request({ shop_id: id }))).status).toBe(403);
     expect(state.rpcs).toEqual([]);
   });
   it('validates prices, UPI, reminders, version, and rejects legacy commission fields', async () => {
@@ -43,6 +45,13 @@ describe('admin subscription APIs', () => {
     expect(state.rpcs[0]).toEqual({ name: 'review_subscription_purchase', args: { p_purchase_id: id, p_actor: 'admin-user', p_action: 'approve', p_note: 'verified' } });
     state.error = { message: 'REASON_REQUIRED' };
     expect((await review(request({ purchase_id: id, action: 'reject' }))).status).toBe(422);
+  });
+  it('grants a pilot only to the selected shop, with authenticated actor and strict input', async () => {
+    expect((await pilot(request({ shop_id: id, actor: 'forged' }))).status).toBe(422);
+    expect((await pilot(request({ shop_id: id }))).status).toBe(200);
+    expect(state.rpcs[0]).toEqual({ name: 'grant_shop_pilot', args: { p_shop_id: id, p_actor: 'admin-user' } });
+    state.error = { message: 'PILOT_ACTIVE_ACCESS' };
+    expect((await pilot(request({ shop_id: id }))).status).toBe(409);
   });
   it('grants or revokes permanent access without a purchase and reports database failures', async () => {
     expect((await permanent(request({ shop_id: id, enabled: true, note: ' family ' }))).status).toBe(200);

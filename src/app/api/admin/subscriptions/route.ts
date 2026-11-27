@@ -46,16 +46,18 @@ export async function GET(req: Request) {
   const shopRows = shops.data ?? [];
   const purchaseRows = [...(pending.data ?? []), ...(history.data ?? [])];
   const ids = [...new Set([...shopRows.map((s) => s.id as string), ...purchaseRows.map((p) => p.shop_id as string)])];
-  const [entitlements, names] = ids.length ? await Promise.all([
+  const [entitlements, names, pilots] = ids.length ? await Promise.all([
     admin.from('shop_subscriptions').select('shop_id, term, started_at, expires_at, is_permanent, updated_at').in('shop_id', ids),
     admin.from('shops').select('id, name, short_code').in('id', ids),
-  ]) : [{ data: [], error: null }, { data: [], error: null }];
-  if (entitlements.error || names.error) return jsonError(503, 'db', 'Could not load shop subscriptions. Please retry.');
+    admin.from('shop_pilot_grants').select('shop_id, starts_at, ends_at').in('shop_id', ids),
+  ]) : [{ data: [], error: null }, { data: [], error: null }, { data: [], error: null }];
+  if (entitlements.error || names.error || pilots.error) return jsonError(503, 'db', 'Could not load shop subscriptions. Please retry.');
   const byShop = new Map((entitlements.data ?? []).map((s) => [s.shop_id, s]));
   const byId = new Map((names.data ?? []).map((s) => [s.id, s]));
+  const byPilot = new Map((pilots.data ?? []).map((p) => [p.shop_id, p]));
   return jsonOk({
     plan: plan.data,
-    shops: shopRows.map((s) => ({ ...s, subscription: byShop.get(s.id) ?? null })),
+    shops: shopRows.map((s) => ({ ...s, subscription: byShop.get(s.id) ?? null, pilot: byPilot.get(s.id) ?? null })),
     pending: (pending.data ?? []).map((p) => ({ ...p, shop: byId.get(p.shop_id) ?? null, subscription: byShop.get(p.shop_id) ?? null })),
     history: (history.data ?? []).map((p) => ({ ...p, shop: byId.get(p.shop_id) ?? null })),
     pagination: { page, pages: Math.max(1, Math.ceil((shops.count ?? 0) / PAGE_SIZE)), count: shops.count ?? 0,

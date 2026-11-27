@@ -25,6 +25,7 @@ export function subscriptionMutationError(error: { message?: string; code?: stri
   if (message.includes('OWNER_REQUIRED')) return jsonError(403, 'owner_required', 'Only the shop owner can purchase or report a subscription payment.');
   if (message.includes('ADMIN_REQUIRED')) return jsonError(403, 'forbidden', 'Admin only.');
   if (message.includes('SUBSCRIPTION_NOT_CONFIGURED')) return jsonError(409, 'not_configured', 'This term is not available yet. Please contact Printly.');
+  if (message.includes('PILOT_ACTIVE_ACCESS')) return jsonError(409, 'pilot_active_access', 'This shop already has active access. The pilot cannot replace or shorten it; grant the pilot after that access expires.');
   if (message.includes('PERMANENT_ACCESS')) return jsonError(409, 'permanent', 'This shop already has permanent access and does not need to purchase.');
   if (message.includes('INVALID_REFERENCE')) return jsonError(422, 'invalid_reference', 'Enter a valid UPI transaction reference (6–40 letters, digits or hyphens).');
   if (message.includes('DUPLICATE_REFERENCE')) return jsonError(409, 'duplicate_reference', 'This payment reference has already been submitted. Contact Printly if you need help.');
