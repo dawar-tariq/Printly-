@@ -154,8 +154,8 @@ jobs:
               if grep -qF "$value" "$RUNNER_TEMP/native-qa-resources.txt"; then echo 'Production Firebase identity found in QA resources.' >&2; exit 1; fi
             done
             for name in google_app_id google_api_key gcm_defaultSenderId project_id; do grep -qF "string/$name" "$RUNNER_TEMP/native-qa-resources.txt"; done
-            test "$("$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest version-code "$QA")" = '8'
-            test "$("$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest version-name "$QA")" = '2.1.3-isolated-test'
+            test "$("$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest version-code "$QA")" = '10'
+            test "$("$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest version-name "$QA")" = '2.1.4-isolated-test'
             "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$QA" > "$RUNNER_TEMP/native-qa-badging.txt"
             grep -F "application-label:'Printly Isolated Test'" "$RUNNER_TEMP/native-qa-badging.txt"
             grep -F 'application-debuggable' "$RUNNER_TEMP/native-qa-badging.txt"
@@ -243,14 +243,14 @@ jobs:
           PASSWORD=$(openssl rand -hex 32)
           keytool -genkeypair -noprompt -keystore "$KEY" -storetype PKCS12 -storepass "$PASSWORD" -keypass "$PASSWORD" -alias printly-owner-release -keyalg RSA -keysize 2048 -validity 1 -dname 'CN=Disposable Native Review CI'
           CERT=$(keytool -exportcert -keystore "$KEY" -storetype PKCS12 -storepass "$PASSWORD" -alias printly-owner-release | sha256sum | cut -d' ' -f1)
-          jq -n --arg cert "$CERT" '{purpose:"signed-review-only",variant:"native",package:"io.github.dawartariq.printly.owner",request_id:"native-ci-review-1234",version_code:8,version_name:"2.1.3",reference_certificate_sha256:$cert}' > "$REQUEST"
+          jq -n --arg cert "$CERT" '{purpose:"signed-review-only",variant:"native",package:"io.github.dawartariq.printly.owner",request_id:"native-ci-review-1234",version_code:10,version_name:"2.1.4",reference_certificate_sha256:$cert}' > "$REQUEST"
           : > "$OUTPUT"
           GITHUB_OUTPUT="$OUTPUT" EXPECTED_CERTIFICATE="$CERT" ../../scripts/check-native-review-request.sh "$REQUEST"
-          grep -qx 'version_code=8' "$OUTPUT"
-          grep -qx 'version_name=2.1.3' "$OUTPUT"
-          KEYSTORE_BASE64="$(base64 -w0 < "$KEY")" PRINTLY_ANDROID_KEYSTORE_PASSWORD="$PASSWORD" EXPECTED_CERTIFICATE="$CERT" REQUESTED_VERSION_CODE=8 GITHUB_EVENT_NAME=push ../../scripts/sign-android-review.sh
+          grep -qx 'version_code=10' "$OUTPUT"
+          grep -qx 'version_name=2.1.4' "$OUTPUT"
+          KEYSTORE_BASE64="$(base64 -w0 < "$KEY")" PRINTLY_ANDROID_KEYSTORE_PASSWORD="$PASSWORD" EXPECTED_CERTIFICATE="$CERT" REQUESTED_VERSION_CODE=10 GITHUB_EVENT_NAME=push ../../scripts/sign-android-review.sh
           APK=app/build/outputs/apk/release/app-release.apk
-          test "$("$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest version-name "$APK")" = '2.1.3'
+          test "$("$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest version-name "$APK")" = '2.1.4'
           "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest print "$APK" > "$RUNNER_TEMP/native-review-manifest.xml"
           python3 check-manifest.py "$RUNNER_TEMP/native-review-manifest.xml" io.github.dawartariq.printly.owner
           unset PASSWORD CERT
