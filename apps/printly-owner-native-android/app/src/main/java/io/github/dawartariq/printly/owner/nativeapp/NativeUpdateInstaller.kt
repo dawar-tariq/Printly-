@@ -61,9 +61,11 @@ internal suspend fun downloadVerifiedUpdate(context: Context, release: NativeApp
     val client = secureHttpClient.newBuilder().connectTimeout(15, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).callTimeout(180, TimeUnit.SECONDS).build()
     var address = release.downloadUrl
     var redirects = 0
+    var failureStage = UpdateFailureStage.CONNECT
     try {
         var downloaded = false
         while (!downloaded) {
+            failureStage = UpdateFailureStage.CONNECT
             client.newCall(Request.Builder().url(address).get().header("Accept", "application/octet-stream").build()).execute().use { response ->
                 if (response.code in setOf(301, 302, 303, 307, 308)) {
                     val location = response.header("Location") ?: throw AppError("update_download", "The download destination could not be verified.")
@@ -75,19 +77,30 @@ internal suspend fun downloadVerifiedUpdate(context: Context, release: NativeApp
                     if (body.contentLength() > MAX_APK_BYTES) throw AppError("update_download", "The update is too large to download safely.")
                     val digest = MessageDigest.getInstance("SHA-256")
                     var total = 0L
-                    body.byteStream().use { input -> temp.outputStream().use { target ->
-                        val buffer = ByteArray(64 * 1024)
-                        while (true) {
-                            coroutineContext.ensureActive()
-                            val count = input.read(buffer)
-                            if (count < 0) break
-                            total += count
-                            if (total > MAX_APK_BYTES) throw AppError("update_download", "The update is too large to download safely.")
-                            digest.update(buffer, 0, count); target.write(buffer, 0, count)
+                    failureStage = UpdateFailureStage.READ
+                    body.byteStream().use { input ->
+                        failureStage = UpdateFailureStage.WRITE
+                        temp.outputStream().use { target ->
+                            val buffer = ByteArray(64 * 1024)
+                            while (true) {
+                                coroutineContext.ensureActive()
+                                failureStage = UpdateFailureStage.READ
+                                val count = input.read(buffer)
+                                if (count < 0) break
+                                total += count
+                                if (total > MAX_APK_BYTES) throw AppError("update_download", "The update is too large to download safely.")
+                                digest.update(buffer, 0, count)
+                                failureStage = UpdateFailureStage.WRITE
+                                target.write(buffer, 0, count)
+                            }
+                            failureStage = UpdateFailureStage.WRITE
                         }
-                    } }
+                        failureStage = UpdateFailureStage.READ
+                    }
                     if (total == 0L || !matchesVerifiedApkSha256(release.sha256, digest.digest())) throw AppError("update_hash", "The downloaded file did not match the expected SHA-256. Do not install it.")
+                    failureStage = UpdateFailureStage.VERIFY_IDENTITY
                     if (!verifyApkIdentity(context, temp, release)) throw AppError("update_identity", "The downloaded app’s package, version or signing certificate does not match this installation. Do not install it.")
+                    failureStage = UpdateFailureStage.PREPARE
                     if (!temp.renameTo(output)) throw AppError("update_storage", "Could not prepare the verified update.")
                     downloaded = true
                 }
@@ -96,7 +109,7 @@ internal suspend fun downloadVerifiedUpdate(context: Context, release: NativeApp
         output
     } catch (cancelled: CancellationException) { output.delete(); throw cancelled }
     catch (error: AppError) { output.delete(); throw error }
-    catch (_: Exception) { output.delete(); throw AppError("update_download", "Could not download the update securely. Please try again.") }
+    catch (error: Exception) { output.delete(); throw updateFailure(error, failureStage) }
     finally { temp.delete() }
 }
 

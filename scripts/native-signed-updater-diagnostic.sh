@@ -12,7 +12,7 @@ adb wait-for-device
 [ "$(adb shell id -u | tr -d '\r')" = 0 ]
 # Isolate the production app from its production API and auth hosts. The public
 # GitHub release asset remains reachable. Never use a real account or session.
-adb shell 'cp /system/etc/hosts /data/local/tmp/printly-hosts; printf "\n127.0.0.1 printly0.vercel.app\n127.0.0.1 lgfqetnfazawglwllymb.supabase.co\n" >> /data/local/tmp/printly-hosts; mount --bind /data/local/tmp/printly-hosts /system/etc/hosts'
+adb shell 'cp /system/etc/hosts /data/local/tmp/printly-hosts; printf "\n127.0.0.1 printly0.vercel.app\n127.0.0.1 lgfqetnfazawglwllymb.supabase.co\n" >> /data/local/tmp/printly-hosts; mount --bind /data/local/tmp/printly-hosts /system/etc/hosts; nsenter -t "$(pidof netd)" -m -- mount --bind /data/local/tmp/printly-hosts /system/etc/hosts'
 adb shell 'cat /system/etc/hosts' | grep -q '127.0.0.1 printly0.vercel.app'
 # Confirm the Android resolver actually uses the isolated hosts mapping.
 resolution=$(adb shell 'ping -c 1 -W 2 printly0.vercel.app' 2>&1 || true)
