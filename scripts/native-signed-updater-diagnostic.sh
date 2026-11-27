@@ -13,7 +13,7 @@ adb wait-for-device
 # The app has no account or session. Install first, then firewall its UID
 # before launch. Only IPv4 GitHub release endpoints on port 443 may be reached;
 # all other IPv4 and IPv6 connections (including production APIs) are rejected.
-adb install "$RUNNER_TEMP/printly-2.1.2.apk" >/dev/null
+adb install "$RUNNER_TEMP/old.apk" >/dev/null
 pkg=io.github.dawartariq.printly.owner
 uid=$(adb shell stat -c %u /data/user/0/$pkg | tr -d '\r')
 [[ "$uid" =~ ^[0-9]+$ ]]
@@ -42,10 +42,10 @@ adb shell iptables -C OUTPUT -m owner --uid-owner "$uid" -j PRINTLY_UPDATER_TEST
 adb shell ip6tables -C OUTPUT -m owner --uid-owner "$uid" -j REJECT
 python3 - "$RUNNER_TEMP/policy.xml" <<'PY'
 import html, json, sys
-policy = dict(available=True, versionCode=8, versionName='2.1.3', minimumVersionCode=1,
+policy = dict(available=True, versionCode=10, versionName='2.1.4', minimumVersionCode=1,
  packageName='io.github.dawartariq.printly.owner',
- downloadUrl='https://github.com/dawar-tariq/Printly-/releases/download/native-v2.1.3/Printly-for-Shops-2.1.3.apk',
- sha256='afb2a2e0eb27a0ff40033772e46a4a0764def12baafd5866947d8c687536e356',
+ downloadUrl='https://github.com/dawar-tariq/Printly-/releases/download/native-v2.1.4/Printly-for-Shops-2.1.4.apk',
+ sha256='275a728431b54af00d32522a094a15c1ae8ee4a5623f897b2579aaa90f92c0dc',
  notes='', mandatory=True, releasedAt='2026-01-01T00:00:00Z')
 open(sys.argv[1], 'w').write('<?xml version="1.0" encoding="utf-8" standalone="yes" ?><map><string name="policy">'+html.escape(json.dumps(policy), quote=False)+'</string></map>')
 PY
@@ -86,10 +86,10 @@ python3 - "$ui" <<'PY'
 import sys, xml.etree.ElementTree as ET
 texts = [n.attrib.get('text','') for n in ET.parse(sys.argv[1]).iter('node')]
 api = int(__import__('subprocess').check_output(['adb', 'shell', 'getprop', 'ro.build.version.sdk']).strip())
-expected = 'identity rejection' if api == 29 else 'success'
+expected = 'identity rejection' if api == 29 and __import__('os').environ['OLD_VERSION'] == '2.1.2' else 'success'
 for category, marker in [('success','Continue to Android installer'), ('generic download exception','Could not download the update securely. Please try again.'), ('identity rejection','The downloaded app’s package, version or signing certificate does not match this installation. Do not install it.'), ('hash rejection','The downloaded file did not match the expected SHA-256. Do not install it.')]:
     if any(marker in t for t in texts):
-        print(('::notice::' if category == expected else '::error::') + 'Signed 2.1.2 updater outcome: ' + category + '; expected historical behavior: ' + expected)
+        print(('::notice::' if category == expected else '::error::') + 'Signed updater outcome: ' + category + '; expected historical behavior: ' + expected)
         sys.exit(0 if category == expected else 1)
 print('::error::Signed updater outcome: unexpected or unfinished state')
 sys.exit(1)
