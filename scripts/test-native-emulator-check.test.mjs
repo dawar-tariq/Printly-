@@ -96,6 +96,7 @@ cases = {
  'debug': [
   ('SessionStoreInstrumentedTest','concurrentLegacyRestoresShareOneIdentityAndCanBeCleared'),
   ('DemoFlowTest','nativeShopNavigationAndExplicitPaymentReview'),
+  ('NativeLiveUpdatePayloadInstrumentedTest','productionPayloadParsesAndRequiresUpdateOnCodeSix'),
   ('NativeUpdateInstrumentedTest','cachedMandatoryPolicySurvivesOfflineAndMalformedUntilExplicitUnpublish'),
   ('NativeUpdateInstrumentedTest','optionalUpdateDoesNotBlockOrShowAnAutomaticDialog'),
   ('NativeUpdateInstrumentedTest','mandatoryScreenRequiresDownloadConfirmationAndInterceptsBack')],
@@ -157,7 +158,7 @@ test('offline harnesses target one acknowledged disposable emulator and require 
     ];
     assert.deepEqual(adbCalls, [...commonCalls, ...(script === permissionScript ? permissionCalls : [])]);
     assert.equal(gradleCalls.length, script === permissionScript ? 1 : 2);
-    assert.equal((result.stdout.match(/Verified instrumented test:/g) ?? []).length, script === permissionScript ? 1 : 8);
+    assert.equal((result.stdout.match(/Verified instrumented test:/g) ?? []).length, script === permissionScript ? 1 : 9);
   }
   const fallback = fixture({ script: permissionScript, device: 'bootprop', uninstall: 'absent-failure' });
   assert.equal(fallback.result.status, 0, fallback.result.stdout + fallback.result.stderr);
