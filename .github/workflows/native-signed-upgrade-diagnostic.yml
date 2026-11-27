@@ -14,6 +14,7 @@ jobs:
       fail-fast: false
       matrix:
         api: [29, 31]
+        old: ['2.1.2', '2.1.3']
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
@@ -21,11 +22,19 @@ jobs:
       - name: Retrieve reviewed public and draft APKs
         env:
           GH_TOKEN: ${{ github.token }}
+          OLD_VERSION: ${{ matrix.old }}
         run: |
           set -eu -o pipefail
-          gh api -H 'Accept: application/octet-stream' repos/dawar-tariq/Printly-/releases/assets/800624105 > "$RUNNER_TEMP/old.apk"
+          if [ "$OLD_VERSION" = '2.1.2' ]; then
+            asset=800032067
+            hash=49df97a8e3d5e0263ad73c899e7e0f38ff9c29d5b45ffaea92bedf2662ad7181
+          elif [ "$OLD_VERSION" = '2.1.3' ]; then
+            asset=800624105
+            hash=afb2a2e0eb27a0ff40033772e46a4a0764def12baafd5866947d8c687536e356
+          else exit 1; fi
+          gh api -H 'Accept: application/octet-stream' "repos/dawar-tariq/Printly-/releases/assets/$asset" > "$RUNNER_TEMP/old.apk"
           gh api -H 'Accept: application/octet-stream' repos/dawar-tariq/Printly-/releases/assets/801434066 > "$RUNNER_TEMP/new.apk"
-          echo 'afb2a2e0eb27a0ff40033772e46a4a0764def12baafd5866947d8c687536e356  '"$RUNNER_TEMP"'/old.apk' | sha256sum -c -
+          echo "$hash  $RUNNER_TEMP/old.apk" | sha256sum -c -
           echo '275a728431b54af00d32522a094a15c1ae8ee4a5623f897b2579aaa90f92c0dc  '"$RUNNER_TEMP"'/new.apk' | sha256sum -c -
       - name: Enable emulator acceleration
         run: |

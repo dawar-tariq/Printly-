@@ -32,4 +32,4 @@ adb shell am start -n "$pkg/io.github.dawartariq.printly.owner.nativeapp.MainAct
 sleep 10
 pid=$(adb shell pidof "$pkg" | tr -d '\r')
 [[ "$pid" =~ ^[0-9]+$ ]]
-echo 'Signed Android upgrade installed over 2.1.3, retained app data and started offline.'
+echo 'Signed Android upgrade installed over the previous version, retained app data and started offline.'
