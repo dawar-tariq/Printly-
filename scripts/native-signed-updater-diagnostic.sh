@@ -15,7 +15,11 @@ adb wait-for-device
 adb shell 'cp /system/etc/hosts /data/local/tmp/printly-hosts; printf "\n127.0.0.1 printly0.vercel.app\n127.0.0.1 lgfqetnfazawglwllymb.supabase.co\n" >> /data/local/tmp/printly-hosts; mount --bind /data/local/tmp/printly-hosts /system/etc/hosts'
 adb shell 'cat /system/etc/hosts' | grep -q '127.0.0.1 printly0.vercel.app'
 # Confirm the Android resolver actually uses the isolated hosts mapping.
-adb shell 'ping -c 1 -W 2 printly0.vercel.app' | grep -q '127.0.0.1'
+resolution=$(adb shell 'ping -c 1 -W 2 printly0.vercel.app' 2>&1 || true)
+if [[ "$resolution" != *127.0.0.1* ]]; then
+  echo '::error::Android DNS did not use the isolation mapping; test stopped before app installation.'
+  exit 1
+fi
 adb install "$RUNNER_TEMP/printly-2.1.2.apk" >/dev/null
 pkg=io.github.dawartariq.printly.owner
 uid=$(adb shell stat -c %u /data/user/0/$pkg | tr -d '\r')
