@@ -1,0 +1,57 @@
+name: Native APK archive diagnostic
+on:
+  workflow_dispatch:
+  push:
+    branches: ['arena/309fdf51-printly']
+    paths: ['.github/workflows/native-apk-diagnostic.yml', 'scripts/NativeApkArchiveDiagnostic.kt']
+permissions:
+  contents: read
+jobs:
+  archive-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [29, 31]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Retrieve and check the two reviewed APKs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu -o pipefail
+          dir=apps/printly-owner-native-android/app/src/androidTest/assets
+          mkdir -p "$dir"
+          gh api -H 'Accept: application/octet-stream' repos/dawar-tariq/Printly-/releases/assets/797724166 > "$dir/old.apk"
+          gh api -H 'Accept: application/octet-stream' repos/dawar-tariq/Printly-/releases/assets/800032067 > "$dir/new.apk"
+          echo 'e20a0ad80b417f63216922a5ff8d80769fadf513ce1b1725d75f9f3780c17e07  '"$dir"'/old.apk' | sha256sum -c -
+          echo '49df97a8e3d5e0263ad73c899e7e0f38ff9c29d5b45ffaea92bedf2662ad7181  '"$dir"'/new.apk' | sha256sum -c -
+          cp scripts/NativeApkArchiveDiagnostic.kt apps/printly-owner-native-android/app/src/androidTest/java/io/github/dawartariq/printly/owner/nativeapp/
+      - name: Install Android platform
+        run: |
+          set +o pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+          result=${PIPESTATUS[1]}
+          set -o pipefail
+          test "$result" -eq 0
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Inspect archives on a disposable offline emulator
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: ${{ matrix.api }}
+          target: google_apis
+          arch: x86_64
+          working-directory: apps/printly-owner-native-android
+          script: bash ../../scripts/native-apk-diagnostic.sh
