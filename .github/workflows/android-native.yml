@@ -29,7 +29,7 @@ jobs:
         run: node --test scripts/create-native-draft-review.test.mjs scripts/check-native-review-version.test.mjs
       - name: Test the native manifest guard with synthetic XML
         working-directory: apps/printly-owner-native-android
-        run: python3 -m unittest test_check_manifest.py
+        run: python3 -m unittest test_check_manifest.py test_notification_branding.py
       - name: Test disposable-emulator safeguards and result verification with synthetic results
         run: |
           for script in ci-emulator-common.sh ci-emulator-check.sh ci-notification-permission-check.sh; do
