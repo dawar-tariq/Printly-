@@ -42,10 +42,10 @@ adb shell iptables -C OUTPUT -m owner --uid-owner "$uid" -j PRINTLY_UPDATER_TEST
 adb shell ip6tables -C OUTPUT -m owner --uid-owner "$uid" -j REJECT
 python3 - "$RUNNER_TEMP/policy.xml" <<'PY'
 import html, json, sys
-policy = dict(available=True, versionCode=10, versionName='2.1.4', minimumVersionCode=1,
+policy = dict(available=True, versionCode=11, versionName='2.1.5', minimumVersionCode=1,
  packageName='io.github.dawartariq.printly.owner',
- downloadUrl='https://github.com/dawar-tariq/Printly-/releases/download/native-v2.1.4/Printly-for-Shops-2.1.4.apk',
- sha256='275a728431b54af00d32522a094a15c1ae8ee4a5623f897b2579aaa90f92c0dc',
+ downloadUrl='https://github.com/dawar-tariq/Printly-/releases/download/native-v2.1.5/Printly-for-Shops-2.1.5.apk',
+ sha256='4de7995d8a6d090c2a752dba3e64467499fb3ee35d01c14fec597bd89da1022d',
  notes='', mandatory=True, releasedAt='2026-01-01T00:00:00Z')
 open(sys.argv[1], 'w').write('<?xml version="1.0" encoding="utf-8" standalone="yes" ?><map><string name="policy">'+html.escape(json.dumps(policy), quote=False)+'</string></map>')
 PY
