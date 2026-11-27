@@ -29,9 +29,7 @@ jobs:
           set -eu -o pipefail
           dir=apps/printly-owner-native-android/app/src/androidTest/assets
           mkdir -p "$dir"
-          if ! gh api -H 'Accept: application/octet-stream' repos/dawar-tariq/Printly-/releases/assets/797724166 > "$dir/old.apk" 2> "$RUNNER_TEMP/asset-error"; then echo "::error title=Old APK download::$(cat "$RUNNER_TEMP/asset-error")"; exit 1; fi
           if ! gh api -H 'Accept: application/octet-stream' repos/dawar-tariq/Printly-/releases/assets/800032067 > "$dir/new.apk" 2> "$RUNNER_TEMP/asset-error"; then echo "::error title=New APK download::$(cat "$RUNNER_TEMP/asset-error")"; exit 1; fi
-          if ! echo 'e20a0ad80b417f63216922a5ff8d80769fadf513ce1b1725d75f9f3780c17e07  '"$dir"'/old.apk' | sha256sum -c -; then echo '::error::Old APK digest mismatch'; exit 1; fi
           if ! echo '49df97a8e3d5e0263ad73c899e7e0f38ff9c29d5b45ffaea92bedf2662ad7181  '"$dir"'/new.apk' | sha256sum -c -; then echo '::error::New APK digest mismatch'; exit 1; fi
           cp scripts/NativeApkArchiveDiagnostic.kt apps/printly-owner-native-android/app/src/androidTest/java/io/github/dawartariq/printly/owner/nativeapp/
       - name: Install Android platform

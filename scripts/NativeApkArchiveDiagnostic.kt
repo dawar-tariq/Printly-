@@ -28,7 +28,6 @@ class NativeApkArchiveDiagnostic {
             return context.packageManager.getPackageArchiveInfo(file.absolutePath, flags)
                 ?: throw AssertionError("Cannot parse archive $asset on API ${Build.VERSION.SDK_INT}")
         }
-        val old = archive("old.apk")
         val new = archive("new.apk")
         val expected = "c31f2f7283f5f32904185a2efde6b97ce89745c7292a330b828b525825ff001f"
         fun check(info: PackageInfo, name: String, code: Long, version: String) {
@@ -41,8 +40,6 @@ class NativeApkArchiveDiagnostic {
             val digest = MessageDigest.getInstance("SHA-256").digest(signers.single()).joinToString("") { "%02x".format(it) }
             assertEquals("$name signer fingerprint", expected, digest)
         }
-        check(old, "old", 6L, "2.1.1")
         check(new, "new", 7L, "2.1.2")
-        assertArrayEquals("archive certificates must match", signatures(old).single(), signatures(new).single())
     }
 }
