@@ -1,0 +1,39 @@
+name: Signed updater diagnostic on isolated emulator
+on:
+  workflow_dispatch:
+  push:
+    branches: ['arena/309fdf51-printly']
+    paths: ['.github/workflows/native-signed-updater-diagnostic.yml', 'scripts/native-signed-updater-diagnostic.sh']
+permissions:
+  contents: read
+jobs:
+  signed-updater:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [29, 31]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Fetch and verify the published 2.1.2 APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu -o pipefail
+          gh api -H 'Accept: application/octet-stream' repos/dawar-tariq/Printly-/releases/assets/800032067 > "$RUNNER_TEMP/printly-2.1.2.apk"
+          echo '49df97a8e3d5e0263ad73c899e7e0f38ff9c29d5b45ffaea92bedf2662ad7181  '"$RUNNER_TEMP"'/printly-2.1.2.apk' | sha256sum -c -
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Test signed updater on an isolated disposable emulator
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: ${{ matrix.api }}
+          target: google_apis
+          arch: x86_64
+          script: PRINTLY_DISPOSABLE_EMULATOR=1 bash scripts/native-signed-updater-diagnostic.sh
