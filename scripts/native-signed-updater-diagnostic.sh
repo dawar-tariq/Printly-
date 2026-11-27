@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # ONLY on a fresh disposable CI emulator with no real accounts or data.
-set -euo pipefail
+set -eEuo pipefail
+trap 'code=$?; echo "::error title=Signed updater diagnostic::Setup or test failed at script line ${LINENO}, exit ${code}"' ERR
 [ "${PRINTLY_DISPOSABLE_EMULATOR:-}" = 1 ]
 mapfile -t devices < <(adb devices | tr -d '\r' | awk 'NR > 1 && NF {print $1 " " $2}')
 [ "${#devices[@]}" -eq 1 ] && [[ "${devices[0]}" =~ ^emulator-[0-9]+\ device$ ]]
