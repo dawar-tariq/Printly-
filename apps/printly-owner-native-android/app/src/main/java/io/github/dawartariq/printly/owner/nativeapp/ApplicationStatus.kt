@@ -1,5 +1,6 @@
 package io.github.dawartariq.printly.owner.nativeapp
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
@@ -38,6 +39,11 @@ internal fun parseApplicationStatus(response: JSONObject): ApplicationStatus? {
     }
     AlertDialog(onDismissRequest = {}, title = { Text(title, fontWeight = FontWeight.ExtraBold) }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Box(Modifier.weight(1f).height(5.dp).background(Green))
+                Box(Modifier.weight(1f).height(5.dp).background(OrangeDark))
+                Box(Modifier.weight(1f).height(5.dp).background(if (approved) Green else Border))
+            }
             Text("✓  Application received", color = Green)
             Text(if (approved || application.status == "rejected") "✓  Under review" else "●  Under review", color = OrangeDark)
             Text(if (approved) "✓  Verified" else "○  Verified", color = if (approved) Green else Muted)
