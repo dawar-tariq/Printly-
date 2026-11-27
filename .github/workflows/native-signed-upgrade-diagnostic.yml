@@ -1,0 +1,41 @@
+name: Signed Android upgrade diagnostic
+on:
+  workflow_dispatch:
+  push:
+    branches: ['arena/309fdf51-printly']
+    paths: ['.github/workflows/native-signed-upgrade-diagnostic.yml', 'scripts/native-signed-upgrade-diagnostic.sh']
+permissions:
+  contents: read
+jobs:
+  upgrade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [29, 31]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Retrieve reviewed public and draft APKs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu -o pipefail
+          gh api -H 'Accept: application/octet-stream' repos/dawar-tariq/Printly-/releases/assets/800624105 > "$RUNNER_TEMP/old.apk"
+          gh api -H 'Accept: application/octet-stream' repos/dawar-tariq/Printly-/releases/assets/801434066 > "$RUNNER_TEMP/new.apk"
+          echo 'afb2a2e0eb27a0ff40033772e46a4a0764def12baafd5866947d8c687536e356  '"$RUNNER_TEMP"'/old.apk' | sha256sum -c -
+          echo '275a728431b54af00d32522a094a15c1ae8ee4a5623f897b2579aaa90f92c0dc  '"$RUNNER_TEMP"'/new.apk' | sha256sum -c -
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Test in-place upgrade on a disposable offline emulator
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: ${{ matrix.api }}
+          target: google_apis
+          arch: x86_64
+          script: PRINTLY_DISPOSABLE_EMULATOR=1 bash scripts/native-signed-upgrade-diagnostic.sh
