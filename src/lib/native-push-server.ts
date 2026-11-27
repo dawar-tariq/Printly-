@@ -78,6 +78,13 @@ export function nativePushRegistrationReady(): boolean {
   return nativePushConfig() !== null;
 }
 
+/** Restricted to the temporary one-shot endpoint, which must authenticate its caller. */
+export function nativePushOneShotCredentials(): { credentials: Credentials; target: NativePushTarget } | null {
+  if (process.env.PRINTLY_NATIVE_PUSH_ENABLED !== '0' || process.env.PRINTLY_NATIVE_PUSH_REGISTRATION_ENABLED !== '1') return null;
+  const config = nativePushCredentials();
+  return config?.target === 'production' ? config : null;
+}
+
 /** Fail closed: the public google-services.json does not authorize sends. */
 export function nativePushConfig(): NativePushConfig | null {
   if (process.env.PRINTLY_NATIVE_PUSH_ENABLED !== '1') return null;
