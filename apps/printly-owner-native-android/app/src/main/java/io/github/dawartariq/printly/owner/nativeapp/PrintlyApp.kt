@@ -305,6 +305,7 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
     var application by remember { mutableStateOf<ApplicationStatus?>(null) }
     var applicationVisible by remember { mutableStateOf(false) }
     var applicationChecking by remember { mutableStateOf(false) }
+    var applicationChecked by remember { mutableStateOf(false) }
     var applicationError by remember { mutableStateOf("") }
     var applicationRefresh by remember { mutableIntStateOf(0) }
     val applicationPrefs = remember { context.getSharedPreferences("native_application_seen_v1", 0) }
@@ -327,7 +328,7 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
                     } else applicationVisible = false
                 } catch (cancelled: CancellationException) { throw cancelled }
                 catch (_: Exception) { applicationError = "Could not check for updates. Please try again." }
-                finally { applicationChecking = false }
+                finally { applicationChecking = false; applicationChecked = true }
                 if (application?.status !in setOf("pending", "changes_requested")) break
                 delay(30_000)
             } while (isActive)
@@ -344,7 +345,7 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
         }, onSignOut = onSignOut)
     }
     val notificationShopId = if (meFresh) me?.optJSONObject("shop")?.optString("id", "")?.takeIf { it.isNotBlank() } else null
-    if (NativePush.available && !applicationVisible) NativePush.FirstShopPrompt(notificationShopId)
+    if (NativePush.available && applicationChecked && !applicationVisible) NativePush.FirstShopPrompt(notificationShopId)
     LaunchedEffect(api, lifecycle, notificationShopId) {
         if (NativePush.available) lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             NativePush.refresh(context, api, notificationShopId)

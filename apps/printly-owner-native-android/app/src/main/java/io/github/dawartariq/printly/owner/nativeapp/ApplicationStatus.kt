@@ -39,7 +39,7 @@ internal fun parseApplicationStatus(response: JSONObject): ApplicationStatus? {
     AlertDialog(onDismissRequest = {}, title = { Text(title, fontWeight = FontWeight.ExtraBold) }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("✓  Application received", color = Green)
-            Text(if (approved) "✓  Under review" else "●  Under review", color = OrangeDark)
+            Text(if (approved || application.status == "rejected") "✓  Under review" else "●  Under review", color = OrangeDark)
             Text(if (approved) "✓  Verified" else "○  Verified", color = if (approved) Green else Muted)
             Text(when (application.status) {
                 "pending" -> "Our team is reviewing your shop details. We'll check for updates while this screen is open."
