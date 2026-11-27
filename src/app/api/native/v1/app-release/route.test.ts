@@ -21,7 +21,13 @@ describe('public native app update policy', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('cache-control')).toContain('no-store');
     expect(response.headers.get('x-content-type-options')).toBe('nosniff');
-    expect(await response.json()).toEqual(release);
+    expect(await response.json()).toEqual({ ...release, releasedAt: '2026-01-01T00:00:00.000Z' });
+  });
+  it('normalizes database offsets to an Android-compatible UTC timestamp', async () => {
+    state.data = { ...release, releasedAt: '2026-11-27T11:08:00+00:00' };
+    expect((await (await GET()).json()).releasedAt).toBe('2026-11-27T11:08:00.000Z');
+    state.data = { ...release, releasedAt: '2026-01-01T05:30:00+05:30' };
+    expect((await (await GET()).json()).releasedAt).toBe('2026-01-01T00:00:00.000Z');
   });
   it('does not advertise production metadata to an isolated installation or when disabled', async () => {
     state.target = 'isolated';

@@ -32,7 +32,14 @@ export async function currentNativeAppRelease(): Promise<{ available: false } | 
     const { data, error } = await createAdminSupabase().rpc('current_native_app_release');
     if (error) return null;
     if (data === null) return { available: false };
-    return parseNativeUpdateRelease(data);
+    const parsed = parseNativeUpdateRelease(data);
+    if (!parsed) return null;
+    // Android's desugared Instant.parse rejects offsets such as PostgreSQL's
+    // +00:00 even though desktop Java accepts them. Always emit UTC with Z so
+    // already-installed apps can parse the policy, including mandatory ones.
+    const instant = new Date(parsed.releasedAt);
+    if (!Number.isFinite(instant.getTime())) return null;
+    return { ...parsed, releasedAt: instant.toISOString() };
   } catch { return null; }
 }
 
