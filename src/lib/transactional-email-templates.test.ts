@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { renderPrintlyEmail, type PrintlyEmailKind } from './transactional-email-templates';
 
-const kinds: PrintlyEmailKind[] = ['welcome', 'application_received', 'under_review', 'changes_requested', 'verified', 'not_approved', 'account_suspended', 'account_reactivated'];
+const kinds: PrintlyEmailKind[] = ['welcome', 'application_received', 'under_review', 'changes_requested', 'verified', 'not_approved', 'account_suspended', 'account_reactivated', 'subscription_active', 'subscription_expiring', 'subscription_expired', 'subscription_payment_submitted', 'subscription_payment_rejected'];
 describe('Printly transactional email templates', () => {
   it.each(kinds)('%s has branded HTML, accessible logo, safe links and plain text', (kind) => {
     const email = renderPrintlyEmail(kind, 'Shop Owner');
