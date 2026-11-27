@@ -26,13 +26,24 @@ private fun signingCertificates(info: PackageInfo): List<ByteArray> = if (Build.
     info.signingInfo?.apkContentsSigners?.map { it.toByteArray() } ?: emptyList()
 } else info.signatures?.map { it.toByteArray() } ?: emptyList()
 
+// Android 10 can return an archive PackageInfo with no signingInfo even for a
+// correctly signed APK. Re-query the archive using the platform's legacy API;
+// identity still requires exactly one signer matching the installed app.
+@Suppress("DEPRECATION")
+internal fun archiveSigningCertificates(context: Context, file: File, archive: PackageInfo): List<ByteArray> {
+    val signers = signingCertificates(archive)
+    if (signers.isNotEmpty() || Build.VERSION.SDK_INT < 28) return signers
+    val legacy = context.packageManager.getPackageArchiveInfo(file.absolutePath, PackageManager.GET_SIGNATURES)
+    return legacy?.signatures?.map { it.toByteArray() } ?: emptyList()
+}
+
 @Suppress("DEPRECATION")
 private fun verifyApkIdentity(context: Context, file: File, release: NativeAppRelease): Boolean {
     val flags = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES
     val archive = context.packageManager.getPackageArchiveInfo(file.absolutePath, flags) ?: return false
     val installed = try { context.packageManager.getPackageInfo(context.packageName, flags) } catch (_: Exception) { return false }
     val code = if (Build.VERSION.SDK_INT >= 28) archive.longVersionCode else archive.versionCode.toLong()
-    val apkSigners = signingCertificates(archive)
+    val apkSigners = archiveSigningCertificates(context, file, archive)
     val installedSigners = signingCertificates(installed)
     return matchesUpdateApkIdentity(release, context.packageName, archive.packageName, code, archive.versionName, apkSigners, installedSigners)
 }

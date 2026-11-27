@@ -32,13 +32,7 @@ class NativeApkArchiveDiagnostic {
             assertEquals("$name version name", version, info.versionName)
             @Suppress("DEPRECATION") val actual = if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()
             assertEquals("$name version code", code, actual)
-            var signers = signatures(info)
-            if (signers.isEmpty() && Build.VERSION.SDK_INT >= 28) {
-                @Suppress("DEPRECATION")
-                val legacy = context.packageManager.getPackageArchiveInfo(file.absolutePath, PackageManager.GET_SIGNATURES)
-                @Suppress("DEPRECATION")
-                signers = legacy?.signatures?.map { it.toByteArray() } ?: emptyList()
-            }
+            val signers = archiveSigningCertificates(context, file, info)
             assertEquals("$name archive signer count on API ${Build.VERSION.SDK_INT}", 1, signers.size)
             val digest = MessageDigest.getInstance("SHA-256").digest(signers.single()).joinToString("") { "%02x".format(it) }
             assertEquals("$name signer fingerprint", expected, digest)
