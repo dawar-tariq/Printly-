@@ -1,1 +1,0 @@
-single authorized synthetic production token test
