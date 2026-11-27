@@ -24,8 +24,9 @@ describe('managed native release and notification contracts', () => {
     for (const releasedAt of ['2026-01-01T00:00:00.1234567890Z', '2026-01-01T00:00:00+18:01', '2026-01-01T00:00:00-23:59']) {
       expect(parseNativeUpdateRelease({ ...release, releasedAt })).toBeNull();
     }
-    const draft = { version_code: 5, version_name: '2.1.0', minimum_version_code: 4, apk_url: url, apk_sha256: sha, certificate_sha256: cert, notes: '', mandatory: false, released_at: '2026-01-01T00:00:00Z' };
+    const draft = { version_code: 5, version_name: '2.1.0', minimum_version_code: 4, apk_url: 'https://github.com/dawar-tariq/Printly-/releases/download/native-v2.1.0/Printly-for-Shops-2.1.0.apk', apk_sha256: sha, certificate_sha256: cert, notes: '', mandatory: false, released_at: '2026-01-01T00:00:00Z' };
     expect(releaseSchema.safeParse(draft).success).toBe(true);
+    expect(releaseSchema.safeParse({ ...draft, version_name: '2.1.0.3', version_code: 9 }).success).toBe(false);
     expect(releaseSchema.safeParse({ ...draft, minimum_version_code: 6 }).success).toBe(false);
     expect(releaseSchema.safeParse({ ...draft, released_at: '2026-01-01T00:00:00+18:01' }).success).toBe(false);
     expect(releaseSchema.safeParse({ ...draft, released_at: '2026-01-01T00:00:00.1234567890Z' }).success).toBe(false);

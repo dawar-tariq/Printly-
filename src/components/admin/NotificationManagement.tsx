@@ -268,7 +268,7 @@ function ReleaseManager({ overview, changed }: { overview: Overview | null; chan
     if (Object.keys(requests.current).length) { setError('A previous release action may have completed. Check the release and notification history before editing a release.'); return; }
     let releasedAt = ''; try { releasedAt = new Date(form.released_at).toISOString(); } catch { /* Invalid input is rejected below. */ }
     const parsed = releaseSchema.safeParse({ ...form, version_code: Number(form.version_code), minimum_version_code: Number(form.minimum_version_code), released_at: releasedAt });
-    if (!parsed.success) { setError('Check the version codes, GitHub APK URL, two SHA-256 values, release date and notes.'); return; }
+    if (!parsed.success) { setError('Check the version codes, GitHub APK URL, two SHA-256 values, release date and notes. The GitHub tag and APK filename must match the version name.'); return; }
     setBusy('save'); setError(''); setNotice('');
     try { const result = await post<{ id: string; revision: number }>({ action: 'save_release', id: draft.id, revision: draft.revision, release: parsed.data }); setDraft({ id: result.id, revision: result.revision }); setNotice('Release draft saved. No APK was published or advertised.'); setReload((n) => n + 1); }
     catch (err) { setError(errorText(err)); } finally { setBusy(''); }

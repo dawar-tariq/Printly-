@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({ role: 'admin', signedIn: true, allowed: true, calls: [] as Array<{ name: string; args: Record<string, unknown> }>,
-  verify: 'ok' as 'ok' | 'fingerprint' | 'asset' | 'unavailable', verifyCalls: 0, revision: 2,
+  verify: 'ok' as 'ok' | 'fingerprint' | 'asset' | 'unavailable', verifyCalls: 0, revision: 2, duplicate: false, releaseName: '2.1.3',
   pushTarget: null as null | 'production' | 'isolated',
   replays: [] as Array<Record<string, unknown> | null>, replayError: null as { message: string } | null }));
 vi.mock('@/lib/api', async (original) => ({ ...await original<typeof import('@/lib/api')>(), getSessionProfile: async () => state.signedIn ? ({ user: { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }, profile: { role: state.role } }) : null }));
@@ -16,7 +16,10 @@ vi.mock('@/lib/supabase', () => ({ createAdminSupabase: () => ({
     if (name === 'native_app_release_request_result') return { data: state.replays.shift() ?? null, error: state.replayError };
     return { data: { id: '11111111-1111-4111-8111-111111111111', revision: 0 }, error: null };
   },
-  from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { revision: state.revision, apk_url: 'https://github.com/dawar-tariq/Printly-/releases/download/v1/app.apk', apk_sha256: 'a'.repeat(64), certificate_sha256: 'b'.repeat(64) }, error: null }) }) }) }),
+  from: () => ({ select: () => ({ eq: () => ({
+    maybeSingle: async () => ({ data: { revision: state.revision, version_name: state.releaseName, version_code: 8, apk_url: 'https://github.com/dawar-tariq/Printly-/releases/download/native-v2.1.3/Printly-for-Shops-2.1.3.apk', apk_sha256: 'a'.repeat(64), certificate_sha256: 'b'.repeat(64) }, error: null }),
+    neq: () => ({ limit: async () => ({ data: state.duplicate ? [{ version_code: 9 }] : [], error: null }) }),
+  }) }) }),
 }) }));
 import { GET, POST } from './route';
 const id = '11111111-1111-4111-8111-111111111111';
@@ -25,7 +28,7 @@ const campaign = { title: 'Notice', message: 'Hello shops', notification_type: '
   audience_kind: 'all', shop_ids: [], device_ids: [], target_version: null };
 const request = (body: unknown) => new Request('https://printly.test/api/admin/notifications', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 const get = () => new Request('https://printly.test/api/admin/notifications?view=overview');
-beforeEach(() => { state.role = 'admin'; state.signedIn = true; state.allowed = true; state.calls = []; state.verify = 'ok'; state.verifyCalls = 0; state.revision = 2; state.pushTarget = null; state.replays = []; state.replayError = null; vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'server-only-test-key'); vi.stubEnv('PRINTLY_NATIVE_RELEASE_MANAGER_ENABLED', '1'); vi.stubEnv('PRINTLY_ISOLATED_NATIVE_PUSH_DELIVERY_ENABLED', ''); });
+beforeEach(() => { state.role = 'admin'; state.signedIn = true; state.allowed = true; state.calls = []; state.verify = 'ok'; state.verifyCalls = 0; state.revision = 2; state.duplicate = false; state.releaseName = '2.1.3'; state.pushTarget = null; state.replays = []; state.replayError = null; vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', 'server-only-test-key'); vi.stubEnv('PRINTLY_NATIVE_RELEASE_MANAGER_ENABLED', '1'); vi.stubEnv('PRINTLY_ISOLATED_NATIVE_PUSH_DELIVERY_ENABLED', ''); });
 afterEach(() => vi.unstubAllEnvs());
 
 describe('native notification admin API', () => {
@@ -86,6 +89,18 @@ describe('native notification admin API', () => {
     expect(state.verifyCalls).toBe(0);
     state.replayError = { message: 'NOTIFICATION_REQUEST_CONFLICT' };
     expect((await POST(request({ ...action, notify: false }))).status).toBe(409);
+  });
+  it('rejects a mismatched filename or an APK reused under a different version code before publication', async () => {
+    const action = { action: 'publish_release', id, revision: 2, request_id: requestId, notify: false, verification_confirmed: true };
+    state.releaseName = '2.1.0.3';
+    expect((await POST(request(action))).status).toBe(422);
+    state.releaseName = '2.1.3'; state.duplicate = true;
+    expect((await POST(request(action))).status).toBe(422);
+    expect(state.verifyCalls).toBe(0);
+    expect(state.calls.some((call) => call.name === 'change_native_app_release')).toBe(false);
+    const release = { version_code: 9, version_name: '2.1.3', minimum_version_code: 1, apk_url: 'https://github.com/dawar-tariq/Printly-/releases/download/native-v2.1.3/Printly-for-Shops-2.1.3.apk', apk_sha256: 'a'.repeat(64), certificate_sha256: 'b'.repeat(64), notes: '', mandatory: false, released_at: '2026-01-01T00:00:00Z' };
+    expect((await POST(request({ action: 'save_release', id, revision: null, release }))).status).toBe(422);
+    expect(state.calls.some((call) => call.name === 'save_native_app_release')).toBe(false);
   });
   it('requires explicit APK review, the enabled feed, a matched signer and GitHub asset before publishing', async () => {
     const action = { action: 'publish_release', id, revision: 2, request_id: requestId, notify: false, verification_confirmed: false };

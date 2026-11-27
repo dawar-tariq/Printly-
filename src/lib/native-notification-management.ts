@@ -43,6 +43,10 @@ export function approvedGithubApkUrl(raw: string): string | null {
   try { const url = new URL(raw); return url.toString() === raw && !url.username && !url.password && !url.search && !url.hash ? raw : null; }
   catch { return null; }
 }
+/** A naming check catches accidental metadata mixups; it does not inspect APK bytes. */
+export function releaseFilenameMatchesVersion(url: string, name: string): boolean {
+  return approvedGithubApkUrl(url) !== null && url === `https://github.com/dawar-tariq/Printly-/releases/download/native-v${name}/Printly-for-Shops-${name}.apk`;
+}
 const image = z.string().trim().refine((value) => approvedNotificationImageUrl(value) !== null).nullable();
 export const contentSchema = z.object({
   title: shortText(100).refine((value) => !/[\r\n]/.test(value)),
@@ -70,7 +74,8 @@ export const releaseSchema = z.object({
   notes: z.string().trim().max(400).refine(hasSafeNativeTextControls),
   mandatory: z.boolean(),
   released_at: nativeReleaseInstantSchema,
-}).strict().refine((value) => value.minimum_version_code <= value.version_code);
+}).strict().refine((value) => value.minimum_version_code <= value.version_code)
+  .refine((value) => releaseFilenameMatchesVersion(value.apk_url, value.version_name), { message: 'The release name must match the GitHub tag and APK filename.' });
 
 export const adminMutationSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('save_campaign'), id, revision: revision.nullable(), campaign: campaignSchema }).strict(),

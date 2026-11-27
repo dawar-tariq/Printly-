@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { getSessionProfile, jsonError, jsonOk } from '@/lib/api';
 import { readJsonBody } from '@/lib/request-body';
 import { createAdminSupabase } from '@/lib/supabase';
-import { adminMutationSchema, notificationTypes } from '@/lib/native-notification-management';
+import { adminMutationSchema, notificationTypes, releaseFilenameMatchesVersion } from '@/lib/native-notification-management';
 import { verifyGithubReleaseAsset } from '@/lib/native-app-update-server';
 import { nativePushConfig, nativePushDatabaseSchedulerConfig } from '@/lib/native-push-server';
 import { nativePushWorkerEnabled } from '@/lib/native-push-worker-gate';
@@ -155,8 +155,12 @@ export async function POST(request: Request): Promise<Response> {
         result = await admin.rpc('retry_native_notification_campaign', { p_actor: actor.user.id, p_id: body.id, p_request: body.request_id }); break;
       case 'save_template':
         result = await admin.rpc('save_native_notification_template', { p_actor: actor.user.id, p_id: body.id, p_revision: body.revision, p_input: body.template }); break;
-      case 'save_release':
+      case 'save_release': {
+        const duplicate = await admin.from('native_app_releases').select('version_code').eq('apk_sha256', body.release.apk_sha256).neq('version_code', body.release.version_code).limit(1);
+        if (duplicate.error) return dbError(duplicate.error);
+        if (duplicate.data?.length) return jsonError(422, 'duplicate_apk', 'This APK checksum is already recorded for a different version code. Use the actual APK version, not a new code for the same file.');
         result = await admin.rpc('save_native_app_release', { p_actor: actor.user.id, p_id: body.id, p_revision: body.revision, p_input: body.release }); break;
+      }
       case 'publish_release': case 'activate_release': case 'unpublish_release': {
         const releaseAction = body.action.replace('_release', '');
         const replayArgs = { p_actor: actor.user.id, p_id: body.id, p_revision: body.revision, p_request: body.request_id, p_action: releaseAction, p_notify: body.notify };
@@ -168,7 +172,7 @@ export async function POST(request: Request): Promise<Response> {
         if (replay.data) return jsonOk({ ok: true, result: replay.data }, noStore);
         if (body.action !== 'unpublish_release') {
           if (process.env.PRINTLY_NATIVE_RELEASE_MANAGER_ENABLED !== '1') return jsonError(503, 'release_disabled', 'Enable the release manager server-side after completing the rollout checks.');
-          const release = await admin.from('native_app_releases').select('apk_url,apk_sha256,certificate_sha256,revision').eq('id', body.id).maybeSingle();
+          const release = await admin.from('native_app_releases').select('version_name,version_code,apk_url,apk_sha256,certificate_sha256,revision').eq('id', body.id).maybeSingle();
           if (release.error) return dbError(release.error);
           if (!release.data || release.data.revision !== body.revision) {
             // Another identical request may have committed after the first
@@ -178,6 +182,10 @@ export async function POST(request: Request): Promise<Response> {
             if (lateReplay.data) return jsonOk({ ok: true, result: lateReplay.data }, noStore);
             return jsonError(409, 'changed', 'This release changed. Refresh before trying again.');
           }
+          if (!releaseFilenameMatchesVersion(release.data.apk_url, release.data.version_name)) return jsonError(422, 'release_version', 'The version name must match the GitHub release tag and APK filename.');
+          const duplicate = await admin.from('native_app_releases').select('version_code').eq('apk_sha256', release.data.apk_sha256).neq('version_code', release.data.version_code).limit(1);
+          if (duplicate.error) return dbError(duplicate.error);
+          if (duplicate.data?.length) return jsonError(422, 'duplicate_apk', 'This APK checksum is recorded for a different version code. Resolve the mismatch before publishing.');
           const verified = await verifyGithubReleaseAsset(release.data, process.env.PRINTLY_ANDROID_SIGNING_CERT_SHA256);
           if (verified === 'fingerprint') return jsonError(422, 'signer', 'The release certificate does not match the server’s independently verified public fingerprint.');
           if (verified === 'asset') return jsonError(422, 'asset', 'The published GitHub release asset or its SHA-256 digest does not match.');
