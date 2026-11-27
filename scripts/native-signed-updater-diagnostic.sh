@@ -33,7 +33,7 @@ PYDNS
 adb shell iptables -N PRINTLY_UPDATER_TEST
 while IFS= read -r ip || [ -n "$ip" ]; do
   [ -n "$ip" ] || continue
-  adb shell iptables -A PRINTLY_UPDATER_TEST -p tcp -d "$ip" --dport 443 -j RETURN
+  adb shell iptables -A PRINTLY_UPDATER_TEST -p tcp -d "$ip" --dport 443 -j RETURN </dev/null
 done < "$ips"
 adb shell iptables -A PRINTLY_UPDATER_TEST -j REJECT
 adb shell iptables -I OUTPUT 1 -m owner --uid-owner "$uid" -j PRINTLY_UPDATER_TEST
