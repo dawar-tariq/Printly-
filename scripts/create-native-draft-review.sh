@@ -13,8 +13,8 @@ evidence=$2
 [ "${GITHUB_REF:-}" = 'refs/heads/arena/309fdf51-printly' ] || fail 'Unexpected release branch.'
 case "${GITHUB_EVENT_NAME:-}" in push|workflow_dispatch) ;; *) fail 'Unexpected release trigger.' ;; esac
 [[ "${GITHUB_SHA:-}" =~ ^[0-9a-f]{40}$ ]] || fail 'A full reviewed commit SHA is required.'
-[ "${REQUESTED_VERSION_NAME:-}" = '2.1.1' ] && [ "${REQUESTED_VERSION_CODE:-}" = '6' ] || fail 'Unexpected native version.'
-[ "$(basename -- "$apk")" = 'Printly-for-Shops-2.1.1.apk' ] || fail 'Unexpected APK filename.'
+[ "${REQUESTED_VERSION_NAME:-}" = '2.1.2' ] && [ "${REQUESTED_VERSION_CODE:-}" = '7' ] || fail 'Unexpected native version.'
+[ "$(basename -- "$apk")" = 'Printly-for-Shops-2.1.2.apk' ] || fail 'Unexpected APK filename.'
 [ -n "${GH_TOKEN:-}" ] || fail 'The scoped GitHub token is unavailable.'
 certificate=$(printf '%s' "${EXPECTED_CERTIFICATE:-}" | tr -d ':[:space:]' | tr '[:upper:]' '[:lower:]')
 [[ "$certificate" =~ ^[0-9a-f]{64}$ ]] || fail 'A verified public certificate fingerprint is required.'
@@ -29,7 +29,7 @@ umask 077
 work=$(mktemp -d "${RUNNER_TEMP:?}/printly-native-draft.XXXXXXXX")
 trap 'rm -rf -- "$work"' EXIT
 repo='dawar-tariq/Printly-'
-tag='native-v2.1.1'
+tag='native-v2.1.2'
 # A pre-existing tag would make --target ineffective. Fail closed on either an
 # existing tag or an indeterminate network error, rather than creating one.
 if git ls-remote --exit-code --refs --tags "https://github.com/${repo}.git" "refs/tags/${tag}" > "$work/tag"; then
@@ -45,7 +45,7 @@ jq -e --arg tag "$tag" '([add[] | select(.tag_name == $tag)] | length) == 0' "$w
   || fail 'A release or draft already uses this tag; refusing to replace it.'
 
 gh release create "$tag" "$apk" --repo "$repo" --target "$GITHUB_SHA" --draft --prerelease \
-  --title 'Printly for Shops 2.1.1 — device review' \
+  --title 'Printly for Shops 2.1.2 — device review' \
   --notes 'Signed native Android candidate for an authorized device test. This draft uses the production Printly site and is not yet a public release.'
 
 gh api --paginate --slurp "repos/${repo}/releases?per_page=100" > "$work/after.json"
@@ -53,7 +53,7 @@ jq -e --arg tag "$tag" --arg commit "$GITHUB_SHA" --arg digest "sha256:$expected
   [add[] | select(.tag_name == $tag)] |
   length == 1 and .[0].draft == true and .[0].prerelease == true and
   .[0].target_commitish == $commit and (.[0].assets | length) == 1 and
-  .[0].assets[0].name == "Printly-for-Shops-2.1.1.apk" and .[0].assets[0].state == "uploaded" and
+  .[0].assets[0].name == "Printly-for-Shops-2.1.2.apk" and .[0].assets[0].state == "uploaded" and
   .[0].assets[0].digest == $digest and (.[0].assets[0].id | type) == "number"
 ' "$work/after.json" >/dev/null || fail 'The draft exists but its uploaded asset could not be verified. Do not publish it.'
 asset_id=$(jq -r --arg tag "$tag" '[add[] | select(.tag_name == $tag)][0].assets[0].id' "$work/after.json")
@@ -70,6 +70,6 @@ actual_certificate=$(printf '%s' "${signers[0]}" | tr -d ':[:space:]' | tr '[:up
 "$tools/aapt" dump badging "$work/hosted.apk" > "$work/badging.txt"
 package_line=$(head -n 1 "$work/badging.txt")
 [[ "$package_line" == "package: name='io.github.dawartariq.printly.owner' "* ]] || fail 'Unexpected downloaded APK package.'
-[[ "$package_line" == *" versionCode='6' "* && "$package_line" == *" versionName='2.1.1' "* ]] || fail 'Unexpected downloaded APK version.'
+[[ "$package_line" == *" versionCode='7' "* && "$package_line" == *" versionName='2.1.2' "* ]] || fail 'Unexpected downloaded APK version.'
 if grep -q '^application-debuggable' "$work/badging.txt"; then fail 'The downloaded APK is debuggable. Do not publish it.'; fi
 echo 'Verified the unpublished draft by downloading its APK and checking SHA-256, signer, package and version. A device test is still required.'
