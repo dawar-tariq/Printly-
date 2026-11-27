@@ -3,6 +3,7 @@ import { jsonError } from '@/lib/api';
 import { SUPABASE_ANON, SUPABASE_URL } from '@/lib/supabase-client';
 import { withVerifiedNativeSession } from '@/lib/native-session';
 import * as me from '@/lib/native-me';
+import * as applicationStatus from '@/lib/native-application-status';
 import * as board from '@/app/api/shop/board/route';
 import * as orders from '@/app/api/shop/orders/route';
 import * as order from '@/lib/native-order';
@@ -36,6 +37,7 @@ function endpoint(method: string, p: string[]): Handler | null {
   const key = p.join('/');
   if (p.length === 1) {
     if (method === 'GET' && key === 'me') return () => me.GET();
+    if (method === 'GET' && key === 'application-status') return () => applicationStatus.GET();
     if (method === 'POST' && key === 'board') return board.POST;
     if (method === 'GET' && key === 'orders') return orders.GET;
     if (method === 'GET' && key === 'inventory') return inventoryItem.GET;

@@ -18,7 +18,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -471,6 +473,52 @@ internal object NativePush {
                 try { NotificationManagerCompat.from(context).notify(delivered.first.tag, 0, notification(context, delivered.first, picture)) } catch (_: SecurityException) { }
             }
         }
+    }
+
+    /** OS permission does not enroll a device. Ask the signed-in shop user
+     * explicitly, once per shop on this phone, without undoing later opt-outs. */
+    @Composable fun FirstShopPrompt(shopId: String?) {
+        val context = LocalContext.current
+        val scope = rememberCoroutineScope()
+        val promptPrefs = remember { context.getSharedPreferences("native_push_onboarding_v1", Context.MODE_PRIVATE) }
+        var show by remember(shopId) { mutableStateOf(false) }
+        var busy by remember(shopId) { mutableStateOf(false) }
+        var error by remember(shopId) { mutableStateOf("") }
+        suspend fun connect() {
+            val shop = shopId ?: return
+            busy = true
+            try {
+                enable(context, shop)
+                if (!promptPrefs.edit().putBoolean(shop, true).commit()) throw IllegalStateException("Could not save choice")
+                show = false
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { error = "Could not enable alerts. Check your phone settings and try again." }
+            finally { busy = false }
+        }
+        val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) scope.launch { connect() }
+            else error = "Notifications are blocked. You can allow them later in your phone settings."
+        }
+        LaunchedEffect(shopId) {
+            if (shopId != null && validPushUuid(shopId)) {
+                if (read(context).enabled) promptPrefs.edit().putBoolean(shopId, true).apply()
+                show = !read(context).enabled && !promptPrefs.getBoolean(shopId, false)
+            } else show = false
+        }
+        if (show) AlertDialog(
+            onDismissRequest = {},
+            title = { Text("Stay on top of your shop") },
+            text = { Text("Turn on Printly alerts for new orders, announcements and updates on this phone. You can turn them off in Notifications. Delivery may be delayed or blocked by your phone or network." + if (error.isNotBlank()) "\n\n$error" else "") },
+            confirmButton = { TextButton(enabled = !busy, onClick = {
+                if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                    permission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                } else scope.launch { connect() }
+            }) { Text(if (busy) "Connecting…" else "Turn on alerts") } },
+            dismissButton = { TextButton(enabled = !busy, onClick = {
+                shopId?.let { promptPrefs.edit().putBoolean(it, true).apply() }
+                show = false
+            }) { Text("Not now") } },
+        )
     }
 
     @Composable fun Settings(api: OwnerApi, shopId: String?) {

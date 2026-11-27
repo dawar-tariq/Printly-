@@ -302,7 +302,49 @@ enum class Screen { HOME, ORDERS, INVENTORY, REPORTS, MORE, DETAIL, PROFILE, RAT
         } finally { billingRequest.cancel(); meRequest.cancel(); accessLoading = false }
     }
     LaunchedEffect(api, refreshKey) { loadAccess() }
+    var application by remember { mutableStateOf<ApplicationStatus?>(null) }
+    var applicationVisible by remember { mutableStateOf(false) }
+    var applicationChecking by remember { mutableStateOf(false) }
+    var applicationError by remember { mutableStateOf("") }
+    var applicationRefresh by remember { mutableIntStateOf(0) }
+    val applicationPrefs = remember { context.getSharedPreferences("native_application_seen_v1", 0) }
+    LaunchedEffect(api, lifecycle, applicationRefresh) {
+        if (!api.isDemo) lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            do {
+                applicationChecking = true
+                try {
+                    val previous = application
+                    val fresh = parseApplicationStatus(api.request("GET", "application-status"))
+                    application = fresh
+                    applicationError = ""
+                    if (fresh != null) {
+                        if (fresh.status == "pending" || fresh.status == "changes_requested") {
+                            applicationPrefs.edit().putBoolean(fresh.shopId, true).apply()
+                        }
+                        if (previous == null || previous.shopId != fresh.shopId || previous.status != fresh.status) {
+                            applicationVisible = fresh.status != "approved" || applicationPrefs.getBoolean(fresh.shopId, false)
+                        }
+                    } else applicationVisible = false
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { applicationError = "Could not check for updates. Please try again." }
+                finally { applicationChecking = false }
+                if (application?.status !in setOf("pending", "changes_requested")) break
+                delay(30_000)
+            } while (isActive)
+        }
+    }
+    application?.takeIf { applicationVisible }?.let { current ->
+        ApplicationStatusDialog(current, applicationError, applicationChecking, onRefresh = { applicationRefresh++ }, onContinue = {
+            applicationVisible = false
+            if (current.status == "approved") {
+                applicationPrefs.edit().remove(current.shopId).apply()
+                screen = if (current.dashboard) Screen.HOME else Screen.SUBSCRIPTION
+                refreshKey++
+            }
+        }, onSignOut = onSignOut)
+    }
     val notificationShopId = if (meFresh) me?.optJSONObject("shop")?.optString("id", "")?.takeIf { it.isNotBlank() } else null
+    if (NativePush.available && !applicationVisible) NativePush.FirstShopPrompt(notificationShopId)
     LaunchedEffect(api, lifecycle, notificationShopId) {
         if (NativePush.available) lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             NativePush.refresh(context, api, notificationShopId)
