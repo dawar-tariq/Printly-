@@ -10,7 +10,7 @@ const fixture = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/supabase-client', () => ({ SUPABASE_URL: 'https://example.supabase.co', SUPABASE_ANON: 'public-anon' }));
-vi.mock('@/lib/native-push-server', () => ({ nativePushConfig: () => fixture.pushConfigured ? { cronSecret: 'configured' } : null }));
+vi.mock('@/lib/native-push-server', () => ({ nativePushRegistrationReady: () => fixture.pushConfigured }));
 vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({ auth: { getUser: async (token: string) => {
   fixture.tokenCalls.push(token);
   // Force overlap so request-local identity must survive asynchronous work.

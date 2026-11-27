@@ -2,7 +2,7 @@ import { createVerify, generateKeyPairSync } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   NATIVE_ANDROID_PACKAGE, NATIVE_FCM_PROJECT, QA_ANDROID_PACKAGE, QA_FCM_PROJECT,
-  nativePushAccessToken, nativePushConfig, nativePushMessage, nativePushTarget, sendNativePush,
+  nativePushAccessToken, nativePushConfig, nativePushRegistrationReady, nativePushMessage, nativePushTarget, sendNativePush,
   validNativePushAuthorization, type NativePushDelivery, type NativePushTarget,
 } from './native-push-server';
 import { ISOLATED_TEST_PROJECT, ISOLATED_TEST_SITE, ISOLATED_TEST_SUPABASE } from './isolated-test-environment.mjs';
@@ -44,6 +44,18 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe('native FCM sender', () => {
+  it('allows explicitly enabled registration without enabling the delivery worker', () => {
+    configure();
+    vi.stubEnv('PRINTLY_NATIVE_PUSH_ENABLED', '0');
+    vi.stubEnv('PRINTLY_NATIVE_PUSH_CRON_SECRET', '');
+    vi.stubEnv('PRINTLY_NATIVE_PUSH_REGISTRATION_ENABLED', '1');
+    expect(nativePushRegistrationReady()).toBe(true);
+    expect(nativePushConfig()).toBeNull();
+    vi.stubEnv('PRINTLY_FCM_SERVICE_ACCOUNT_JSON', JSON.stringify({ ...account, project_id: 'wrong' }));
+    expect(nativePushRegistrationReady()).toBe(false);
+    vi.stubEnv('PRINTLY_NATIVE_PUSH_REGISTRATION_ENABLED', '0');
+    expect(nativePushRegistrationReady()).toBe(false);
+  });
   it('fails closed without an enabled and correctly scoped service account and worker secret', () => {
     configure(); expect(nativePushConfig()).toMatchObject({ target: 'production', cronSecret: secret, credentials: { clientEmail: account.client_email } });
     vi.stubEnv('PRINTLY_NATIVE_PUSH_ENABLED', '0'); expect(nativePushConfig()).toBeNull();

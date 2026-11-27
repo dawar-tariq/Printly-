@@ -51,13 +51,12 @@ export function nativePushTarget(env: Record<string, string | undefined> = proce
   return env.PRINTLY_ISOLATED_TEST === '1' && isolatedTestDeploymentAllowed(env) ? 'isolated' : null;
 }
 
-/** Fail closed: the public google-services.json does not authorize sends. */
-export function nativePushConfig(): NativePushConfig | null {
-  if (process.env.PRINTLY_NATIVE_PUSH_ENABLED !== '1') return null;
+/** Validate credentials separately so opt-in registration can be staged while
+ * the dispatcher and its claim privileges remain disabled. */
+function nativePushCredentials(): { credentials: Credentials; target: NativePushTarget } | null {
   const target = nativePushTarget();
   const raw = process.env.PRINTLY_FCM_SERVICE_ACCOUNT_JSON ?? '';
-  const cronSecret = process.env.PRINTLY_NATIVE_PUSH_CRON_SECRET ?? '';
-  if (!target || !raw || raw.length > 12_000 || !/^[A-Za-z0-9_-]{32,128}$/.test(cronSecret)) return null;
+  if (!target || !raw || raw.length > 12_000) return null;
   try {
     const value: unknown = JSON.parse(raw);
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -69,8 +68,23 @@ export function nativePushConfig(): NativePushConfig | null {
     if (address.length !== 2 || !/^[a-z0-9._-]+$/.test(address[0]) || address[1] !== `${targets[target].project}.iam.gserviceaccount.com`) return null;
     const key = createPrivateKey(account.private_key);
     if (key.asymmetricKeyType !== 'rsa' || (key.asymmetricKeyDetails?.modulusLength ?? 0) < 2048) return null;
-    return { credentials: { clientEmail: account.client_email, privateKey: account.private_key }, cronSecret, target };
+    return { credentials: { clientEmail: account.client_email, privateKey: account.private_key }, target };
   } catch { return null; }
+}
+
+/** Registration opt-in is distinct from the worker's delivery switch. */
+export function nativePushRegistrationReady(): boolean {
+  if (process.env.PRINTLY_NATIVE_PUSH_REGISTRATION_ENABLED === '1') return nativePushCredentials() !== null;
+  return nativePushConfig() !== null;
+}
+
+/** Fail closed: the public google-services.json does not authorize sends. */
+export function nativePushConfig(): NativePushConfig | null {
+  if (process.env.PRINTLY_NATIVE_PUSH_ENABLED !== '1') return null;
+  const cronSecret = process.env.PRINTLY_NATIVE_PUSH_CRON_SECRET ?? '';
+  if (!/^[A-Za-z0-9_-]{32,128}$/.test(cronSecret)) return null;
+  const config = nativePushCredentials();
+  return config ? { ...config, cronSecret } : null;
 }
 
 export function validNativePushAuthorization(header: string | null, secret: string): boolean {

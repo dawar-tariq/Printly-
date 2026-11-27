@@ -3,7 +3,7 @@ import { createHmac } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { getStaffContext, jsonError, jsonOk } from '@/lib/api';
 import { currentNativeSession } from '@/lib/native-session';
-import { nativePushConfig } from '@/lib/native-push-server';
+import { nativePushRegistrationReady } from '@/lib/native-push-server';
 import { readBodyBytes } from '@/lib/request-body';
 import { createAdminSupabase } from '@/lib/supabase';
 
@@ -49,7 +49,7 @@ export async function POST(request: Request): Promise<Response> {
         typeof data.version_name !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._+-]{0,39}$/.test(data.version_name)))) {
     return jsonError(422, 'validation', 'Invalid notification registration.');
   }
-  if (!nativePushConfig()) return jsonError(503, 'unavailable', 'Notifications are not set up on the server yet.');
+  if (!nativePushRegistrationReady()) return jsonError(503, 'unavailable', 'Notifications are not set up on the server yet.');
   const limited = await deviceWriteLimit(session.user.id, 'registration');
   if (limited) return limited;
   const staff = await getStaffContext({ allowExpired: true });
