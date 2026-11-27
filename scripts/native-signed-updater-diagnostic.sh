@@ -17,7 +17,7 @@ adb install "$RUNNER_TEMP/printly-2.1.2.apk" >/dev/null
 pkg=io.github.dawartariq.printly.owner
 uid=$(adb shell stat -c %u /data/user/0/$pkg | tr -d '\r')
 [[ "$uid" =~ ^[0-9]+$ ]]
-# Resolve the same endpoints from both CI and Android. Never allow arbitrary
+# Resolve only the known GitHub endpoints from CI. Never allow arbitrary
 # hosts or addresses supplied by the APK. Reject on DNS or firewall failure.
 ips="$RUNNER_TEMP/github-ips"
 python3 - "$ips" <<'PYDNS'
@@ -30,12 +30,6 @@ for host in hosts:
     ips.update(str(ipaddress.IPv4Address(r[4][0])) for r in records)
 open(sys.argv[1], 'w').write('\n'.join(sorted(ips)) + '\n')
 PYDNS
-for host in github.com objects.githubusercontent.com release-assets.githubusercontent.com; do
-  result=$(adb shell "ping -c 1 -W 2 $host" 2>&1 || true)
-  ip=$(printf '%s' "$result" | sed -n '1s/.*(\([0-9][0-9.]*\)).*/\1/p' | tr -d '\r')
-  [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Android release endpoint resolution failed for $host"; exit 1; }
-  printf '%s\n' "$ip" >> "$ips"
-done
 adb shell iptables -N PRINTLY_UPDATER_TEST
 while IFS= read -r ip || [ -n "$ip" ]; do
   [ -n "$ip" ] || continue
