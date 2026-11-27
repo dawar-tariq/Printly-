@@ -26,8 +26,8 @@ adb shell chown -R "$uid:$uid" /data/user/0/$pkg/files
 adb shell restorecon -RF /data/user/0/$pkg/files
 adb install -r "$RUNNER_TEMP/new.apk" >/dev/null
 [ "$(adb shell cat /data/user/0/$pkg/files/upgrade-sentinel | tr -d '\r')" = synthetic-upgrade-sentinel ]
-adb shell dumpsys package "$pkg" | grep -q 'versionCode=10 '
-adb shell dumpsys package "$pkg" | grep -q 'versionName=2.1.4'
+adb shell dumpsys package "$pkg" | grep -q 'versionCode=11 '
+adb shell dumpsys package "$pkg" | grep -q 'versionName=2.1.5'
 adb shell am start -n "$pkg/io.github.dawartariq.printly.owner.nativeapp.MainActivity" >/dev/null
 sleep 10
 pid=$(adb shell pidof "$pkg" | tr -d '\r')
