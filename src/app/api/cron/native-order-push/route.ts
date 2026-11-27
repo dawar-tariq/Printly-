@@ -1,6 +1,6 @@
 import { jsonError, jsonOk } from '@/lib/api';
 import { createAdminSupabase } from '@/lib/supabase';
-import { nativePushAccessToken, nativePushConfig, sendNativePush, validNativePushAuthorization, type NativePushDelivery, type PushOutcome } from '@/lib/native-push-server';
+import { nativePushAccessToken, nativePushConfig, nativePushDatabaseSchedulerConfig, sendNativePush, validNativePushAuthorization, type NativePushDelivery, type PushOutcome } from '@/lib/native-push-server';
 import { nativePushWorkerEnabled } from '@/lib/native-push-worker-gate';
 
 export const runtime = 'nodejs';
@@ -9,10 +9,21 @@ export const maxDuration = 60;
 
 /** A private scheduler invokes this; no scheduler or credentials are installed by the code. */
 async function run(request: Request): Promise<Response> {
+  const header = request.headers.get('authorization');
   const secret = process.env.PRINTLY_NATIVE_PUSH_CRON_SECRET ?? '';
-  if (!validNativePushAuthorization(request.headers.get('authorization'), secret)) return jsonError(401, 'unauthorized', 'Unauthorized.');
-  const config = nativePushConfig();
-  if (!config || !nativePushWorkerEnabled(config.target)) return jsonError(503, 'unavailable', 'Notification worker is not configured or is disabled.');
+  const legacyAuthorized = validNativePushAuthorization(header, secret);
+  let config = legacyAuthorized ? nativePushConfig() : null;
+  if (legacyAuthorized && !config) return jsonError(503, 'unavailable', 'Notification worker is not configured or is disabled.');
+  if (!config) {
+    const dbConfig = nativePushDatabaseSchedulerConfig();
+    if (!dbConfig || !header || !/^Bearer [a-f0-9]{64}$/.test(header)) return jsonError(401, 'unauthorized', 'Unauthorized.');
+    try {
+      const auth = await createAdminSupabase().rpc('verify_native_push_scheduler_secret', { p_secret: header.slice(7) });
+      if (auth.error || auth.data !== true) return jsonError(401, 'unauthorized', 'Unauthorized.');
+      config = { ...dbConfig, cronSecret: '' };
+    } catch { return jsonError(503, 'unavailable', 'Scheduler authorization unavailable.'); }
+  }
+  if (!nativePushWorkerEnabled(config.target)) return jsonError(503, 'unavailable', 'Notification worker is not configured or is disabled.');
   // The isolated gate above stops even authorized requests before OAuth, queue
   // access or delivery. Device registration uses its own configuration check.
   // Do not consume outbox attempts if Google authorization is unavailable.

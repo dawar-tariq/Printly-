@@ -2,7 +2,7 @@ import { createVerify, generateKeyPairSync } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   NATIVE_ANDROID_PACKAGE, NATIVE_FCM_PROJECT, QA_ANDROID_PACKAGE, QA_FCM_PROJECT,
-  nativePushAccessToken, nativePushConfig, nativePushRegistrationReady, nativePushMessage, nativePushTarget, sendNativePush,
+  nativePushAccessToken, nativePushConfig, nativePushDatabaseSchedulerConfig, nativePushRegistrationReady, nativePushMessage, nativePushTarget, sendNativePush,
   validNativePushAuthorization, type NativePushDelivery, type NativePushTarget,
 } from './native-push-server';
 import { ISOLATED_TEST_PROJECT, ISOLATED_TEST_SITE, ISOLATED_TEST_SUPABASE } from './isolated-test-environment.mjs';
@@ -64,6 +64,17 @@ describe('native FCM sender', () => {
     configure({ ...account, token_uri: 'https://attacker.invalid/token' }); expect(nativePushConfig()).toBeNull();
     configure({ ...account, private_key: 'not a key' }); expect(nativePushConfig()).toBeNull();
     configure(); vi.stubEnv('PRINTLY_NATIVE_PUSH_CRON_SECRET', 'short'); expect(nativePushConfig()).toBeNull();
+  });
+  it('enables the database scheduler only with both flags and exact production identities', () => {
+    configure();
+    const env = { PRINTLY_NATIVE_DB_SCHEDULER_ENABLED: '1', VERCEL_ENV: 'production', VERCEL_PROJECT_ID: 'prj_piCeGnHsSrpHaSbAiOQ3tvm8Cn7x', NEXT_PUBLIC_SUPABASE_URL: 'https://lgfqetnfazawglwllymb.supabase.co' };
+    stubEnvironment(env);
+    expect(nativePushDatabaseSchedulerConfig()).toMatchObject({ target: 'production' });
+    for (const [key, value] of Object.entries({ PRINTLY_NATIVE_DB_SCHEDULER_ENABLED:'0', PRINTLY_NATIVE_PUSH_ENABLED:'0', VERCEL_ENV:'preview', VERCEL_PROJECT_ID:'other', NEXT_PUBLIC_SUPABASE_URL:ISOLATED_TEST_SUPABASE })) {
+      vi.stubEnv(key, value); expect(nativePushDatabaseSchedulerConfig(), key).toBeNull(); vi.stubEnv(key, key === 'PRINTLY_NATIVE_PUSH_ENABLED' ? '1' : env[key as keyof typeof env]);
+    }
+    vi.stubEnv('PRINTLY_FCM_SERVICE_ACCOUNT_JSON', JSON.stringify(qaAccount));
+    expect(nativePushDatabaseSchedulerConfig()).toBeNull();
   });
   it('selects QA only when the entire isolated website and backend guard passes', () => {
     expect(nativePushTarget({})).toBe('production');

@@ -6,7 +6,7 @@ import { readJsonBody } from '@/lib/request-body';
 import { createAdminSupabase } from '@/lib/supabase';
 import { adminMutationSchema, notificationTypes } from '@/lib/native-notification-management';
 import { verifyGithubReleaseAsset } from '@/lib/native-app-update-server';
-import { nativePushConfig } from '@/lib/native-push-server';
+import { nativePushConfig, nativePushDatabaseSchedulerConfig } from '@/lib/native-push-server';
 import { nativePushWorkerEnabled } from '@/lib/native-push-worker-gate';
 
 export const runtime = 'nodejs';
@@ -64,7 +64,7 @@ export async function GET(request: Request): Promise<Response> {
     if (view === 'overview') {
       const result = await admin.rpc('admin_native_notification_overview', { p_actor: actor.user.id });
       if (result.error || !result.data || typeof result.data !== 'object') return dbError(result.error);
-      const config = nativePushConfig();
+      const config = nativePushConfig() ?? nativePushDatabaseSchedulerConfig();
       return jsonOk({ ...result.data, worker_configured: !!config && nativePushWorkerEnabled(config.target), release_manager_enabled: process.env.PRINTLY_NATIVE_RELEASE_MANAGER_ENABLED === '1' }, noStore);
     }
     if (view === 'campaigns') {

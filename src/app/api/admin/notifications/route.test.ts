@@ -5,7 +5,7 @@ const state = vi.hoisted(() => ({ role: 'admin', signedIn: true, allowed: true, 
   pushTarget: null as null | 'production' | 'isolated',
   replays: [] as Array<Record<string, unknown> | null>, replayError: null as { message: string } | null }));
 vi.mock('@/lib/api', async (original) => ({ ...await original<typeof import('@/lib/api')>(), getSessionProfile: async () => state.signedIn ? ({ user: { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }, profile: { role: state.role } }) : null }));
-vi.mock('@/lib/native-push-server', () => ({ nativePushConfig: () => state.pushTarget ? { target: state.pushTarget } : null }));
+vi.mock('@/lib/native-push-server', () => ({ nativePushConfig: () => state.pushTarget ? { target: state.pushTarget } : null, nativePushDatabaseSchedulerConfig: () => null }));
 vi.mock('@/lib/native-app-update-server', () => ({ verifyGithubReleaseAsset: async () => { state.verifyCalls++; return state.verify; } }));
 vi.mock('@/lib/supabase', () => ({ createAdminSupabase: () => ({
   rpc: async (name: string, args: Record<string, unknown>) => {

@@ -3,12 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const state = vi.hoisted(() => ({
   config: true, authorize: true, tokenFails: false, sweepFails: false, staleGone: false, payloadFails: false, payloadMissing: false,
   orderTokenFails: false, orderTokenMissing: false,
-  target: 'production' as 'production' | 'isolated', tokenCalls: 0,
+  target: 'production' as 'production' | 'isolated', tokenCalls: 0, dbConfig: false, dbAuthorized: false,
   calls: [] as Array<{ name: string; args?: Record<string, unknown> }>,
   sentTargets: [] as string[],
 }));
 vi.mock('@/lib/native-push-server', () => ({
   nativePushConfig: () => state.config ? { credentials: {}, cronSecret: 'secret', target: state.target } : null,
+  nativePushDatabaseSchedulerConfig: () => state.dbConfig ? { credentials: {}, target: 'production' } : null,
   validNativePushAuthorization: () => state.authorize,
   nativePushAccessToken: async () => { state.tokenCalls++; if (state.tokenFails) throw new Error('never log this'); return 'test-token'; },
   sendNativePush: async (delivery: { kind: string }, _token: string, target: string) => {
@@ -18,6 +19,7 @@ vi.mock('@/lib/native-push-server', () => ({
 }));
 vi.mock('@/lib/supabase', () => ({ createAdminSupabase: () => ({ rpc: async (name: string, args?: Record<string, unknown>) => {
   state.calls.push({ name, args });
+  if (name === 'verify_native_push_scheduler_secret') return { data: state.dbAuthorized, error: null };
   if (name === 'enqueue_due_native_notification_campaigns') return { data: 1, error: null };
   if (name === 'claim_native_push_deliveries_budgeted') return { data: [
     { delivery_id: 'delivery-a', lease_token: 'lease-a', kind: 'order' },
@@ -40,6 +42,16 @@ describe('private native notification worker', () => {
     expect((await GET(request())).status).toBe(401); expect(state.calls).toEqual([]);
     state.authorize = true; state.config = false;
     expect((await GET(request())).status).toBe(503); expect(state.calls).toEqual([]);
+  });
+  it('accepts only a verified database scheduler secret, and does not touch the queue on rejection', async () => {
+    state.authorize = false; state.dbConfig = true; state.dbAuthorized = false;
+    const dbRequest = () => new Request('https://printly.test/api/cron/native-order-push', { method: 'POST', headers: { authorization: `Bearer ${'a'.repeat(64)}` } });
+    expect((await POST(dbRequest())).status).toBe(401);
+    expect(state.calls.map(c => c.name)).toEqual(['verify_native_push_scheduler_secret']);
+    state.calls = []; state.dbAuthorized = true;
+    expect((await POST(dbRequest())).status).toBe(200);
+    expect(state.calls.some(c => c.name === 'claim_native_push_deliveries_budgeted')).toBe(true);
+    state.dbConfig = false; state.dbAuthorized = false;
   });
   it('does not claim deliveries if OAuth is unavailable', async () => {
     state.tokenFails = true;

@@ -78,6 +78,15 @@ export function nativePushRegistrationReady(): boolean {
   return nativePushConfig() !== null;
 }
 
+/** Database scheduler is restricted to the explicitly configured production project. */
+export function nativePushDatabaseSchedulerConfig(): { credentials: Credentials; target: NativePushTarget } | null {
+  if (process.env.PRINTLY_NATIVE_PUSH_ENABLED !== '1' || process.env.PRINTLY_NATIVE_DB_SCHEDULER_ENABLED !== '1' ||
+      process.env.VERCEL_ENV !== 'production' || process.env.VERCEL_PROJECT_ID !== 'prj_piCeGnHsSrpHaSbAiOQ3tvm8Cn7x' ||
+      hostname(process.env.NEXT_PUBLIC_SUPABASE_URL) !== 'lgfqetnfazawglwllymb.supabase.co') return null;
+  const config = nativePushCredentials();
+  return config?.target === 'production' ? config : null;
+}
+
 /** Fail closed: the public google-services.json does not authorize sends. */
 export function nativePushConfig(): NativePushConfig | null {
   if (process.env.PRINTLY_NATIVE_PUSH_ENABLED !== '1') return null;
