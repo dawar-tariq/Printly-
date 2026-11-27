@@ -28,12 +28,12 @@ for host in hosts:
     records = socket.getaddrinfo(host, 443, socket.AF_INET, socket.SOCK_STREAM)
     if not records: raise RuntimeError('release endpoint DNS lookup failed')
     ips.update(str(ipaddress.IPv4Address(r[4][0])) for r in records)
-open(sys.argv[1], 'w').write('\n'.join(sorted(ips)))
+open(sys.argv[1], 'w').write('\n'.join(sorted(ips)) + '\n')
 PYDNS
 for host in github.com objects.githubusercontent.com release-assets.githubusercontent.com; do
   result=$(adb shell "ping -c 1 -W 2 $host" 2>&1 || true)
   ip=$(printf '%s' "$result" | sed -n '1s/.*(\([0-9][0-9.]*\)).*/\1/p' | tr -d '\r')
-  [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Android release endpoint resolution failed'; exit 1; }
+  [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Android release endpoint resolution failed for $host"; exit 1; }
   printf '%s\n' "$ip" >> "$ips"
 done
 adb shell iptables -N PRINTLY_UPDATER_TEST
@@ -75,7 +75,7 @@ for node in ET.parse(sys.argv[1]).iter('node'):
         break
 PY
 )
-  [ -n "$bounds" ] || { echo "Expected UI control not found: $text"; return 1; }
+  [ -n "$bounds" ] || { echo "::error::Expected UI control not found: $text"; return 1; }
   adb shell input tap $bounds
 }
 sleep 12
@@ -90,8 +90,8 @@ import sys, xml.etree.ElementTree as ET
 texts = [n.attrib.get('text','') for n in ET.parse(sys.argv[1]).iter('node')]
 for category, marker in [('success','Continue to Android installer'), ('generic download exception','Could not download the update securely. Please try again.'), ('identity rejection','The downloaded app’s package, version or signing certificate does not match this installation. Do not install it.'), ('hash rejection','The downloaded file did not match the expected SHA-256. Do not install it.')]:
     if any(marker in t for t in texts):
-        print('Signed updater outcome:', category)
+        print(('::notice::' if category == 'success' else '::error::') + 'Signed updater outcome: ' + category)
         sys.exit(0 if category == 'success' else 1)
-print('Signed updater outcome: unexpected or unfinished state')
+print('::error::Signed updater outcome: unexpected or unfinished state')
 sys.exit(1)
 PY
