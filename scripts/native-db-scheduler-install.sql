@@ -44,7 +44,6 @@ begin
     perform extensions.http_reset_curlopt();
     perform extensions.http_set_curlopt('CURLOPT_SSL_VERIFYPEER','1');
     perform extensions.http_set_curlopt('CURLOPT_SSL_VERIFYHOST','2');
-    perform extensions.http_set_curlopt('CURLOPT_FOLLOWLOCATION','0');
     perform extensions.http_set_curlopt('CURLOPT_TIMEOUT_MS','55000');
     select (extensions.http(('POST','https://printly0.vercel.app/api/cron/native-order-push',
       array[extensions.http_header('Authorization','Bearer '||token)],'application/json','{}')::extensions.http_request)).status into code;
