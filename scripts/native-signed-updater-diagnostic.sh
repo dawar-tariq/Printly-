@@ -79,6 +79,9 @@ find_and_tap 'Download'
 sleep 60
 adb shell uiautomator dump /sdcard/window.xml >/dev/null
 adb pull /sdcard/window.xml "$ui" >/dev/null 2>&1
+# Counts only: no URLs, credentials or response data are printed.
+adb shell iptables -L PRINTLY_UPDATER_TEST -nvx | tr '\n' ' ' | sed 's/^/::notice title=IPv4 firewall counters::/'
+adb shell ip6tables -L OUTPUT -nvx | grep "owner UID match $uid" | tr '\n' ' ' | sed 's/^/::notice title=IPv6 firewall counters::/' || true
 python3 - "$ui" <<'PY'
 import sys, xml.etree.ElementTree as ET
 texts = [n.attrib.get('text','') for n in ET.parse(sys.argv[1]).iter('node')]
