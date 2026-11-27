@@ -45,7 +45,7 @@ vi.mock('@/lib/supabase', () => {
         { shop_id: fixture.shopB, is_permanent: false, expires_at: '2000-01-01T00:00:00Z' },
       ];
       if (this.table === 'shops') rows = [
-        { id: fixture.shopA, owner_id: fixture.userA, name: 'Shop A' }, { id: fixture.shopB, owner_id: fixture.userB, name: 'Shop B' },
+        { id: fixture.shopA, owner_id: fixture.userA, name: 'Shop A', kyc_status: 'approved', status: 'active' }, { id: fixture.shopB, owner_id: fixture.userB, name: 'Shop B', kyc_status: 'pending', status: 'paused' },
       ];
       if (this.table === 'orders') rows = orders;
       if (this.table === 'order_files') rows = [{ id: fixture.fileA, order_id: fixture.orderA, shop_id: fixture.shopA, storage_path: 'x/file.pdf', original_name: 'file.pdf' }];
@@ -117,6 +117,13 @@ describe('native bearer gateway', () => {
     }
     expect(fixture.tokenCalls).toHaveLength(6);
     expect(fixture.cookieCalls).toBe(0);
+  });
+  it('requires a verified bearer for application status and scopes it to the linked owner even without a subscription', async () => {
+    expect((await GET(request('application-status', null), context('application-status'))).status).toBe(401);
+    const response = await GET(request('application-status?shop_id=' + fixture.shopA, 'tokenB'), context('application-status'));
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toContain('no-store');
+    expect((await response.json()).application).toMatchObject({ shop_id: fixture.shopB, status: 'pending', can_access_dashboard: false });
   });
   it('allows only eligible recovery for an expired member and rejects cross-shop access', async () => {
     const list = await GET(request('recovery', 'tokenB'), context('recovery'));
