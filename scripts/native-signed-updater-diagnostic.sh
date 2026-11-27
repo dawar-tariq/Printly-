@@ -21,13 +21,20 @@ uid=$(adb shell stat -c %u /data/user/0/$pkg | tr -d '\r')
 # hosts or addresses supplied by the APK. Reject on DNS or firewall failure.
 ips="$RUNNER_TEMP/github-ips"
 python3 - "$ips" <<'PYDNS'
-import ipaddress, socket, sys
+import ipaddress, re, socket, subprocess, sys
 hosts = ['github.com', 'objects.githubusercontent.com', 'release-assets.githubusercontent.com']
 ips = set()
 for host in hosts:
     records = socket.getaddrinfo(host, 443, socket.AF_INET, socket.SOCK_STREAM)
     if not records: raise RuntimeError('release endpoint DNS lookup failed')
     ips.update(str(ipaddress.IPv4Address(r[4][0])) for r in records)
+    # Android's resolver can select a different CDN IP from the CI host. Query
+    # only the fixed allowlisted hostnames from the disposable emulator too;
+    # ICMP itself need not succeed, but its resolved address must be present.
+    probe = subprocess.run(['adb', 'shell', 'ping', '-4', '-c', '1', '-W', '2', host], capture_output=True, text=True, timeout=10)
+    match = re.search(r'PING\s+\S+\s+\((\d+\.\d+\.\d+\.\d+)\)', probe.stdout)
+    if not match: raise RuntimeError('emulator release endpoint DNS lookup failed')
+    ips.add(str(ipaddress.IPv4Address(match.group(1))))
 open(sys.argv[1], 'w').write('\n'.join(sorted(ips)) + '\n')
 PYDNS
 adb shell iptables -N PRINTLY_UPDATER_TEST
