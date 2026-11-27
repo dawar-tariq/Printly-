@@ -5,7 +5,7 @@ on:
     branches: ['arena/309fdf51-printly']
     paths: ['.github/workflows/native-signed-upgrade-diagnostic.yml', 'scripts/native-signed-upgrade-diagnostic.sh']
 permissions:
-  contents: read
+  contents: write # GitHub requires draft-release access for the reviewed APK.
 jobs:
   upgrade:
     runs-on: ubuntu-latest
