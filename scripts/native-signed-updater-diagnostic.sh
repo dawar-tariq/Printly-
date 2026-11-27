@@ -10,20 +10,42 @@ export ANDROID_SERIAL="${devices[0]%% *}"
 adb root
 adb wait-for-device
 [ "$(adb shell id -u | tr -d '\r')" = 0 ]
-# Isolate the production app from its production API and auth hosts. The public
-# GitHub release asset remains reachable. Never use a real account or session.
-adb shell 'cp /system/etc/hosts /data/local/tmp/printly-hosts; printf "\n127.0.0.1 printly0.vercel.app\n127.0.0.1 lgfqetnfazawglwllymb.supabase.co\n" >> /data/local/tmp/printly-hosts; mount --bind /data/local/tmp/printly-hosts /system/etc/hosts; nsenter -t "$(pidof netd)" -m -- mount --bind /data/local/tmp/printly-hosts /system/etc/hosts'
-adb shell 'cat /system/etc/hosts' | grep -q '127.0.0.1 printly0.vercel.app'
-# Confirm the Android resolver actually uses the isolated hosts mapping.
-resolution=$(adb shell 'ping -c 1 -W 2 printly0.vercel.app' 2>&1 || true)
-if [[ "$resolution" != *127.0.0.1* ]]; then
-  echo '::error::Android DNS did not use the isolation mapping; test stopped before app installation.'
-  exit 1
-fi
+# The app has no account or session. Install first, then firewall its UID
+# before launch. Only IPv4 GitHub release endpoints on port 443 may be reached;
+# all other IPv4 and IPv6 connections (including production APIs) are rejected.
 adb install "$RUNNER_TEMP/printly-2.1.2.apk" >/dev/null
 pkg=io.github.dawartariq.printly.owner
 uid=$(adb shell stat -c %u /data/user/0/$pkg | tr -d '\r')
 [[ "$uid" =~ ^[0-9]+$ ]]
+# Resolve the same endpoints from both CI and Android. Never allow arbitrary
+# hosts or addresses supplied by the APK. Reject on DNS or firewall failure.
+ips="$RUNNER_TEMP/github-ips"
+python3 - "$ips" <<'PYDNS'
+import ipaddress, socket, sys
+hosts = ['github.com', 'objects.githubusercontent.com', 'release-assets.githubusercontent.com']
+ips = set()
+for host in hosts:
+    records = socket.getaddrinfo(host, 443, socket.AF_INET, socket.SOCK_STREAM)
+    if not records: raise RuntimeError('release endpoint DNS lookup failed')
+    ips.update(str(ipaddress.IPv4Address(r[4][0])) for r in records)
+open(sys.argv[1], 'w').write('\n'.join(sorted(ips)))
+PYDNS
+for host in github.com objects.githubusercontent.com release-assets.githubusercontent.com; do
+  result=$(adb shell "ping -c 1 -W 2 $host" 2>&1 || true)
+  ip=$(printf '%s' "$result" | sed -n '1s/.*(\([0-9][0-9.]*\)).*/\1/p' | tr -d '\r')
+  [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Android release endpoint resolution failed'; exit 1; }
+  printf '%s\n' "$ip" >> "$ips"
+done
+adb shell iptables -N PRINTLY_UPDATER_TEST
+while IFS= read -r ip || [ -n "$ip" ]; do
+  [ -n "$ip" ] || continue
+  adb shell iptables -A PRINTLY_UPDATER_TEST -p tcp -d "$ip" --dport 443 -j RETURN
+done < "$ips"
+adb shell iptables -A PRINTLY_UPDATER_TEST -j REJECT
+adb shell iptables -I OUTPUT 1 -m owner --uid-owner "$uid" -j PRINTLY_UPDATER_TEST
+adb shell ip6tables -I OUTPUT 1 -m owner --uid-owner "$uid" -j REJECT
+adb shell iptables -C OUTPUT -m owner --uid-owner "$uid" -j PRINTLY_UPDATER_TEST
+adb shell ip6tables -C OUTPUT -m owner --uid-owner "$uid" -j REJECT
 python3 - "$RUNNER_TEMP/policy.xml" <<'PY'
 import html, json, sys
 policy = dict(available=True, versionCode=8, versionName='2.1.3', minimumVersionCode=1,
