@@ -7,6 +7,7 @@ import { SignOutButton } from '@/components/SignOutButton';
 import { LayoutDashboard, Settings, Boxes, BarChart3, CreditCard, ExternalLink, Hourglass, PenLine, Ban, MessageCircle, Smartphone } from 'lucide-react';
 import { SubscriptionNotice } from '@/components/SubscriptionNotice';
 import { ShopAvailability } from '@/components/ShopAvailability';
+import { ShopApplicationStatus } from '@/components/ShopApplicationStatus';
 import type { ShopSubscription } from '@/lib/subscription';
 import { cn } from '@/lib/utils';
 import { publicShopPath } from '@/lib/shop-identity';
@@ -47,6 +48,7 @@ export function ShopShell({ shop, reviewNote, subscription, warningDays, isOwner
         </nav>
       </header>
       <main className="max-w-6xl min-w-0 mx-auto px-3 sm:px-4 py-4">
+        {isOwner && <ShopApplicationStatus shopId={shop.id} status={shop.kyc_status} shopStatus={shop.status} reviewNote={reviewNote} canAccessDashboard />}
         <ShopAvailability initialOpen={shop.is_open} isOwner={isOwner} />
         <SubscriptionNotice subscription={subscription} warningDays={warningDays} isOwner={isOwner} />
         {shop.kyc_status === 'pending' && (
