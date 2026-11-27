@@ -1,53 +1,58 @@
--- Installs a one-use scheduler authenticator. Does NOT start a job, grant
--- worker claims or enable delivery. The separately reviewed activation must
--- only run after the matching server deployment is ready.
+-- Install scheduler authentication and an invocation helper only. Does not
+-- grant worker claims, start a cron job or enable delivery.
 create extension if not exists pg_cron;
-create extension if not exists pg_net with schema extensions;
+create extension if not exists http with schema extensions;
 
--- Supabase pg_net may grant public access to its request queue. Never put a
--- long-lived credential in that queue. Each invocation uses a random token,
--- valid for 60 seconds and consumed atomically on first use. An observer of
--- pg_net can race that invocation (a denial-of-service risk), but cannot use
--- the same token to invoke the worker again or mint another token.
-create table public.native_push_scheduler_tickets (
-  digest bytea primary key,
-  expires_at timestamptz not null
-);
-alter table public.native_push_scheduler_tickets enable row level security;
-revoke all on public.native_push_scheduler_tickets from public, anon, authenticated, service_role;
+do $$
+begin
+  if exists(select 1 from vault.decrypted_secrets where name='printly_native_scheduler_v2') then
+    raise exception 'scheduler secret already exists; do not silently rotate it';
+  end if;
+  perform vault.create_secret(encode(extensions.gen_random_bytes(32),'hex'), 'printly_native_scheduler_v2', 'Private native notification scheduler');
+end $$;
+
 create table public.native_push_scheduler_runs (
-  request_id bigint primary key,
-  requested_at timestamptz not null default clock_timestamp()
+  id bigint generated always as identity primary key,
+  requested_at timestamptz not null default clock_timestamp(),
+  completed_at timestamptz,
+  status_code integer,
+  error boolean not null default false
 );
 alter table public.native_push_scheduler_runs enable row level security;
 revoke all on public.native_push_scheduler_runs from public, anon, authenticated, service_role;
 
 create function public.verify_native_push_scheduler_secret(p_secret text) returns boolean
-language plpgsql security definer set search_path=pg_catalog,pg_temp as $$
-declare consumed integer;
-begin
-  if p_secret is null or p_secret !~ '^[a-f0-9]{64}$' then return false; end if;
-  delete from public.native_push_scheduler_tickets
-    where digest=extensions.digest(p_secret,'sha256') and expires_at>clock_timestamp();
-  get diagnostics consumed=row_count;
-  return consumed=1;
-end $$;
+language sql security definer set search_path=pg_catalog,pg_temp as $$
+  select coalesce(p_secret ~ '^[a-f0-9]{64}$' and
+    (select count(*)=1 and bool_and(extensions.digest(decrypted_secret,'sha256')=extensions.digest(p_secret,'sha256'))
+     from vault.decrypted_secrets where name='printly_native_scheduler_v2'), false)
+$$;
 revoke all on function public.verify_native_push_scheduler_secret(text) from public, anon, authenticated, service_role;
 grant execute on function public.verify_native_push_scheduler_secret(text) to service_role;
 
+-- Synchronous HTTPS avoids pg_net's publicly readable request queue: the
+-- long-lived secret is only held in Vault and backend memory, never in a
+-- scheduled SQL command, table, URL, response, or log. No redirects.
 create function public.invoke_native_push_scheduler() returns void
 language plpgsql security definer set search_path=pg_catalog,pg_temp as $$
-declare ticket text; request_id bigint;
+declare token text; code integer; run_id bigint;
 begin
-  -- Serialize issuance even if the scheduler happens to overlap.
   perform pg_advisory_xact_lock(2112026,9);
-  delete from public.native_push_scheduler_tickets where expires_at<=clock_timestamp();
-  ticket := encode(extensions.gen_random_bytes(32),'hex');
-  insert into public.native_push_scheduler_tickets(digest,expires_at) values (extensions.digest(ticket,'sha256'),clock_timestamp()+interval '60 seconds');
-  select net.http_post(url:='https://printly0.vercel.app/api/cron/native-order-push',
-    headers:=jsonb_build_object('Content-Type','application/json','Authorization','Bearer '||ticket),
-    body:='{}'::jsonb,timeout_milliseconds:=55000) into request_id;
-  insert into public.native_push_scheduler_runs(request_id) values (request_id);
+  select decrypted_secret into strict token from vault.decrypted_secrets where name='printly_native_scheduler_v2';
+  insert into public.native_push_scheduler_runs default values returning id into run_id;
+  begin
+    perform extensions.http_reset_curlopt();
+    perform extensions.http_set_curlopt('CURLOPT_SSL_VERIFYPEER','1');
+    perform extensions.http_set_curlopt('CURLOPT_SSL_VERIFYHOST','2');
+    perform extensions.http_set_curlopt('CURLOPT_FOLLOWLOCATION','0');
+    perform extensions.http_set_curlopt('CURLOPT_TIMEOUT_MS','55000');
+    select (extensions.http(('POST','https://printly0.vercel.app/api/cron/native-order-push',
+      array[extensions.http_header('Authorization','Bearer '||token)],'application/json','{}')::extensions.http_request)).status into code;
+    update public.native_push_scheduler_runs set status_code=code,completed_at=clock_timestamp() where id=run_id;
+  exception when others then
+    update public.native_push_scheduler_runs set error=true,completed_at=clock_timestamp() where id=run_id;
+  end;
+  perform extensions.http_reset_curlopt();
   delete from public.native_push_scheduler_runs where requested_at<clock_timestamp()-interval '2 days';
 end $$;
 revoke all on function public.invoke_native_push_scheduler() from public, anon, authenticated, service_role;
