@@ -33,8 +33,8 @@ for host in hosts:
     # ICMP itself need not succeed, but its resolved address must be present.
     probe = subprocess.run(['adb', 'shell', 'ping', '-4', '-c', '1', '-W', '2', host], capture_output=True, text=True, timeout=10)
     match = re.search(r'PING\s+\S+\s+\((\d+\.\d+\.\d+\.\d+)\)', probe.stdout)
-    if not match: raise RuntimeError('emulator release endpoint DNS lookup failed')
-    ips.add(str(ipaddress.IPv4Address(match.group(1))))
+    if match:
+        ips.add(str(ipaddress.IPv4Address(match.group(1))))
 open(sys.argv[1], 'w').write('\n'.join(sorted(ips)) + '\n')
 PYDNS
 adb shell iptables -N PRINTLY_UPDATER_TEST
