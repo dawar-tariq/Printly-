@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches: ['arena/309fdf51-printly']
-    paths: ['.github/workflows/native-apk-diagnostic.yml', 'scripts/NativeApkArchiveDiagnostic.kt']
+    paths: ['.github/workflows/native-apk-diagnostic.yml', 'scripts/NativeApkArchiveDiagnostic.kt', 'scripts/native-apk-diagnostic.sh']
 permissions:
   contents: read
 jobs:
