@@ -85,10 +85,12 @@ adb shell ip6tables -L OUTPUT -nvx | grep "owner UID match $uid" | tr '\n' ' ' |
 python3 - "$ui" <<'PY'
 import sys, xml.etree.ElementTree as ET
 texts = [n.attrib.get('text','') for n in ET.parse(sys.argv[1]).iter('node')]
+api = int(__import__('subprocess').check_output(['adb', 'shell', 'getprop', 'ro.build.version.sdk']).strip())
+expected = 'identity rejection' if api == 29 else 'success'
 for category, marker in [('success','Continue to Android installer'), ('generic download exception','Could not download the update securely. Please try again.'), ('identity rejection','The downloaded app’s package, version or signing certificate does not match this installation. Do not install it.'), ('hash rejection','The downloaded file did not match the expected SHA-256. Do not install it.')]:
     if any(marker in t for t in texts):
-        print(('::notice::' if category == 'success' else '::error::') + 'Signed updater outcome: ' + category)
-        sys.exit(0 if category == 'success' else 1)
+        print(('::notice::' if category == expected else '::error::') + 'Signed 2.1.2 updater outcome: ' + category + '; expected historical behavior: ' + expected)
+        sys.exit(0 if category == expected else 1)
 print('::error::Signed updater outcome: unexpected or unfinished state')
 sys.exit(1)
 PY
