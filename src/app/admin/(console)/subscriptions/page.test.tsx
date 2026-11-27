@@ -24,6 +24,16 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('admin subscription management', () => {
+  it('requires confirmation before starting the selected shop pilot', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    render(<AdminSubscriptionsPage />);
+    const button = await screen.findByRole('button', { name: 'Grant 30-day pilot' });
+    fireEvent.click(button);
+    expect(writes).toEqual([]);
+    confirm.mockReturnValue(true);
+    fireEvent.click(button);
+    await waitFor(() => expect(writes).toEqual([{ url: '/api/admin/subscriptions/pilot', body: { shop_id: shopId } }]));
+  });
   it('requires the admin to acknowledge independent verification before approval', async () => {
     render(<AdminSubscriptionsPage />);
     expect(await screen.findByText('123456789012')).toBeTruthy();
