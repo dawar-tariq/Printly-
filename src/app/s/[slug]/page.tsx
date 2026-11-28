@@ -1,0 +1,118 @@
+import { notFound } from 'next/navigation';
+import Link from 'next/link';
+import { createAdminSupabase, createServerSupabase } from '@/lib/supabase';
+import { shopHasSubscription } from '@/lib/subscription-server';
+import { Logo } from '@/components/Logo';
+import { Star, MapPin, Phone, Clock, Printer, FileText, ScanLine, BookOpen, Layers, Copy, ArrowRight, ShieldCheck } from 'lucide-react';
+import { formatPaiseExact } from '@/lib/format';
+import { rateUnitLabel } from '@/lib/rate-display';
+import type { RateRow } from '@/lib/pricing';
+import { findPublicShop } from '@/lib/public-shop';
+import { publicShopPath } from '@/lib/shop-identity';
+
+export const dynamic = 'force-dynamic';
+
+const SERVICE_ICONS: Record<string, typeof Printer> = {
+  print: Printer, photocopy: Copy, scan: ScanLine, bind: BookOpen, laminate: Layers,
+};
+const SERVICE_LABEL: Record<string, string> = {
+  print: 'Print', photocopy: 'Photocopy', scan: 'Scan to email', bind: 'Binding', laminate: 'Lamination',
+};
+
+export default async function ShopLandingPage({ params }: { params: Promise<{ slug: string }> }) {
+  const isolatedTest = process.env.PRINTLY_ISOLATED_TEST === '1';
+  const { slug } = await params;
+  const supabase = await createServerSupabase();
+  const { data: shop, error } = await findPublicShop(supabase, slug);
+
+  if (error) {
+    return (
+      <div className="min-h-screen grid place-items-center px-6">
+        <div className="card max-w-md p-8 text-center">
+          <Logo />
+          <h1 className="mt-5 text-xl font-extrabold">Can’t reach Printly right now</h1>
+          <p className="mt-2 text-sm text-neutral-600">The shop directory is temporarily unavailable. Please try again in a moment.</p>
+        </div>
+      </div>
+    );
+  }
+  if (!shop) notFound();
+  const subscribed = shop.status === 'active' ? await shopHasSubscription(createAdminSupabase(), shop.id) : false;
+  const active = shop.status === 'active' && shop.is_open === true && subscribed === true;
+
+  const [{ data: services }, { data: rates }] = await Promise.all([
+    supabase.from('shop_services').select('service, enabled, display_order').eq('shop_id', shop.id).eq('enabled', true).order('display_order'),
+    supabase.from('rate_card').select('service, unit, price_paise').eq('shop_id', shop.id),
+  ]);
+  const startingAt = new Map<string, { price: number; unit: RateRow['unit'] }>();
+  for (const r of rates ?? []) {
+    const cur = startingAt.get(r.service);
+    if (!cur || r.price_paise < cur.price) startingAt.set(r.service, { price: r.price_paise, unit: r.unit as RateRow['unit'] });
+  }
+
+  return (
+    <div className="min-h-screen">
+      <header className="max-w-lg mx-auto px-4 h-14 flex items-center justify-between">
+        <Logo />
+        <span className="chip bg-neutral-100 text-neutral-600"><ShieldCheck size={12} /> {isolatedTest ? 'Test shop' : 'Verified shop'}</span>
+      </header>
+
+      <main className="max-w-lg mx-auto px-4 pb-24">
+        {/* Shop card */}
+        <section className="card p-5 mt-2">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h1 className="break-words [overflow-wrap:anywhere] text-2xl font-extrabold tracking-tight">{shop.name}</h1>
+              <p className="mt-1 text-xs font-semibold text-neutral-500">Shop code <span className="font-mono">{shop.short_code}</span></p>
+              <p className="mt-1 flex items-start gap-1.5 text-sm text-neutral-500"><MapPin size={14} className="mt-1 shrink-0" /><span className="break-words [overflow-wrap:anywhere]">{shop.address}{shop.city ? `, ${shop.city}` : ''}</span></p>
+              {shop.phone && (isolatedTest ? <p className="mt-1 text-sm font-semibold text-neutral-600">Test contact only — do not call.</p> : <a href={`tel:${shop.phone.replace(/[^\d+]/g, '')}`} className="mt-1 flex items-center gap-1.5 break-all text-sm font-semibold text-orange-800 hover:underline"><Phone size={14} className="shrink-0" />{shop.phone}</a>)}
+              <p className="mt-1 text-sm text-neutral-500 flex items-center gap-1.5"><Clock size={14} className="shrink-0" />Estimated ready time: ~{shop.eta_minutes} min</p>
+            </div>
+            <div className="text-right shrink-0">
+              <div className="flex items-center gap-1 justify-end font-bold"><Star size={16} className="fill-amber-400 text-amber-400" />{shop.rating_avg || '—'}</div>
+              <div className="text-xs text-neutral-400">{shop.rating_count} reviews</div>
+            </div>
+          </div>
+          {!active && (
+            <div className="mt-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-sm px-4 py-3">
+              {shop.is_open === false ? 'This shop is closed. Please check back when it reopens.' : 'This shop is not accepting orders right now. Please check back soon.'}
+            </div>
+          )}
+        </section>
+
+        {/* Services */}
+        <section className="mt-5">
+          <h2 className="text-xs font-bold uppercase tracking-widest text-neutral-400 px-1">Services & starting prices</h2>
+          <div className="mt-2 card divide-y divide-neutral-100">
+            {(services ?? []).map(({ service }) => {
+              const Icon = SERVICE_ICONS[service] ?? FileText;
+              const from = startingAt.get(service);
+              return (
+                <div key={service} className="flex items-center gap-3 px-4 py-3.5">
+                  <span className="w-10 h-10 rounded-xl bg-orange-50 text-orange-700 grid place-items-center"><Icon size={20} /></span>
+                  <div className="flex-1">
+                    <div className="font-semibold">{SERVICE_LABEL[service] ?? service}</div>
+                    <div className="text-xs text-neutral-500">{from ? `Per ${rateUnitLabel(from.unit, service)} · options affect price` : 'Shop rates vary by option'}</div>
+                  </div>
+                  <div className="text-sm font-bold text-neutral-700">{from ? `from ${formatPaiseExact(from.price)}` : ''}</div>
+                </div>
+              );
+            })}
+            {(services ?? []).length === 0 && <div className="px-4 py-6 text-sm text-neutral-400">Services will appear here once the shop goes live.</div>}
+          </div>
+        </section>
+
+        {/* CTA */}
+        {active ? (
+          <Link href={`${publicShopPath(shop.short_code)}/order`} className="btn btn-primary w-full h-14 text-lg mt-6 shadow-lg shadow-orange-600/20">
+            Start your order <ArrowRight size={20} />
+          </Link>
+        ) : <div className="mt-6 text-center text-sm text-neutral-600">
+          <p>Already started checkout? Return in the same tab, or use your saved tracking link.</p>
+          <Link href={`/s/${encodeURIComponent(slug)}/order`} className="mt-2 inline-block font-bold text-orange-800 underline">Return to a previous checkout</Link>
+        </div>}
+        <p className="mt-3 text-center text-xs text-neutral-400">{isolatedTest ? 'Synthetic test orders only · Never send money' : 'No app needed · Pay the shop directly on UPI · Collect with your token'}</p>
+      </main>
+    </div>
+  );
+}

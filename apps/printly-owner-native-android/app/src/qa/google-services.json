@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "170293293872",
+    "project_id": "printly-notifications-qa",
+    "storage_bucket": "printly-notifications-qa.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:170293293872:android:face589a3744a9aa5acef5",
+        "android_client_info": {
+          "package_name": "io.github.dawartariq.printly.owner.native.qa"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD3qXYiLubQYJZqI1Tn_p-hfhw7g9wnrHc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

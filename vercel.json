@@ -1,0 +1,3 @@
+{
+  "ignoreCommand": "if [ \"$VERCEL_ENV\" = \"production\" ]; then exit 1; fi; echo 'Preview builds are disabled until staging isolation is configured.'; exit 0"
+}

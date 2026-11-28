@@ -1,0 +1,5 @@
+.hero { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 24px; border: 1px solid rgba(255,255,255,.9); border-radius: 22px; background: linear-gradient(115deg,rgba(255,255,255,.9),rgba(255,247,242,.73)); box-shadow: 0 12px 36px rgba(35,46,56,.06),inset 0 1px white; backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+.eyebrow { margin-bottom: 7px; color: #b74816; font-size: 11px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
+.access { overflow: hidden; border: 1px solid rgba(255,255,255,.9); border-radius: 24px; color: white; background: linear-gradient(125deg,#252c31,#3a3532); box-shadow: 0 14px 36px rgba(35,46,56,.12); }
+.term { background: rgba(255,255,255,.8); box-shadow: 0 12px 30px rgba(35,46,56,.06), inset 0 1px white; backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
+@media(max-width:639px) { .hero { padding: 19px; border-radius: 18px; } .hero h1 { font-size: 25px; } }

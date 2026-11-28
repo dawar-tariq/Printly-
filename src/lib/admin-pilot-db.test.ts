@@ -1,0 +1,40 @@
+import { readFileSync } from 'node:fs';
+import { PGlite } from '@electric-sql/pglite';
+import { afterAll, beforeAll, expect, it } from 'vitest';
+const admin='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const owner='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const shop='cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+let db: PGlite;
+beforeAll(async()=>{
+  db=new PGlite();
+  await db.exec(`create role anon; create role authenticated; create role service_role;
+    create table public.profiles(id uuid primary key,role text not null);
+    create table public.shops(id uuid primary key);
+    create table public.shop_subscriptions(shop_id uuid primary key references public.shops(id),term text,started_at timestamptz,expires_at timestamptz,is_permanent boolean not null default false,updated_at timestamptz);
+    create table public.subscription_events(shop_id uuid,actor_id uuid,event text,note text);
+  `);
+  await db.exec(readFileSync('supabase/migrations/0029_admin_pilot_access.sql','utf8'));
+  await db.query('insert into public.profiles values ($1,$2),($3,$4)',[admin,'admin',owner,'shop_staff']);
+  await db.query('insert into public.shops values ($1)',[shop]);
+});
+afterAll(async()=>{await db.close();});
+it('starts nothing on installation and protects the grant from client roles',async()=>{
+  expect((await db.query('select * from public.shop_subscriptions')).rows).toEqual([]);
+  const r=await db.query<{anon:boolean;auth:boolean;service:boolean}>("select has_function_privilege('anon','public.grant_shop_pilot(uuid,uuid)','execute') anon,has_function_privilege('authenticated','public.grant_shop_pilot(uuid,uuid)','execute') auth,has_function_privilege('service_role','public.grant_shop_pilot(uuid,uuid)','execute') service");
+  expect(r.rows[0]).toEqual({anon:false,auth:false,service:true});
+  await expect(db.query('select public.grant_shop_pilot($1,$2)',[shop,owner])).rejects.toThrow('ADMIN_REQUIRED');
+});
+it('never replaces active or permanent access, grants exactly 30 days once and is idempotent',async()=>{
+  await db.query("insert into public.shop_subscriptions(shop_id,term,started_at,expires_at) values($1,'monthly',now(),now()+interval '5 days')",[shop]);
+  await expect(db.query('select public.grant_shop_pilot($1,$2)',[shop,admin])).rejects.toThrow('PILOT_ACTIVE_ACCESS');
+  await db.query("update public.shop_subscriptions set expires_at=now()-interval '1 second',is_permanent=true where shop_id=$1",[shop]);
+  await expect(db.query('select public.grant_shop_pilot($1,$2)',[shop,admin])).rejects.toThrow('PILOT_ACTIVE_ACCESS');
+  await db.query('update public.shop_subscriptions set is_permanent=false where shop_id=$1',[shop]);
+  const first=await db.query<{result:{already_granted:boolean;starts_at:string;ends_at:string}}>('select public.grant_shop_pilot($1,$2) result',[shop,admin]);
+  const second=await db.query<{result:{already_granted:boolean;starts_at:string;ends_at:string}}>('select public.grant_shop_pilot($1,$2) result',[shop,admin]);
+  expect(first.rows[0].result.already_granted).toBe(false);
+  expect(second.rows[0].result.already_granted).toBe(true);
+  expect(second.rows[0].result.ends_at).toEqual(first.rows[0].result.ends_at);
+  expect(Date.parse(first.rows[0].result.ends_at)-Date.parse(first.rows[0].result.starts_at)).toBe(30*86400000);
+  expect((await db.query('select * from public.subscription_events')).rows).toHaveLength(1);
+});

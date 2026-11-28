@@ -1,0 +1,280 @@
+name: Native Android demo and checks
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'apps/printly-owner-native-android/**'
+      - '.github/workflows/android-native.yml'
+      - '.github/workflows/android-native-release-review.yml'
+      - 'scripts/check-native-review-request.*'
+      - 'scripts/check-native-review-version.*'
+      - 'scripts/test-native-emulator-check.test.mjs'
+      - 'scripts/create-native-draft-review.*'
+      - 'scripts/check-android-review-request.sh'
+      - 'scripts/sign-android-review.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Test unpublished draft and review-version safeguards
+        run: node --test scripts/create-native-draft-review.test.mjs scripts/check-native-review-version.test.mjs
+      - name: Test the native manifest guard with synthetic XML
+        working-directory: apps/printly-owner-native-android
+        run: python3 -m unittest test_check_manifest.py test_notification_branding.py
+      - name: Test disposable-emulator safeguards and result verification with synthetic results
+        run: |
+          for script in ci-emulator-common.sh ci-emulator-check.sh ci-notification-permission-check.sh; do
+            bash -n "apps/printly-owner-native-android/$script"
+          done
+          node --test scripts/test-native-emulator-check.test.mjs
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Android platform
+        shell: bash
+        run: |
+          set +o pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+          status=${PIPESTATUS[1]}
+          set -o pipefail
+          test "$status" -eq 0
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Build demo and run local tests
+        working-directory: apps/printly-owner-native-android
+        shell: bash
+        run: |
+          set +e
+          ./gradlew --no-daemon testDebugUnitTest assembleDebug assembleDebugAndroidTest --stacktrace > "$RUNNER_TEMP/native-build.log" 2>&1
+          result=$?
+          tail -n 300 "$RUNNER_TEMP/native-build.log"
+          if [ "$result" -ne 0 ]; then
+            # Keep diagnostics in one annotation, accessible even when CI log downloads are unavailable.
+            lines=$(grep -E '(^e: |^FAILURE:|^\* What went wrong|^> |^   > |^Caused by:|error:| FAILED)' "$RUNNER_TEMP/native-build.log" | grep -v '^> Task ' | head -60 || true)
+            if [ -z "$lines" ]; then lines=$(tail -n 60 "$RUNNER_TEMP/native-build.log"); fi
+            lines=${lines//'%'/'%25'}; lines=${lines//$'\r'/'%0D'}; lines=${lines//$'\n'/'%0A'}
+            echo "::error title=Native Android build::$lines"
+          fi
+          exit "$result"
+      - name: Inspect compiled demo package
+        working-directory: apps/printly-owner-native-android
+        shell: bash
+        run: |
+          set -eu -o pipefail
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest print "$APK" > "$RUNNER_TEMP/native-demo-manifest.xml"
+          python3 check-manifest.py "$RUNNER_TEMP/native-demo-manifest.xml" io.github.dawartariq.printly.owner.native.debug
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump --values resources "$APK" > "$RUNNER_TEMP/native-demo-resources.txt"
+          if grep -qE 'string/(google_app_id|gcm_defaultSenderId)' "$RUNNER_TEMP/native-demo-resources.txt"; then echo 'Firebase resources found in the demo.' >&2; exit 1; fi
+          unzip -p "$APK" 'classes*.dex' > "$RUNNER_TEMP/native-demo.dex"
+          if grep -aqF 'Lcom/google/firebase/messaging/FirebaseMessaging;' "$RUNNER_TEMP/native-demo.dex"; then echo 'Firebase Messaging found in the demo.' >&2; exit 1; fi
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$APK"
+          sha256sum "$APK"
+          if grep -R -E 'android\.webkit|TrustedWebActivity|androidbrowserhelper' app/src/main/java; then
+            echo 'A browser-wrapper dependency was found in native source.' >&2; exit 1
+          fi
+      - name: Guard, test and inspect the isolated QA build (not a release)
+        working-directory: apps/printly-owner-native-android
+        shell: bash
+        run: |
+          set +e
+          (
+            set -eu -o pipefail
+            for origin in '' 'http://test.example.invalid' 'https://printly-steel-three.vercel.app' 'https://printly0.vercel.app' 'https://printly-shop.vercel.app' 'https://test.example.invalid/path' 'https://test.example.invalid' 'https://printly-native-test.vercel.app.evil.test'; do
+              if ./gradlew --no-daemon assembleQa "-PprintlyQaSiteOrigin=$origin" > "$RUNNER_TEMP/invalid-native-qa.log" 2>&1; then
+                echo 'Unsafe isolated-test origin unexpectedly built.' >&2; exit 1
+              fi
+              if ! grep -F 'isolated QA build needs' "$RUNNER_TEMP/invalid-native-qa.log"; then
+                tail -n 80 "$RUNNER_TEMP/invalid-native-qa.log"
+                echo 'Expected the isolated-origin guard, but another failure occurred.' >&2; exit 1
+              fi
+            done
+            # Check the actual Gradle gate, not only a separate JSON validator.
+            cp app/src/qa/google-services.json "$RUNNER_TEMP/native-qa-original.json"
+            restore_qa_client() { cp "$RUNNER_TEMP/native-qa-original.json" app/src/qa/google-services.json; }
+            trap restore_qa_client EXIT
+            for tamper in missing wrong-project wrong-package production-identity private-field; do
+              python3 - "$RUNNER_TEMP/native-qa-original.json" "$tamper" <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+          dest = Path('app/src/qa/google-services.json')
+          if sys.argv[2] == 'missing':
+              dest.unlink(missing_ok=True)
+          else:
+              data = json.loads(Path(sys.argv[1]).read_text())
+              client = data['client'][0]
+              if sys.argv[2] == 'wrong-project':
+                  data['project_info']['project_id'] = 'printly-5c247'
+              elif sys.argv[2] == 'wrong-package':
+                  client['client_info']['android_client_info']['package_name'] = 'io.github.dawartariq.printly.owner'
+              elif sys.argv[2] == 'production-identity':
+                  production = json.loads(Path('app/src/release/google-services.json').read_text())
+                  data['project_info']['project_number'] = production['project_info']['project_number']
+                  client['client_info']['mobilesdk_app_id'] = production['client'][0]['client_info']['mobilesdk_app_id']
+              elif sys.argv[2] == 'private-field':
+                  client['unexpected'] = {'private_key': 'synthetic-not-a-real-key'}
+              else:
+                  raise SystemExit('Unknown synthetic mutation')
+              dest.write_text(json.dumps(data))
+          PY
+              if ./gradlew --no-daemon assembleQa '-PprintlyQaSiteOrigin=https://printly-native-test.vercel.app' > "$RUNNER_TEMP/invalid-native-qa-client.log" 2>&1; then
+                echo "Unsafe QA Firebase client unexpectedly built: $tamper" >&2; exit 1
+              fi
+              if ! grep -F 'isolated QA Firebase Android client configuration' "$RUNNER_TEMP/invalid-native-qa-client.log"; then
+                tail -n 80 "$RUNNER_TEMP/invalid-native-qa-client.log"
+                echo "Expected the QA client guard for $tamper, but another failure occurred." >&2; exit 1
+              fi
+            done
+            restore_qa_client
+            trap - EXIT
+            ./gradlew --no-daemon testQaUnitTest assembleQa '-PprintlyQaSiteOrigin=https://printly-native-test.vercel.app'
+            QA=app/build/outputs/apk/qa/app-qa.apk
+            "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest print "$QA" > "$RUNNER_TEMP/native-qa-manifest.xml"
+            python3 check-manifest.py "$RUNNER_TEMP/native-qa-manifest.xml" io.github.dawartariq.printly.owner.native.qa
+            "$ANDROID_HOME/build-tools/36.0.0/aapt" dump --values resources "$QA" > "$RUNNER_TEMP/native-qa-resources.txt"
+            firebase_values() {
+              python3 -c 'import json,sys; j=json.load(open(sys.argv[1])); c=next(x for x in j["client"] if x["client_info"]["android_client_info"]["package_name"] == sys.argv[2]); print(j["project_info"]["project_id"], j["project_info"]["project_number"], c["client_info"]["mobilesdk_app_id"], c["api_key"][0]["current_key"], sep="\n")' "$1" "$2"
+            }
+            mapfile -t qa_values < <(firebase_values app/src/qa/google-services.json io.github.dawartariq.printly.owner.native.qa)
+            mapfile -t production_values < <(firebase_values app/src/release/google-services.json io.github.dawartariq.printly.owner)
+            test "${#qa_values[@]}" -eq 4 && test "${#production_values[@]}" -eq 4
+            for value in "${qa_values[@]}"; do test -n "$value" && grep -qF "$value" "$RUNNER_TEMP/native-qa-resources.txt"; done
+            for value in "${production_values[@]}"; do
+              if grep -qF "$value" "$RUNNER_TEMP/native-qa-resources.txt"; then echo 'Production Firebase identity found in QA resources.' >&2; exit 1; fi
+            done
+            for name in google_app_id google_api_key gcm_defaultSenderId project_id; do grep -qF "string/$name" "$RUNNER_TEMP/native-qa-resources.txt"; done
+            test "$("$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest version-code "$QA")" = '11'
+            test "$("$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest version-name "$QA")" = '2.1.5-isolated-test'
+            "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$QA" > "$RUNNER_TEMP/native-qa-badging.txt"
+            grep -F "application-label:'Printly Isolated Test'" "$RUNNER_TEMP/native-qa-badging.txt"
+            grep -F 'application-debuggable' "$RUNNER_TEMP/native-qa-badging.txt"
+            "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$QA"
+            sha256sum "$QA"
+            CONFIG=$(find app/build/generated -name BuildConfig.java -path '*/qa/*' -print -quit)
+            test -n "$CONFIG"
+            grep -F 'ISOLATED_TEST_MODE = true' "$CONFIG"
+            grep -F 'DEMO_MODE = false' "$CONFIG"
+            grep -F 'https://printly-native-test.vercel.app' "$CONFIG"
+            grep -F 'rahfmpsdbwbktlobntkm.supabase.co' "$CONFIG"
+            if grep -F 'lgfqetnfazawglwllymb.supabase.co' "$CONFIG"; then echo 'Production Auth host found in QA build.' >&2; exit 1; fi
+            # Inspect the actual package too, not just the generated source.
+            unzip -p "$QA" 'classes*.dex' > "$RUNNER_TEMP/native-qa.dex"
+            grep -aqF 'https://printly-native-test.vercel.app' "$RUNNER_TEMP/native-qa.dex"
+            grep -aqF 'rahfmpsdbwbktlobntkm.supabase.co' "$RUNNER_TEMP/native-qa.dex"
+            grep -aqF 'Lcom/google/firebase/messaging/FirebaseMessaging;' "$RUNNER_TEMP/native-qa.dex"
+            grep -aqF 'Lio/github/dawartariq/printly/owner/nativeapp/NativeMessagingService;' "$RUNNER_TEMP/native-qa.dex"
+            for productionHost in 'printly-steel-three.vercel.app' 'printly0.vercel.app' 'printly-shop.vercel.app' 'lgfqetnfazawglwllymb.supabase.co'; do
+              if grep -aqF "$productionHost" "$RUNNER_TEMP/native-qa.dex"; then echo 'Production host found in QA DEX.' >&2; exit 1; fi
+            done
+          ) > "$RUNNER_TEMP/native-qa-check.log" 2>&1
+          result=$?
+          tail -n 160 "$RUNNER_TEMP/native-qa-check.log"
+          if [ "$result" -ne 0 ]; then
+            lines=$(tail -n 80 "$RUNNER_TEMP/native-qa-check.log")
+            lines=${lines//'%'/'%25'}; lines=${lines//$'\r'/'%0D'}; lines=${lines//$'\n'/'%0A'}
+            echo "::error title=Native isolated build::$lines"
+          fi
+          exit "$result"
+      - name: Refuse release without signing configuration
+        working-directory: apps/printly-owner-native-android
+        shell: bash
+        run: |
+          if ./gradlew --no-daemon assembleRelease > "$RUNNER_TEMP/unsigned-native.log" 2>&1; then
+            echo 'Unsigned release unexpectedly succeeded.' >&2; exit 1
+          fi
+          grep -F 'Release signing is not configured' "$RUNNER_TEMP/unsigned-native.log"
+      - name: Compile live variant with a disposable CI key (never published)
+        working-directory: apps/printly-owner-native-android
+        shell: bash
+        run: |
+          set -eu -o pipefail
+          KEY="$RUNNER_TEMP/native-disposable.p12"
+          trap 'rm -f "$KEY"' EXIT
+          keytool -genkeypair -noprompt -keystore "$KEY" -storetype PKCS12 -storepass ci-test-only -keypass ci-test-only -alias ci-test -keyalg RSA -keysize 2048 -validity 1 -dname 'CN=Disposable CI Test'
+          PRINTLY_ANDROID_KEYSTORE_PATH="$KEY" PRINTLY_ANDROID_KEYSTORE_PASSWORD=ci-test-only PRINTLY_ANDROID_KEYSTORE_TYPE=PKCS12 PRINTLY_ANDROID_KEY_ALIAS=ci-test PRINTLY_ANDROID_KEY_PASSWORD=ci-test-only ./gradlew --no-daemon assembleRelease
+          APK=app/build/outputs/apk/release/app-release.apk
+          "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest print "$APK" > "$RUNNER_TEMP/native-release-manifest.xml"
+          python3 check-manifest.py "$RUNNER_TEMP/native-release-manifest.xml" io.github.dawartariq.printly.owner
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump --values resources "$APK" > "$RUNNER_TEMP/native-release-resources.txt"
+          firebase_values() {
+            python3 -c 'import json,sys; j=json.load(open(sys.argv[1])); c=next(x for x in j["client"] if x["client_info"]["android_client_info"]["package_name"] == sys.argv[2]); print(j["project_info"]["project_id"], j["project_info"]["project_number"], c["client_info"]["mobilesdk_app_id"], c["api_key"][0]["current_key"], sep="\n")' "$1" "$2"
+          }
+          mapfile -t production_values < <(firebase_values app/src/release/google-services.json io.github.dawartariq.printly.owner)
+          mapfile -t qa_values < <(firebase_values app/src/qa/google-services.json io.github.dawartariq.printly.owner.native.qa)
+          test "${#production_values[@]}" -eq 4 && test "${#qa_values[@]}" -eq 4
+          for value in "${production_values[@]}"; do test -n "$value" && grep -qF "$value" "$RUNNER_TEMP/native-release-resources.txt"; done
+          for value in "${qa_values[@]}"; do
+            if grep -qF "$value" "$RUNNER_TEMP/native-release-resources.txt"; then echo 'QA Firebase identity found in production resources.' >&2; exit 1; fi
+          done
+          for name in google_app_id google_api_key gcm_defaultSenderId project_id; do grep -qF "string/$name" "$RUNNER_TEMP/native-release-resources.txt"; done
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$APK"
+          CONFIG=$(find app/build/generated -name BuildConfig.java -path '*/release/*' -print -quit)
+          test -n "$CONFIG"
+          grep -F 'ISOLATED_TEST_MODE = false' "$CONFIG"
+          grep -F 'DEMO_MODE = false' "$CONFIG"
+          grep -F 'https://printly0.vercel.app' "$CONFIG"
+          grep -F 'lgfqetnfazawglwllymb.supabase.co' "$CONFIG"
+          unzip -p "$APK" 'classes*.dex' > "$RUNNER_TEMP/native-release.dex"
+          grep -aqF 'https://printly0.vercel.app' "$RUNNER_TEMP/native-release.dex"
+          grep -aqF 'lgfqetnfazawglwllymb.supabase.co' "$RUNNER_TEMP/native-release.dex"
+          if grep -aqF 'https://printly-native-test.vercel.app' "$RUNNER_TEMP/native-release.dex" || grep -aqF 'rahfmpsdbwbktlobntkm.supabase.co' "$RUNNER_TEMP/native-release.dex"; then
+            echo 'Staging host found in production DEX.' >&2; exit 1
+          fi
+      - name: Exercise native review signing with a disposable key
+        working-directory: apps/printly-owner-native-android
+        shell: bash
+        run: |
+          set -eu -o pipefail
+          KEY="$RUNNER_TEMP/native-review-disposable.p12"
+          REQUEST="$RUNNER_TEMP/native-review-request.json"
+          OUTPUT="$RUNNER_TEMP/native-review-output"
+          trap 'rm -f "$KEY" "$REQUEST" "$OUTPUT"' EXIT
+          PASSWORD=$(openssl rand -hex 32)
+          keytool -genkeypair -noprompt -keystore "$KEY" -storetype PKCS12 -storepass "$PASSWORD" -keypass "$PASSWORD" -alias printly-owner-release -keyalg RSA -keysize 2048 -validity 1 -dname 'CN=Disposable Native Review CI'
+          CERT=$(keytool -exportcert -keystore "$KEY" -storetype PKCS12 -storepass "$PASSWORD" -alias printly-owner-release | sha256sum | cut -d' ' -f1)
+          jq -n --arg cert "$CERT" '{purpose:"signed-review-only",variant:"native",package:"io.github.dawartariq.printly.owner",request_id:"native-ci-review-1234",version_code:11,version_name:"2.1.5",reference_certificate_sha256:$cert}' > "$REQUEST"
+          : > "$OUTPUT"
+          GITHUB_OUTPUT="$OUTPUT" EXPECTED_CERTIFICATE="$CERT" ../../scripts/check-native-review-request.sh "$REQUEST"
+          grep -qx 'version_code=11' "$OUTPUT"
+          grep -qx 'version_name=2.1.5' "$OUTPUT"
+          KEYSTORE_BASE64="$(base64 -w0 < "$KEY")" PRINTLY_ANDROID_KEYSTORE_PASSWORD="$PASSWORD" EXPECTED_CERTIFICATE="$CERT" REQUESTED_VERSION_CODE=11 GITHUB_EVENT_NAME=push ../../scripts/sign-android-review.sh
+          APK=app/build/outputs/apk/release/app-release.apk
+          test "$("$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest version-name "$APK")" = '2.1.5'
+          "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest print "$APK" > "$RUNNER_TEMP/native-review-manifest.xml"
+          python3 check-manifest.py "$RUNNER_TEMP/native-review-manifest.xml" io.github.dawartariq.printly.owner
+          unset PASSWORD CERT
+      - name: Enable emulator acceleration
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Exercise demo update policy and QA push taps on an offline Android emulator
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 31
+          target: google_apis
+          arch: x86_64
+          working-directory: apps/printly-owner-native-android
+          script: PRINTLY_DISPOSABLE_EMULATOR=1 bash ci-emulator-check.sh
+      - name: Exercise first-open notification permission on an offline Android 13+ emulator
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          working-directory: apps/printly-owner-native-android
+          script: PRINTLY_DISPOSABLE_EMULATOR=1 bash ci-notification-permission-check.sh
+      # This check builds temporary demo/QA packages but uploads no APKs. A
+      # phone-test artifact or production release requires a separate decision.

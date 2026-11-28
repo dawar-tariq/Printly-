@@ -1,0 +1,194 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+    id 'org.jetbrains.kotlin.plugin.compose'
+}
+
+// The isolated build has one dedicated website and staging Auth host. A new
+// hostname must not silently point this QA package at a different backend.
+// The website's server-side isolation still needs independent verification.
+def qaOriginInput = providers.gradleProperty('printlyQaSiteOrigin').orElse('').get()
+def qaOrigin = qaOriginInput == 'https://printly-native-test.vercel.app' ? qaOriginInput : null
+def qaAuthHost = 'rahfmpsdbwbktlobntkm.supabase.co'
+
+// These files contain public Android client configuration, not credentials for
+// sending messages. Reject private service-account fields even if accidentally
+// placed anywhere in a client file. Never print the parsed contents on error.
+def privateFirebaseFields = ['private_key', 'private_key_id', 'client_email', 'client_secret'] as Set
+def hasPrivateFirebaseFields
+hasPrivateFirebaseFields = { value ->
+    if (value instanceof Map) return value.any { key, child -> privateFirebaseFields.contains(key.toString().toLowerCase(Locale.ROOT)) || hasPrivateFirebaseFields(child) }
+    if (value instanceof Collection) return value.any { child -> hasPrivateFirebaseFields(child) }
+    return false
+}
+def readFirebaseClient = { String path, String expectedProject, String expectedPackage ->
+    try {
+        def firebase = new groovy.json.JsonSlurper().parse(file(path))
+        if (!(firebase instanceof Map) || hasPrivateFirebaseFields(firebase) || firebase.type == 'service_account' || !(firebase.client instanceof List)) return null
+        def matches = firebase.client.findAll { it?.client_info?.android_client_info?.package_name == expectedPackage }
+        if (matches.size() != 1) return null
+        def appId = matches[0].client_info?.mobilesdk_app_id
+        def apiKey = matches[0].api_key?.getAt(0)?.current_key
+        def sender = firebase.project_info?.project_number
+        def project = firebase.project_info?.project_id
+        if (project != expectedProject || !(appId instanceof String && appId ==~ /1:[0-9]+:android:[0-9a-f]+/) ||
+            !(apiKey instanceof String && apiKey ==~ /AIza[A-Za-z0-9_-]{35}/) || !(sender instanceof String && sender ==~ /[0-9]+/) ||
+            !appId.startsWith("1:${sender}:android:")) return null
+        return [appId: appId, apiKey: apiKey, sender: sender, project: project]
+    } catch (Exception ignored) { return null }
+}
+def releaseFirebase = readFirebaseClient('src/release/google-services.json', 'printly-5c247', 'io.github.dawartariq.printly.owner')
+if (!releaseFirebase) throw new GradleException('The production Firebase Android client configuration is missing or does not match this app.')
+// The demo and release do not depend on a valid QA client file. QA tasks fail
+// closed below if that file is missing, private, or for the wrong project/app.
+def qaFirebase = readFirebaseClient('src/qa/google-services.json', 'printly-notifications-qa', 'io.github.dawartariq.printly.owner.native.qa')
+if (qaFirebase && (qaFirebase.sender == releaseFirebase.sender || qaFirebase.appId == releaseFirebase.appId || qaFirebase.apiKey == releaseFirebase.apiKey)) qaFirebase = null
+
+// CI may run an offline QA-specific instrumentation test. Never target a
+// production-signed build with this switch.
+def instrumentationBuildType = providers.gradleProperty('printlyInstrumentationBuildType').orElse('debug').get()
+if (!(instrumentationBuildType in ['debug', 'qa'])) throw new GradleException('Instrumentation is allowed only for debug or isolated QA.')
+
+android {
+    namespace 'io.github.dawartariq.printly.owner.nativeapp'
+    compileSdk 36
+    testBuildType instrumentationBuildType
+
+    defaultConfig {
+        // Same release identity as the installed owner app. A future signed
+        // release must be reviewed and use the independently verified key.
+        applicationId 'io.github.dawartariq.printly.owner'
+        minSdk 24
+        targetSdk 36
+        versionCode 11
+        // This candidate uses a new code; code 9 was recorded with mismatched metadata. It is
+        // not a release until separately signed, upgrade-tested and approved.
+        versionName '2.1.5'
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+        buildConfigField 'String', 'SITE_ORIGIN', '"https://printly0.vercel.app"'
+        buildConfigField 'String', 'SUPABASE_HOST', '"lgfqetnfazawglwllymb.supabase.co"'
+        buildConfigField 'boolean', 'ISOLATED_TEST_MODE', 'false'
+    }
+
+    def storePath = System.getenv('PRINTLY_ANDROID_KEYSTORE_PATH')
+    def storePasswordValue = System.getenv('PRINTLY_ANDROID_KEYSTORE_PASSWORD')
+    def storeTypeValue = System.getenv('PRINTLY_ANDROID_KEYSTORE_TYPE')
+    def keyAliasValue = System.getenv('PRINTLY_ANDROID_KEY_ALIAS')
+    def keyPasswordValue = System.getenv('PRINTLY_ANDROID_KEY_PASSWORD')
+    if (storeTypeValue && !(storeTypeValue in ['JKS', 'PKCS12'])) {
+        throw new GradleException('PRINTLY_ANDROID_KEYSTORE_TYPE must be JKS or PKCS12.')
+    }
+    def releaseSigningReady = [storePath, storePasswordValue, keyAliasValue, keyPasswordValue].every { it != null && !it.isEmpty() }
+    signingConfigs {
+        if (releaseSigningReady) {
+            release {
+                storeFile file(storePath)
+                storePassword storePasswordValue
+                if (storeTypeValue) storeType storeTypeValue
+                keyAlias keyAliasValue
+                keyPassword keyPasswordValue
+            }
+        }
+    }
+    buildTypes {
+        // A debug install is visibly synthetic, uses no live shop data, and
+        // cannot overwrite the installed release because its package differs.
+        debug {
+            applicationIdSuffix '.native.debug'
+            versionNameSuffix '-demo'
+            buildConfigField 'boolean', 'DEMO_MODE', 'true'
+        }
+        release {
+            minifyEnabled false
+            buildConfigField 'boolean', 'DEMO_MODE', 'false'
+            // Equivalent to the Firebase plugin's public resource values.
+            resValue 'string', 'google_app_id', releaseFirebase.appId
+            resValue 'string', 'google_api_key', releaseFirebase.apiKey
+            resValue 'string', 'gcm_defaultSenderId', releaseFirebase.sender
+            resValue 'string', 'project_id', releaseFirebase.project
+            if (releaseSigningReady) signingConfig signingConfigs.release
+        }
+        // Different package, visible test label, debug key and staging Auth host.
+        // It can be installed alongside a real app and is never a release APK.
+        qa {
+            initWith debug
+            applicationIdSuffix = '.native.qa'
+            versionNameSuffix = '-isolated-test'
+            matchingFallbacks = ['debug']
+            buildConfigField 'boolean', 'DEMO_MODE', 'false'
+            buildConfigField 'boolean', 'ISOLATED_TEST_MODE', 'true'
+            buildConfigField 'String', 'SITE_ORIGIN', '"' + (qaOrigin ?: 'https://invalid.invalid') + '"'
+            buildConfigField 'String', 'SUPABASE_HOST', '"' + qaAuthHost + '"'
+            if (qaFirebase) {
+                resValue 'string', 'google_app_id', qaFirebase.appId
+                resValue 'string', 'google_api_key', qaFirebase.apiKey
+                resValue 'string', 'gcm_defaultSenderId', qaFirebase.sender
+                resValue 'string', 'project_id', qaFirebase.project
+            }
+        }
+    }
+    // The demo has no Firebase. QA and release share the push implementation,
+    // icon and privacy-preserving manifest, but receive separate client values.
+    sourceSets {
+        debug.java.srcDir 'src/nonProduction/java'
+        release.java.srcDir 'src/push/java'
+        qa.java.srcDir 'src/push/java'
+        release.res.srcDir 'src/push/res'
+        qa.res.srcDir 'src/push/res'
+        release.manifest.srcFile 'src/push/AndroidManifest.xml'
+        qa.manifest.srcFile 'src/push/AndroidManifest.xml'
+    }
+    gradle.taskGraph.whenReady { graph ->
+        if (!releaseSigningReady && graph.allTasks.any { it.path.startsWith(':app:') && it.name in ['assembleRelease', 'bundleRelease', 'packageRelease'] }) {
+            throw new GradleException('Release signing is not configured. A signed review needs explicit approval and the verified release key.')
+        }
+        def qaTaskRequested = graph.allTasks.any { it.path.startsWith(':app:') && it.name.toLowerCase(Locale.ROOT).contains('qa') }
+        if (qaTaskRequested && !qaOrigin) {
+            throw new GradleException('The isolated QA build needs -PprintlyQaSiteOrigin=https://printly-native-test.vercel.app; all other origins are forbidden.')
+        }
+        if (qaTaskRequested && !qaFirebase) {
+            throw new GradleException('The isolated QA Firebase Android client configuration is missing or does not match the test project and package.')
+        }
+    }
+    buildFeatures { compose true; buildConfig true }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+        coreLibraryDesugaringEnabled true
+    }
+    kotlinOptions { jvmTarget = '17' }
+    packaging { resources { excludes += '/META-INF/{AL2.0,LGPL2.1}' } }
+}
+
+dependencies {
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'
+    implementation platform('androidx.compose:compose-bom:2024.12.01')
+    implementation 'androidx.activity:activity-compose:1.10.0'
+    implementation 'androidx.core:core-ktx:1.15.0'
+    implementation 'androidx.core:core-splashscreen:1.0.1'
+    implementation 'androidx.lifecycle:lifecycle-runtime-compose:2.8.7'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7'
+    implementation 'androidx.compose.ui:ui'
+    implementation 'androidx.compose.ui:ui-tooling-preview'
+    implementation 'androidx.compose.material3:material3'
+    implementation 'androidx.compose.material:material-icons-extended'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0'
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    releaseImplementation platform('com.google.firebase:firebase-bom:35.2.0')
+    releaseImplementation 'com.google.firebase:firebase-messaging'
+    releaseImplementation 'androidx.work:work-runtime-ktx:2.10.1'
+    qaImplementation platform('com.google.firebase:firebase-bom:35.2.0')
+    qaImplementation 'com.google.firebase:firebase-messaging'
+    qaImplementation 'androidx.work:work-runtime-ktx:2.10.1'
+    debugImplementation 'androidx.compose.ui:ui-tooling'
+    debugImplementation 'androidx.compose.ui:ui-test-manifest'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
+    testImplementation 'com.squareup.okhttp3:mockwebserver:4.12.0'
+    testImplementation 'com.squareup.okhttp3:okhttp-tls:4.12.0'
+    androidTestImplementation platform('androidx.compose:compose-bom:2024.12.01')
+    androidTestImplementation 'androidx.compose.ui:ui-test-junit4'
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+    androidTestImplementation 'androidx.test.uiautomator:uiautomator:2.3.0'
+}

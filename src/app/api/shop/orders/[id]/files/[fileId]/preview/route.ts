@@ -1,0 +1,20 @@
+import { NextResponse } from 'next/server';
+import { assertStaffOfShop, jsonError } from '@/lib/api';
+import { createAdminSupabase } from '@/lib/supabase';
+import { IMAGE_MIMES, PDF_MIME } from '@/lib/upload-files';
+
+export async function GET(_req: Request, { params }: { params: Promise<{ id: string; fileId: string }> }) {
+  const { id, fileId } = await params;
+  const admin = createAdminSupabase();
+  const { data: file } = await admin.from('order_files').select('storage_path, shop_id, mime').eq('id', fileId).eq('order_id', id).maybeSingle();
+  if (!file) return jsonError(404, 'not_found', 'File not found');
+  if (!await assertStaffOfShop(file.shop_id, { recoveryOrderId: id })) return jsonError(403, 'forbidden', 'Not your shop or order is unavailable');
+  if (file.mime !== PDF_MIME && !IMAGE_MIMES.has(file.mime)) return jsonError(415, 'unsupported', 'Preview is available for PDF, JPEG and PNG files.');
+  const { data, error } = await admin.storage.from('order-files').createSignedUrl(file.storage_path, 60);
+  if (error || !data) return jsonError(500, 'storage', 'Could not open this file. Please try again.');
+  const response = NextResponse.redirect(data.signedUrl, 302);
+  response.headers.set('Cache-Control', 'private, no-store, max-age=0');
+  response.headers.set('Referrer-Policy', 'no-referrer');
+  response.headers.set('X-Content-Type-Options', 'nosniff');
+  return response;
+}

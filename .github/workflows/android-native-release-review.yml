@@ -1,0 +1,159 @@
+name: Native Android protected signed review
+
+# An approved run creates an encrypted review artifact and an unpublished
+# GitHub release draft for an authorized device test. It does not publish the
+# release, deploy the site, or configure the owner download. A deliberately
+# committed request can trigger the branch workflow without merging.
+on:
+  workflow_dispatch:
+    inputs:
+      expected_certificate_sha256:
+        description: 'Independently verified release certificate SHA-256 fingerprint'
+        required: true
+        type: string
+  push:
+    branches:
+      - 'arena/309fdf51-printly'
+    paths:
+      - 'apps/printly-owner-native-android/signed-review-request.json'
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: android-owner-signed-review
+  cancel-in-progress: false
+
+jobs:
+  verify-protection:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Check signing-environment protections before requesting approval
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/check-android-signing-environment.mjs
+
+  signed-native-review:
+    needs: verify-protection
+    environment: printly-owner-signing
+    # The scoped token can create an unpublished draft after signing; no step
+    # publishes it, changes hosting, or exposes an unencrypted Actions artifact.
+    permissions:
+      actions: read
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Recheck protections and the approved commit
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -eu -o pipefail
+          node scripts/check-android-signing-environment.mjs
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Validate the explicit native review request
+        id: request
+        working-directory: apps/printly-owner-native-android
+        shell: bash
+        env:
+          EXPECTED_CERTIFICATE: ${{ vars.PRINTLY_ANDROID_EXPECTED_CERT_SHA256 }}
+        run: |
+          set -eu -o pipefail
+          ../../scripts/check-native-review-request.sh signed-review-request.json
+          # A previous review request must not authorize signing a newer local
+          # candidate. Check the literal candidate version before reading any
+          # signing secret; a new review requires a separately approved request.
+          node ../../scripts/check-native-review-version.mjs signed-review-request.json app/build.gradle
+          echo "::notice title=Native review build::Encrypted review-only APK requested from commit $GITHUB_SHA; this does not publish or deploy."
+      # Refuse to touch signing secrets unless a harmless sample can be encrypted
+      # and decrypted using the separately stored artifact passphrase.
+      - name: Verify review encryption with harmless data
+        working-directory: apps/printly-owner-native-android
+        shell: bash
+        env:
+          PRINTLY_ANDROID_ARTIFACT_PASSPHRASE: ${{ secrets.PRINTLY_ANDROID_ARTIFACT_PASSPHRASE }}
+        run: ../../scripts/check-android-review-encryption.sh
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Android platform
+        shell: bash
+        run: |
+          set +o pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+          result=${PIPESTATUS[1]}
+          set -o pipefail
+          test "$result" -eq 0
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Sign and independently verify the native APK
+        working-directory: apps/printly-owner-native-android
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.PRINTLY_ANDROID_KEYSTORE_BASE64 }}
+          PRINTLY_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.PRINTLY_ANDROID_KEYSTORE_PASSWORD }}
+          EXPECTED_CERTIFICATE: ${{ vars.PRINTLY_ANDROID_EXPECTED_CERT_SHA256 }}
+          MANUAL_EXPECTED_CERTIFICATE: ${{ inputs.expected_certificate_sha256 }}
+          REQUESTED_VERSION_CODE: ${{ steps.request.outputs.version_code }}
+          REQUESTED_VERSION_NAME: ${{ steps.request.outputs.version_name }}
+        run: |
+          set -eu -o pipefail
+          ../../scripts/sign-android-review.sh
+          APK=app/build/outputs/apk/release/app-release.apk
+          analyzer="$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer"
+          test "$("$analyzer" manifest version-name "$APK")" = "$REQUESTED_VERSION_NAME"
+          "$analyzer" manifest print "$APK" > "$RUNNER_TEMP/native-release-manifest.xml"
+          python3 check-manifest.py "$RUNNER_TEMP/native-release-manifest.xml" io.github.dawartariq.printly.owner
+          if grep -q '^application-debuggable' package-evidence.txt; then echo 'A release APK must not be debuggable.' >&2; exit 1; fi
+          unzip -p "$APK" 'classes*.dex' > "$RUNNER_TEMP/native-release.dex"
+          grep -aqF 'https://printly0.vercel.app' "$RUNNER_TEMP/native-release.dex"
+          grep -aqF 'lgfqetnfazawglwllymb.supabase.co' "$RUNNER_TEMP/native-release.dex"
+          if grep -aqF 'https://printly-native-test.vercel.app' "$RUNNER_TEMP/native-release.dex" || grep -aqF 'rahfmpsdbwbktlobntkm.supabase.co' "$RUNNER_TEMP/native-release.dex"; then
+            echo 'Staging host found in production DEX.' >&2; exit 1
+          fi
+      - name: Encrypt the native review APK for the operator
+        working-directory: apps/printly-owner-native-android
+        shell: bash
+        env:
+          PRINTLY_ANDROID_ARTIFACT_PASSPHRASE: ${{ secrets.PRINTLY_ANDROID_ARTIFACT_PASSPHRASE }}
+          REQUESTED_VERSION_NAME: ${{ steps.request.outputs.version_name }}
+        run: |
+          set -eu -o pipefail
+          umask 077
+          # Keep the identical verified bytes on the ephemeral runner for the
+          # draft-release step; only encrypted bytes go to Actions artifacts.
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/Printly-for-Shops-$REQUESTED_VERSION_NAME.apk"
+          ../../scripts/encrypt-android-review.sh app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/app-release.apk.gpg
+          rm -f app/build/outputs/apk/release/app-release.apk
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          # This repository is public: only encrypted bytes and public evidence.
+          name: printly-native-signed-review-encrypted-NOT-PUBLISHED
+          path: |
+            apps/printly-owner-native-android/app/build/outputs/apk/release/app-release.apk.gpg
+            apps/printly-owner-native-android/signer-evidence.txt
+            apps/printly-owner-native-android/package-evidence.txt
+            apps/printly-owner-native-android/sha256-evidence.txt
+          if-no-files-found: error
+          retention-days: 7
+      - name: Create and verify an unpublished device-test draft
+        working-directory: apps/printly-owner-native-android
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_CERTIFICATE: ${{ vars.PRINTLY_ANDROID_EXPECTED_CERT_SHA256 }}
+          REQUESTED_VERSION_CODE: ${{ steps.request.outputs.version_code }}
+          REQUESTED_VERSION_NAME: ${{ steps.request.outputs.version_name }}
+        run: |
+          set -eu -o pipefail
+          APK="$RUNNER_TEMP/Printly-for-Shops-$REQUESTED_VERSION_NAME.apk"
+          trap 'rm -f -- "$APK"' EXIT
+          ../../scripts/create-native-draft-review.sh "$APK" sha256-evidence.txt

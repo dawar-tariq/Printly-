@@ -1,0 +1,48 @@
+name: Native public APK download diagnostic
+on:
+  workflow_dispatch:
+  push:
+    branches: ['arena/309fdf51-printly']
+    paths: ['.github/workflows/native-download-diagnostic.yml', 'scripts/NativeDownloadDiagnostic.kt', 'scripts/native-download-diagnostic.sh']
+permissions:
+  contents: read
+jobs:
+  network-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [29, 31]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Prepare diagnostic and Android platform
+        shell: bash
+        run: |
+          set -eu -o pipefail
+          cp scripts/NativeDownloadDiagnostic.kt apps/printly-owner-native-android/app/src/androidTest/java/io/github/dawartariq/printly/owner/nativeapp/
+          set +o pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+          result=${PIPESTATUS[1]}
+          set -o pipefail
+          test "$result" -eq 0
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Exercise updater on a disposable Android emulator
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: ${{ matrix.api }}
+          target: google_apis
+          arch: x86_64
+          working-directory: apps/printly-owner-native-android
+          script: PRINTLY_DISPOSABLE_EMULATOR=1 bash ../../scripts/native-download-diagnostic.sh

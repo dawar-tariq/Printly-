@@ -1,0 +1,122 @@
+name: Android protected signed review
+
+# A deliberate request-file change works on this branch without merging to main.
+# The job still requires a protected environment and human approval. Manual
+# dispatch becomes available only after this workflow exists on the default branch.
+# Neither trigger publishes the APK or deploys the website.
+on:
+  workflow_dispatch:
+    inputs:
+      expected_certificate_sha256:
+        description: 'Independently verified release certificate SHA-256 fingerprint'
+        required: true
+        type: string
+  push:
+    branches:
+      - 'arena/309fdf51-printly'
+    paths:
+      - 'apps/printly-owner-android/signed-review-request.json'
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: android-owner-signed-review
+  cancel-in-progress: false
+
+jobs:
+  verify-protection:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Check signing-environment protections before requesting approval
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/check-android-signing-environment.mjs
+
+  signed-review:
+    needs: verify-protection
+    # Environment secrets are available only after its rules and review pass.
+    environment: printly-owner-signing
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Recheck protections and the approved commit
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -eu -o pipefail
+          node scripts/check-android-signing-environment.mjs
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Validate the explicit review request
+        id: request
+        working-directory: apps/printly-owner-android
+        shell: bash
+        env:
+          EXPECTED_CERTIFICATE: ${{ vars.PRINTLY_ANDROID_EXPECTED_CERT_SHA256 }}
+        run: |
+          set -eu -o pipefail
+          ../../scripts/check-android-review-request.sh signed-review-request.json
+          echo "::notice title=Review build::Review-only APK requested from commit $GITHUB_SHA; this does not publish or deploy."
+      # Fail before touching the signing key if the configured artifact
+      # passphrase or GnuPG setup cannot encrypt and decrypt harmless data.
+      - name: Verify review encryption with harmless data
+        working-directory: apps/printly-owner-android
+        shell: bash
+        env:
+          PRINTLY_ANDROID_ARTIFACT_PASSPHRASE: ${{ secrets.PRINTLY_ANDROID_ARTIFACT_PASSPHRASE }}
+        run: ../../scripts/check-android-review-encryption.sh
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Android platform
+        shell: bash
+        run: |
+          set +o pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+          result=${PIPESTATUS[1]}
+          set -o pipefail
+          test "$result" -eq 0
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Sign and independently verify the APK
+        working-directory: apps/printly-owner-android
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.PRINTLY_ANDROID_KEYSTORE_BASE64 }}
+          PRINTLY_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.PRINTLY_ANDROID_KEYSTORE_PASSWORD }}
+          EXPECTED_CERTIFICATE: ${{ vars.PRINTLY_ANDROID_EXPECTED_CERT_SHA256 }}
+          MANUAL_EXPECTED_CERTIFICATE: ${{ inputs.expected_certificate_sha256 }}
+          REQUESTED_VERSION_CODE: ${{ steps.request.outputs.version_code }}
+        run: |
+          set -eu -o pipefail
+          ../../scripts/sign-android-review.sh
+          "$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer" manifest print app/build/outputs/apk/release/app-release.apk > review-compiled-manifest.xml
+          python3 ../../scripts/check-android-launch-manifest.py review-compiled-manifest.xml io.github.dawartariq.printly.owner
+      - name: Encrypt the review APK for the operator
+        working-directory: apps/printly-owner-android
+        shell: bash
+        env:
+          PRINTLY_ANDROID_ARTIFACT_PASSPHRASE: ${{ secrets.PRINTLY_ANDROID_ARTIFACT_PASSPHRASE }}
+        run: |
+          set -eu -o pipefail
+          ../../scripts/encrypt-android-review.sh app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/app-release.apk.gpg
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          # Only the encrypted APK and public evidence are uploaded. GitHub
+          # artifacts in this public repository are not private storage.
+          name: printly-owner-signed-review-encrypted
+          path: |
+            apps/printly-owner-android/app/build/outputs/apk/release/app-release.apk.gpg
+            apps/printly-owner-android/signer-evidence.txt
+            apps/printly-owner-android/package-evidence.txt
+            apps/printly-owner-android/sha256-evidence.txt
+          if-no-files-found: error
+          retention-days: 7

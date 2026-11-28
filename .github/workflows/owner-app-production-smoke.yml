@@ -1,0 +1,187 @@
+name: Owner app production smoke
+
+# This read-only smoke test visits public pages and never signs in or changes data.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'arena/309fdf51-printly'
+    paths:
+      - '.github/workflows/owner-app-production-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Locate Chrome and install the browser driver
+        shell: bash
+        run: |
+          set -euo pipefail
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+          test -n "$CHROME"
+          echo "CHROME_PATH=$CHROME" >> "$GITHUB_ENV"
+          npm install --prefix "$RUNNER_TEMP/owner-smoke" --no-save --ignore-scripts --no-audit --no-fund playwright-core@1.55.0
+      - name: Check the owner welcome and existing sign-in
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const { chromium } = require(`${process.env.RUNNER_TEMP}/owner-smoke/node_modules/playwright-core`);
+          const site = 'https://printly0.vercel.app';
+          (async () => {
+            const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH, args: ['--no-sandbox'] });
+            try {
+              const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+              const page = await context.newPage();
+              const pageErrors = [];
+              page.on('pageerror', error => pageErrors.push(error.message));
+              async function checkSlideImage(path) {
+                const image = page.locator(`section img[src="${path}"]`);
+                await image.waitFor({ state: 'visible' });
+                const decoded = await image.evaluate(async img => {
+                  try { await img.decode(); return img.complete && img.naturalWidth > 0; } catch { return false; }
+                });
+                assert.equal(decoded, true, `onboarding image ${path} must display`);
+              }
+              const entry = await page.goto(`${site}/owner-app?android_version=2`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+              assert.equal(entry?.status(), 200, 'owner app must return HTTP 200');
+              await page.getByRole('heading', { name: 'Get orders from anyone, anywhere.' }).waitFor({ state: 'visible', timeout: 15000 });
+              await checkSlideImage('/images/owner-onboarding-qr.webp');
+              assert.equal(await page.evaluate(() => localStorage.getItem('printly-owner-android-version')), '2');
+              await page.getByRole('button', { name: 'Next', exact: true }).click();
+              await page.getByRole('heading', { name: 'Manage everything in one place.' }).waitFor();
+              await checkSlideImage('/images/owner-onboarding-printer.webp');
+              await page.getByRole('button', { name: 'Next', exact: true }).click();
+              await page.getByRole('heading', { name: 'Grow your print shop.' }).waitFor();
+              await checkSlideImage('/images/owner-onboarding-growth.webp');
+              await page.getByRole('button', { name: 'Get started' }).click();
+              await page.waitForURL(url => url.pathname === '/login' && url.searchParams.get('next') === '/shop', { timeout: 15000 });
+              await page.getByRole('heading', { name: 'Shop owner sign in' }).waitFor();
+              await page.goto(`${site}/owner-app?android_version=2`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+              await page.waitForURL(url => url.pathname === '/login' && url.searchParams.get('next') === '/shop', { timeout: 15000 });
+              const root = await context.request.get(`${site}/`);
+              assert.equal(root.status(), 200, 'public homepage must return HTTP 200');
+              const manifest = await context.request.get(`${site}/owner-app.webmanifest`);
+              assert.equal(manifest.status(), 200, 'owner app manifest must return HTTP 200');
+              assert.equal((await manifest.json()).id, '/owner-app');
+              assert.deepEqual(pageErrors, [], 'owner app should not raise browser errors');
+              console.log('PASS: public site, owner app HTTP 200, all introduction slides and images, first-time and returning login redirects, and manifest.');
+              await context.close();
+            } finally {
+              await browser.close();
+            }
+          })().catch(error => { console.error(error); process.exitCode = 1; });
+          NODE
+      - name: Check owner icons and logged-out shop protection
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const site = 'https://printly0.vercel.app';
+          (async () => {
+            for (const size of [192, 512]) {
+              const response = await fetch(`${site}/brand/printly-owner-${size}.png`, { signal: AbortSignal.timeout(30000) });
+              assert.equal(response.status, 200, `${size}px icon must return HTTP 200`);
+              assert.match(response.headers.get('content-type') || '', /^image\/png\b/i);
+              const body = Buffer.from(await response.arrayBuffer());
+              assert.equal(body.subarray(0, 8).toString('hex'), '89504e470d0a1a0a', 'icon must be a PNG');
+              assert.equal(body.readUInt32BE(16), size, 'icon width');
+              assert.equal(body.readUInt32BE(20), size, 'icon height');
+            }
+            const response = await fetch(`${site}/shop`, { redirect: 'manual', signal: AbortSignal.timeout(30000) });
+            assert.ok([302, 303, 307, 308].includes(response.status), 'logged-out shop must redirect');
+            const destination = new URL(response.headers.get('location'), site);
+            assert.equal(destination.origin, site);
+            assert.equal(destination.pathname, '/login');
+            assert.equal(destination.searchParams.get('next'), '/shop');
+            console.log('PASS: both owner icons are valid PNGs and unauthenticated shop access redirects to login.');
+          })().catch(error => { console.error(error); process.exitCode = 1; });
+          NODE
+      - name: Report Android domain association status
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          (async () => {
+            const response = await fetch('https://printly0.vercel.app/.well-known/assetlinks.json', { redirect: 'manual', signal: AbortSignal.timeout(30000) });
+            const association = await response.json();
+            if (response.status === 404) {
+              assert.deepEqual(association, []);
+              console.log('::notice title=Android association not configured::The endpoint returned HTTP 404. The app may show a browser bar until its signer is verified and configured.');
+            } else {
+              assert.equal(response.status, 200, 'association must be a valid JSON response or the expected unconfigured 404');
+              assert.ok(Array.isArray(association));
+              const entry = association.find(item => item?.target?.package_name === 'io.github.dawartariq.printly.owner');
+              assert.ok(entry, 'association must name the owner app');
+              assert.ok(entry.relation.includes('delegate_permission/common.handle_all_urls'));
+              assert.ok(entry.target.sha256_cert_fingerprints.some(value => /^(?:[0-9A-F]{2}:){31}[0-9A-F]{2}$/.test(value)));
+              console.log('::notice title=Android association present::The endpoint returned HTTP 200 with an owner-app fingerprint; verify it against the installed APK separately.');
+            }
+          })().catch(error => { console.error(error); process.exitCode = 1; });
+          NODE
+      - name: Check production native gateway and download protection
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const site = 'https://printly0.vercel.app';
+          const get = path => fetch(`${site}${path}`, { redirect: 'manual', signal: AbortSignal.timeout(30000) });
+          const notCached = response => {
+            assert.match(response.headers.get('cache-control') || '', /\bno-store\b/i, 'response must not be cached');
+            assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+          };
+          const variesBy = (response, credential) => assert.ok(
+            (response.headers.get('vary') || '').split(',').some(field => field.trim().toLowerCase() === credential),
+            'private response must vary by its credential',
+          );
+          (async () => {
+            const config = await get('/api/native/v1/config');
+            assert.equal(config.status, 200, 'native config must be available');
+            notCached(config);
+            const data = await config.json();
+            assert.equal(data.api_version, 1);
+            assert.equal(data.supabase_url, 'https://lgfqetnfazawglwllymb.supabase.co');
+            assert.ok(typeof data.supabase_anon_key === 'string' && data.supabase_anon_key.length > 0, 'public sign-in key must be present');
+            const auth = await fetch(`${data.supabase_url}/auth/v1/settings`, {
+              headers: { apikey: data.supabase_anon_key }, redirect: 'error', signal: AbortSignal.timeout(30000),
+            });
+            assert.ok(auth.ok, 'public sign-in key must work with production Auth');
+            const experience = await get('/api/native/v1/experience');
+            assert.equal(experience.status, 200, 'native experience must be available');
+            notCached(experience);
+            const experienceData = await experience.json();
+            assert.equal(experienceData.schema, 1);
+            assert.doesNotMatch(experienceData.notice, /test only/i, 'production must not serve the isolated test notice');
+            const diagnostic = await get('/api/native/v1/test-environment');
+            assert.equal(diagnostic.status, 404, 'test-only diagnostic must be unavailable in production');
+            const nativeMe = await get('/api/native/v1/shop/me');
+            assert.equal(nativeMe.status, 401, 'native shop access must require a bearer token');
+            notCached(nativeMe); variesBy(nativeMe, 'authorization');
+            const release = await get('/api/shop/app-release');
+            assert.equal(release.status, 401, 'download metadata must require a shop session');
+            notCached(release); variesBy(release, 'cookie');
+            const downloadPage = await get('/shop/app');
+            assert.ok([302, 303, 307, 308].includes(downloadPage.status), 'download page must redirect when signed out');
+            const destination = new URL(downloadPage.headers.get('location'), site);
+            assert.equal(destination.origin, site);
+            assert.equal(destination.pathname, '/login');
+            assert.equal(destination.searchParams.get('next'), '/shop/app');
+            const root = await get('/');
+            assert.equal(root.status, 200, 'canonical homepage must be available');
+            assert.ok((await root.text()).includes(`${site}/brand/printly-share.png`), 'site metadata must use the canonical production origin');
+            const legacy = await fetch('https://printly-steel-three.vercel.app/s/p-demo1?legacy_check=1', {
+              redirect: 'manual', signal: AbortSignal.timeout(30000),
+            });
+            assert.equal(legacy.status, 307, 'old origin must redirect');
+            assert.equal(legacy.headers.get('location'), `${site}/s/p-demo1?legacy_check=1`, 'redirect must preserve the shop path and query');
+            console.log('PASS: production Auth/config, isolation, private gateway and download guards, canonical metadata and legacy redirect.');
+          })().catch(error => { console.error(error); process.exitCode = 1; });
+          NODE

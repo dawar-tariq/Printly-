@@ -1,0 +1,217 @@
+name: Native owner gateway integration
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'src/app/api/native/**'
+      - 'src/app/api/shop/**'
+      - 'src/app/shop/(billing)/app/**'
+      - 'src/app/shop/(billing)/layout.tsx'
+      - 'src/components/OwnerAppDownload.tsx'
+      - 'src/components/RestrictedShopShell.tsx'
+      - 'src/lib/**'
+      - 'src/middleware.ts'
+      - 'supabase/migrations/**'
+      - 'supabase/candidates/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'scripts/test-native-integration.mjs'
+      - 'scripts/test-native-realtime-local.mjs'
+      - 'scripts/test-native-push-local.mjs'
+      - '.github/workflows/native-backend-integration.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  disposable-supabase:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - uses: supabase/setup-cli@1dedf2c611547ede7232d26866dd3c56ab903bbb # v1.7.3
+        with:
+          version: 2.45.4
+      - name: Install website dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@10.15.1 --activate
+          pnpm install --frozen-lockfile
+      - name: Start disposable local Supabase
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/printly-native-integration"
+          cd "$RUNNER_TEMP/printly-native-integration"
+          supabase init
+          mkdir -p supabase/migrations
+          # The synthetic demo seed is migration 0003; the CLI's optional seed
+          # file is otherwise absent from this clean disposable project.
+          : > supabase/seed.sql
+          # Only tracked migrations present in this checked-out commit; never
+          # connect to a hosted project or include deferred worktree migrations.
+          cp "$GITHUB_WORKSPACE"/supabase/migrations/*.sql supabase/migrations/
+          # Exercise the exact containment candidate and verify its flags on the
+          # fresh local database, then restore the disposable baseline so the
+          # harness can first demonstrate the DELETE positive control. Its
+          # later pause rehearsal uses the same resulting publication options.
+          cp "$GITHUB_WORKSPACE/supabase/candidates/realtime_pause_delete.sql" supabase/migrations/9998_candidate_rehearsal.sql
+          cat >> supabase/migrations/9998_candidate_rehearsal.sql <<'SQL'
+          do $$ begin
+            if not exists (select 1 from pg_publication where pubname='supabase_realtime'
+              and pubinsert and pubupdate and not pubdelete and pubtruncate) then
+              raise exception 'CANDIDATE_PUBLICATION_FLAGS_INCORRECT';
+            end if;
+            alter publication supabase_realtime set (publish = 'insert, update, delete, truncate');
+          end $$;
+          SQL
+          # Do not add orders to Realtime in a test helper. Migration 0025
+          # itself must establish the publication used by the live-event test.
+          # Loopback can also be a tunnel to another database. Add a unique,
+          # runner-generated marker to this disposable stack, and require the
+          # harness to read it before it is allowed to make any writes.
+          nonce=$(openssl rand -hex 32)
+          echo "PRINTLY_NATIVE_DISPOSABLE_NONCE=$nonce" >> "$GITHUB_ENV"
+          cat > supabase/migrations/9999_native_integration_guard.sql <<SQL
+          create table public.native_integration_guard (nonce text not null);
+          insert into public.native_integration_guard (nonce) values ('$nonce');
+          revoke all on public.native_integration_guard from public, anon, authenticated;
+          grant select on public.native_integration_guard to service_role;
+          -- These helpers exist only in this runner's fresh local stack and
+          -- require the per-run nonce; none is a production migration.
+          create function public.native_integration_pause_delete_events(p_nonce text)
+          returns boolean language plpgsql security definer set search_path = pg_catalog, public, pg_temp as \$\$
+          begin
+            if p_nonce is null or not exists (select 1 from public.native_integration_guard where nonce = p_nonce) then
+              raise exception 'INVALID_DISPOSABLE_STACK';
+            end if;
+            -- Match the metadata observed in production; don't normalize or
+            -- guess a different publication's existing event configuration.
+            if not exists (select 1 from pg_publication where pubname = 'supabase_realtime'
+                and pubinsert and pubupdate and pubdelete and pubtruncate) then
+              raise exception 'PUBLICATION_BASELINE_MISMATCH';
+            end if;
+            alter publication supabase_realtime set (publish = 'insert, update, truncate');
+            if not exists (select 1 from pg_publication where pubname = 'supabase_realtime'
+                and pubinsert and pubupdate and not pubdelete and pubtruncate) then
+              raise exception 'DELETE_EVENTS_STILL_ENABLED';
+            end if;
+            return true;
+          end \$\$;
+          revoke all on function public.native_integration_pause_delete_events(text) from public, anon, authenticated;
+          grant execute on function public.native_integration_pause_delete_events(text) to service_role;
+          create function public.native_integration_resume_delete_events(p_nonce text)
+          returns boolean language plpgsql security definer set search_path = pg_catalog, public, pg_temp as \$\$
+          begin
+            if p_nonce is null or not exists (select 1 from public.native_integration_guard where nonce = p_nonce) then
+              raise exception 'INVALID_DISPOSABLE_STACK';
+            end if;
+            if not exists (select 1 from pg_publication where pubname = 'supabase_realtime'
+                and pubinsert and pubupdate and not pubdelete and pubtruncate) then
+              raise exception 'PUBLICATION_NOT_PAUSED';
+            end if;
+            alter publication supabase_realtime set (publish = 'insert, update, delete, truncate');
+            if not exists (select 1 from pg_publication where pubname = 'supabase_realtime'
+                and pubinsert and pubupdate and pubdelete and pubtruncate) then
+              raise exception 'DELETE_EVENTS_NOT_RESTORED';
+            end if;
+            return true;
+          end \$\$;
+          revoke all on function public.native_integration_resume_delete_events(text) from public, anon, authenticated;
+          grant execute on function public.native_integration_resume_delete_events(text) to service_role;
+          create function public.native_integration_unpublish_orders(p_nonce text)
+          returns boolean language plpgsql security definer set search_path = pg_catalog, public, pg_temp as \$\$
+          begin
+            if p_nonce is null or not exists (select 1 from public.native_integration_guard where nonce = p_nonce) then
+              raise exception 'INVALID_DISPOSABLE_STACK';
+            end if;
+            if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime'
+                and schemaname = 'public' and tablename = 'orders') then
+              raise exception 'ORDERS_NOT_PUBLISHED';
+            end if;
+            alter publication supabase_realtime drop table public.orders;
+            if exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime'
+                and schemaname = 'public' and tablename = 'orders') then
+              raise exception 'ORDERS_STILL_PUBLISHED';
+            end if;
+            return true;
+          end \$\$;
+          revoke all on function public.native_integration_unpublish_orders(text) from public, anon, authenticated;
+          grant execute on function public.native_integration_unpublish_orders(text) to service_role;
+          notify pgrst, 'reload schema';
+          SQL
+          set +e
+          supabase start --exclude studio,imgproxy,edge-runtime,logflare,vector,supavisor,mailpit,postgres-meta > "$RUNNER_TEMP/local-supabase.log" 2>&1
+          result=$?
+          set -e
+          if [ "$result" -ne 0 ]; then
+            python3 - "$RUNNER_TEMP/local-supabase.log" <<'PY'
+          import re, sys
+          lines = open(sys.argv[1], encoding='utf-8', errors='replace').read().splitlines()[-80:]
+          lines = ['[local configuration redacted]' if re.search(r'(?i)(key|secret|password|token|jwt)', line) else line for line in lines]
+          text = '\n'.join(lines)[-10000:].replace('%','%25').replace('\r','%0D').replace('\n','%0A')
+          print('::error title=Disposable Supabase startup::' + text)
+          PY
+            exit "$result"
+          fi
+          supabase status -o env > "$RUNNER_TEMP/local-supabase.env"
+      - name: Test the native gateway with real local Auth and database
+        shell: bash
+        run: |
+          set -euo pipefail
+          # These values come from the disposable local stack, never from a
+          # GitHub secret or a hosted project. The test enforces loopback too.
+          set -a
+          source "$RUNNER_TEMP/local-supabase.env"
+          set +a
+          case "$API_URL" in http://127.0.0.1:*|http://localhost:*) ;; *) echo 'Local Supabase URL required' >&2; exit 1;; esac
+          export NEXT_PUBLIC_SUPABASE_URL="$API_URL"
+          export NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON_KEY"
+          export SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY"
+          export NEXT_PUBLIC_SITE_URL='http://127.0.0.1:3000'
+          export PRINTLY_TEST_SITE_URL="$NEXT_PUBLIC_SITE_URL"
+          export PRINTLY_DISPOSABLE_NATIVE_TEST='1'
+          # A disposable fake RSA identity lets the local gateway validate
+          # configuration. It is not a Google credential, and this test never
+          # invokes the sender or connects to Firebase.
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$RUNNER_TEMP/fake-native-fcm.pem" 2>/dev/null
+          export PRINTLY_NATIVE_PUSH_ENABLED='1'
+          export PRINTLY_NATIVE_PUSH_CRON_SECRET="$(openssl rand -hex 32)"
+          export PRINTLY_FCM_SERVICE_ACCOUNT_JSON="$(node -e 'const fs=require("fs"); process.stdout.write(JSON.stringify({type:"service_account",project_id:"printly-5c247",client_email:"synthetic@printly-5c247.iam.gserviceaccount.com",private_key:fs.readFileSync(process.argv[1],"utf8"),token_uri:"https://oauth2.googleapis.com/token"}))' "$RUNNER_TEMP/fake-native-fcm.pem")"
+          rm -f "$RUNNER_TEMP/fake-native-fcm.pem"
+          pnpm exec next dev --hostname 127.0.0.1 --port 3000 > "$RUNNER_TEMP/native-next.log" 2>&1 &
+          server=$!
+          trap 'kill "$server" 2>/dev/null || true' EXIT
+          set +e
+          node scripts/test-native-integration.mjs > "$RUNNER_TEMP/native-integration.log" 2>&1
+          result=$?
+          set -e
+          cat "$RUNNER_TEMP/native-integration.log"
+          if [ "$result" -ne 0 ]; then
+            python3 - "$RUNNER_TEMP/native-integration.log" "$RUNNER_TEMP/native-next.log" <<'PY'
+          import re, sys
+          chunks = []
+          for path in sys.argv[1:]:
+              lines = open(path, encoding='utf-8', errors='replace').read().splitlines()[-45:]
+              chunks.append('\n'.join('[local configuration redacted]' if re.search(r'(?i)(service.role.key|authorization:|password=|access.token)', line) else line for line in lines))
+          text = '\n--- local server ---\n'.join(chunks)[-12000:].replace('%','%25').replace('\r','%0D').replace('\n','%0A')
+          print('::error title=Native local integration::' + text)
+          PY
+            exit "$result"
+          fi
+      - name: Stop and discard the local stack
+        if: always()
+        shell: bash
+        run: |
+          if [ -f "$RUNNER_TEMP/printly-native-integration/supabase/config.toml" ]; then
+            cd "$RUNNER_TEMP/printly-native-integration"
+            supabase stop --no-backup > /dev/null 2>&1 || true
+          fi

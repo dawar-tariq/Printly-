@@ -1,0 +1,16 @@
+.page { max-width: 1100px; margin: 0 auto; padding-bottom: 32px; color: #20242a; }
+.heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 24px; border: 1px solid rgba(255,255,255,.9); border-radius: 22px; background: linear-gradient(115deg,rgba(255,255,255,.9),rgba(255,247,242,.73)); box-shadow: 0 12px 36px rgba(35,46,56,.06),inset 0 1px white; backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+.heading h1 { font-size: 28px; }
+.heading h1 svg { color: #e85d20; }
+.heading p:last-child { font-size: 13px; }
+.refresh { display: grid; place-items: center; flex-shrink: 0; width: 44px; height: 44px; border: 1px solid #e3e7e8; border-radius: 13px; background: rgba(255,255,255,.8); color: #505b62; }
+.refresh:disabled { opacity: .5; }
+.addPanel, .list { margin-top: 16px; border: 1px solid rgba(255,255,255,.92); border-radius: 20px; background: rgba(255,255,255,.76); box-shadow: 0 12px 36px rgba(35,46,56,.07),inset 0 1px white; backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+.addPanel { padding: 18px; }
+.addPanel summary:focus-visible, .page button:focus-visible { outline: 2px solid #c2410c; outline-offset: 2px; }
+.addPanel[open] summary > svg { transform: rotate(180deg); }
+.filters { display: flex; gap: 4px; margin-top: 16px; padding: 4px; border: 1px solid rgba(220,225,227,.85); border-radius: 14px; background: rgba(240,243,244,.82); }
+.list { overflow: hidden; margin-top: 12px; }
+.row { padding: 16px 18px; border-bottom: 1px solid #edf0f1; }
+.row:last-child { border-bottom: 0; }
+@media (max-width: 639px) { .heading { padding: 19px; border-radius: 18px; } .heading h1 { font-size: 25px; } .addPanel { padding: 15px; } .row { padding: 14px 12px; } }

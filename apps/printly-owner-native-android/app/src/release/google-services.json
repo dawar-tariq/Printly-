@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "121052523887",
+    "project_id": "printly-5c247",
+    "storage_bucket": "printly-5c247.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:121052523887:android:8e1d9dbd7095e78a51cc9a",
+        "android_client_info": {
+          "package_name": "io.github.dawartariq.printly.owner"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC3mFXM3oKHzUx0OacpzSpOTOqMTt6Lko8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
