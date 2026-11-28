@@ -1,4 +1,6 @@
-import { renderPrintlyEmail, type PrintlyEmailKind } from './transactional-email-templates';
+// Deno requires the extension when this module is loaded by an Edge Function.
+// @ts-expect-error Next's TypeScript configuration omits TypeScript import extensions.
+import { renderPrintlyEmail, type PrintlyEmailKind } from './transactional-email-templates.ts';
 
 type Claim = { id: string; claim_token: string; kind: PrintlyEmailKind; email: string; owner_name: string | null };
 type Config = { projectUrl: string; serviceKey: string; brevoKey: string; fetcher?: typeof fetch };
