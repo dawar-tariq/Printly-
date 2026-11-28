@@ -13,6 +13,7 @@ import { planSavings, subscriptionQuoteSchema, termMonths, type SubscriptionQuot
 import { clearSubscriptionRequestKey, ensureSubscriptionRequestKey, readSubscriptionRequestKey } from '@/lib/subscription-request-client';
 import { SUBSCRIPTION_TERMS, subscriptionDate, termLabel, type ShopSubscription, type SubscriptionPlan, type SubscriptionPurchase, type SubscriptionTerm } from '@/lib/subscription';
 import { useSubscriptionState } from '@/lib/use-subscription-state';
+import styles from '../billing-pages.module.css';
 
 type Data = { shop: { id: string; name: string; short_code: string }; is_owner: boolean; subscription: ShopSubscription | null; plan: SubscriptionPlan; purchases: SubscriptionPurchase[]; announcements?: VisibleAnnouncement[]; offers_unavailable?: boolean };
 const statusText = { active: 'Active', expiring: 'Expiring soon', expired: 'Expired', not_subscribed: 'Not subscribed', permanent: 'Permanent access' };
@@ -164,14 +165,14 @@ export default function ShopSubscriptionPage() {
   const priceFor = (term: SubscriptionTerm) => term === 'monthly' ? data.plan.monthly_paise : term === 'six_months' ? data.plan.six_months_paise : data.plan.yearly_paise;
 
   return <div className="mx-auto max-w-6xl space-y-6 pb-10">
-    <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className={styles.hero}>
       <div><p className="text-xs font-bold uppercase tracking-[0.18em] text-orange-700">Printly for shops</p><h1 className="mt-1 text-3xl font-extrabold tracking-tight">Your subscription</h1><p className="mt-1 text-sm text-neutral-600">One plan. All your tools. More ways to save.</p></div>
       <button onClick={() => { void load(); router.refresh(); }} className="btn btn-ghost min-h-10 px-3 text-xs"><RefreshCw size={14} />Refresh status</button>
     </div>
     {error && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div>}
     {notice && <div role="status" className="rounded-xl border border-green-200 bg-green-50 p-3 text-sm text-green-800">{notice}</div>}
 
-    <section className="overflow-hidden rounded-[1.5rem] bg-[#24221f] text-white shadow-[0_12px_35px_rgba(35,26,20,0.12)]">
+    <section className={styles.access}>
       <div className="relative flex flex-wrap items-start justify-between gap-5 overflow-hidden p-5 sm:p-7">
         <div aria-hidden="true" className="pointer-events-none absolute -right-8 -top-24 h-52 w-52 rounded-full bg-orange-400/20 blur-3xl" />
         <div className="relative"><p className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-orange-200"><ShieldCheck size={17} />Your Printly access</p>
@@ -215,7 +216,7 @@ export default function ShopSubscriptionPage() {
       <div className="grid gap-3 md:grid-cols-3">{SUBSCRIPTION_TERMS.map((term) => {
         const amount = priceFor(term.value);
         const difference = planSavings(data.plan.monthly_paise, term.value, amount)?.termDifference;
-        return <div key={term.value} className={`flex flex-col rounded-2xl border p-5 shadow-sm ${selected === term.value ? 'border-orange-500 bg-orange-50/60 ring-1 ring-orange-500' : 'border-neutral-200 bg-white'}`}>
+        return <div key={term.value} className={`flex flex-col rounded-2xl border p-5 shadow-sm ${styles.term} ${selected === term.value ? 'border-orange-500 bg-orange-50/60 ring-1 ring-orange-500' : 'border-neutral-200 bg-white'}`}>
           <div className="flex items-start justify-between gap-2"><div><h3 className="font-extrabold">{term.label}</h3><p className="mt-1 text-xs text-neutral-500">{term.duration} of full access</p></div>{difference != null && difference > 0 && term.value !== 'monthly' && <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[0.65rem] font-extrabold text-emerald-700">SAVE {formatPaiseExact(difference)}</span>}</div>
           <p className="mt-6 text-3xl font-extrabold tracking-tight">{amount == null ? 'Not configured' : formatPaiseExact(amount)}</p><p className="mt-1 text-xs text-neutral-500">one-time base price</p>
           {term.value !== 'monthly' && difference != null && <p className="mt-3 min-h-8 text-xs leading-5 text-neutral-600">{difference > 0 ? `Save ${formatPaiseExact(difference)}` : difference < 0 ? `${formatPaiseExact(-difference)} more` : 'Same price'} compared with {termMonths(term.value)} monthly terms.</p>}

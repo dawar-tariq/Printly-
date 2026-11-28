@@ -29,7 +29,7 @@ export function OwnerAppDownload() {
     return () => controller.abort();
   }, [attempt]);
 
-  return <section className="rounded-[1.35rem] border border-[#eee4db] bg-white p-4 sm:p-5" aria-labelledby="owner-app-download-title">
+  return <section className="card p-5 sm:p-6" aria-labelledby="owner-app-download-title">
     <div className="flex items-start gap-3">
       <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-orange-50 text-orange-700"><Smartphone size={23} /></span>
       <div><h2 id="owner-app-download-title" className="font-extrabold">Printly for Shops · Android</h2><p className="mt-1 text-sm leading-6 text-neutral-600">Manage orders, inventory and your shop using your existing Printly account.</p></div>

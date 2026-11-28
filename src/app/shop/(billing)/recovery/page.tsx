@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AlertTriangle, ChevronRight, Loader2, RefreshCw } from 'lucide-react';
 import { formatPaiseExact, timeAgo } from '@/lib/format';
+import styles from '../billing-pages.module.css';
 
 type Order = { id: string; token: string | null; status: string; payment_status: string; payment_method: string | null; customer_name: string; customer_phone: string; total_paise: number; utr: string | null; created_at: string };
 type Result = { orders: Order[]; pagination: { page: number; pages: number; count: number } };
@@ -27,7 +28,7 @@ export default function RecoveryPage() {
   useEffect(() => { void load(); }, [load]);
 
   return <div className="space-y-4 pb-10">
-    <div className="flex flex-wrap items-start justify-between gap-3"><div><h1 className="text-2xl font-extrabold">Open orders &amp; payment issues</h1><p className="mt-1 text-sm text-neutral-600">A limited workspace for orders already in progress.</p></div><button onClick={() => void load()} className="btn btn-ghost min-h-10 px-3 text-xs"><RefreshCw size={14} />Refresh</button></div>
+    <div className={styles.hero}><div><p className={styles.eyebrow}>Your shop tools</p><h1 className="text-2xl font-extrabold">Open orders &amp; payment issues</h1><p className="mt-1 text-sm text-neutral-600">A limited workspace for orders already in progress.</p></div><button onClick={() => void load()} className="btn btn-ghost min-h-10 px-3 text-xs"><RefreshCw size={14} />Refresh</button></div>
     <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950"><AlertTriangle size={18} className="mt-0.5 shrink-0" /><p>New orders and normal management require an active subscription. You can finish existing jobs and handle UPI reports here. <Link href="/shop/subscription" className="font-bold underline">Review subscription</Link></p></div>
     <section className="card p-4"><h2 className="font-extrabold">Find a specific existing order</h2><p className="mt-1 text-xs text-neutral-500">For a completed or cancelled order with a payment issue, paste the customer’s tracking link or order ID. Only orders belonging to your shop can be opened.</p><form className="mt-3 flex flex-wrap gap-2" onSubmit={(event) => {
       event.preventDefault();
