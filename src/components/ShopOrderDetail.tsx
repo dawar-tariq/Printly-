@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils';
 import { SERVICE_LABEL } from '@/lib/constants';
 import { duplexSheets } from '@/lib/duplex';
 import { requestUpiDecision } from '@/lib/upi-confirmation';
+import styles from './ShopOrderDetail.module.css';
 
 interface Detail {
   order: Record<string, unknown> & {
@@ -97,8 +98,8 @@ export function ShopOrderDetail({ backHref = '/shop' }: { backHref?: string }) {
     : null;
 
   return (
-    <div className="max-w-4xl mx-auto">
-      <div className="flex flex-wrap items-center gap-2 no-print">
+    <div className={styles.page}>
+      <div className={`no-print ${styles.heading}`}>
         <Link href={backHref} aria-label="Back to orders" className="-ml-2 shrink-0 p-2 text-neutral-500 hover:text-neutral-800"><ChevronLeft size={22} /></Link>
         <div className="min-w-0 flex-1 basis-[calc(100%-3rem)] sm:basis-auto">
           <h1 className="break-words font-extrabold text-lg leading-tight">Order {o.token ?? `#${o.id.slice(0, 8).toUpperCase()}`} {o.rush && <span className="chip bg-red-100 text-red-700 ml-1 align-middle"><Zap size={10} />RUSH</span>}</h1>
@@ -119,7 +120,7 @@ export function ShopOrderDetail({ backHref = '/shop' }: { backHref?: string }) {
         {/* left: files + items */}
         <div className="min-w-0 md:col-span-3 space-y-4">
           <section className="card p-4">
-            <h2 className="text-xs font-extrabold uppercase tracking-widest text-neutral-500 flex items-center gap-1.5"><FileText size={13} />Files ({detail.files.length})</h2>
+            <h2 className={styles.sectionTitle}><FileText size={13} />Files ({detail.files.length})</h2>
             <ul className="mt-2 divide-y divide-neutral-100">
               {detail.files.map((f) => (
                 <li key={f.id} className="py-3">
@@ -143,7 +144,7 @@ export function ShopOrderDetail({ backHref = '/shop' }: { backHref?: string }) {
           </section>
 
           <section className="card p-4">
-            <h2 className="text-xs font-extrabold uppercase tracking-widest text-neutral-500 flex items-center gap-1.5"><ListChecks size={13} />Print spec</h2>
+            <h2 className={styles.sectionTitle}><ListChecks size={13} />Print spec</h2>
             <div className="mt-2 max-w-full overflow-x-auto">
               <table className="w-full text-xs">
                 <thead className="text-left text-neutral-400"><tr><th className="py-1.5 pr-2">Item</th><th className="py-1.5 pr-2">Spec</th><th className="py-1.5 pr-2 text-right">Qty</th><th className="py-1.5 text-right">Amount</th></tr></thead>
@@ -181,14 +182,14 @@ export function ShopOrderDetail({ backHref = '/shop' }: { backHref?: string }) {
           </section>
 
           {o.notes && (
-            <section className="card p-4"><h2 className="text-xs font-extrabold uppercase tracking-widest text-neutral-500 flex items-center gap-1.5"><StickyNote size={13} />Note from customer</h2><p className="mt-1.5 break-words text-sm">{o.notes}</p></section>
+            <section className="card p-4"><h2 className={styles.sectionTitle}><StickyNote size={13} />Note from customer</h2><p className="mt-1.5 break-words text-sm">{o.notes}</p></section>
           )}
         </div>
 
         {/* right: customer + payment + timeline */}
         <div className="min-w-0 md:col-span-2 space-y-4">
           <section className="card p-4">
-            <h2 className="text-xs font-extrabold uppercase tracking-widest text-neutral-500 flex items-center gap-1.5"><User size={13} />Customer</h2>
+            <h2 className={styles.sectionTitle}><User size={13} />Customer</h2>
             <div className="mt-2 text-sm space-y-1.5">
               <div className="break-words font-bold">{o.customer_name || 'Walk-in'}</div>
               <a href={`tel:${o.customer_phone}`} className="flex items-start gap-1.5 break-all text-orange-800 font-semibold hover:underline"><Phone size={13} className="mt-1 shrink-0" />{o.customer_phone}</a>
@@ -197,7 +198,7 @@ export function ShopOrderDetail({ backHref = '/shop' }: { backHref?: string }) {
           </section>
 
           <section className="card p-4">
-            <h2 className="text-xs font-extrabold uppercase tracking-widest text-neutral-500 flex items-center gap-1.5"><IndianRupee size={13} />Payment</h2>
+            <h2 className={styles.sectionTitle}><IndianRupee size={13} />Payment</h2>
             <div className="mt-2 space-y-1.5 text-sm">
               <div className="flex items-center justify-between">
                 <span className="text-neutral-600">{o.payment_method === 'cod' ? 'Cash' : 'UPI'}</span>
@@ -224,7 +225,7 @@ export function ShopOrderDetail({ backHref = '/shop' }: { backHref?: string }) {
           </section>
 
           <section className="card p-4">
-            <h2 className="text-xs font-extrabold uppercase tracking-widest text-neutral-500 flex items-center gap-1.5"><History size={13} />Timeline</h2>
+            <h2 className={styles.sectionTitle}><History size={13} />Timeline</h2>
             <ol className="mt-2 space-y-2 text-xs">
               {detail.events.map((e, idx) => (
                 <li key={idx} className="flex items-start gap-2">

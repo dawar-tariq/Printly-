@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import Link from 'next/link';
 import { Copy, Loader2, MessageCircle, RefreshCw } from 'lucide-react';
 import { Logo } from '@/components/Logo';
+import styles from './support.module.css';
 import { CustomerLanguagePicker } from '@/components/CustomerLanguagePicker';
 import { useCustomerLanguage } from '@/lib/customer-language';
 import { formatDateTime } from '@/lib/format';
@@ -88,11 +89,11 @@ export default function SupportPage() {
     creation.current = null; pendingReply.current = null; setAccess(null); setConversation(null); setCodeInput(''); setSubject(''); setMessage(''); setReply(''); setError(''); setNotice(''); setMode('new');
   };
 
-  return <div lang={language} dir={language === 'ur' ? 'rtl' : 'ltr'} className="min-h-screen bg-neutral-50">
-    <header className="mx-auto flex h-16 max-w-2xl items-center justify-between gap-3 px-4"><Logo /><div className="flex items-center gap-3"><CustomerLanguagePicker language={language} onChange={setLanguage} /><Link href="/contact" className="text-sm font-bold text-orange-800 underline">Help</Link></div></header>
+  return <div lang={language} dir={language === 'ur' ? 'rtl' : 'ltr'} className={styles.page}>
+    <header className={`mx-auto flex h-16 max-w-2xl items-center justify-between gap-3 px-4 ${styles.header}`}><Logo /><div className="flex items-center gap-3"><CustomerLanguagePicker language={language} onChange={setLanguage} /><Link href="/contact" className="text-sm font-bold text-orange-800 underline">Help</Link></div></header>
     <main className="mx-auto max-w-2xl px-4 pb-16">
       {language !== 'en' && <p className="mb-3 text-xs text-neutral-600">{t.limitedTranslation}</p>}
-      <div className="mb-5"><h1 className="flex items-center gap-2 text-2xl font-extrabold"><MessageCircle size={23} />{t.supportTitle}</h1><p className="mt-2 text-sm leading-relaxed text-neutral-600">{t.supportIntro}</p></div>
+      <div className={`mb-5 ${styles.hero}`}><h1 className="flex items-center gap-2 text-2xl font-extrabold"><MessageCircle size={23} />{t.supportTitle}</h1><p className="mt-2 text-sm leading-relaxed text-neutral-600">{t.supportIntro}</p></div>
       {access && <section className="mb-4 rounded-2xl border border-amber-300 bg-amber-50 p-4" aria-labelledby="support-code-title">
         <h2 id="support-code-title" className="font-extrabold text-amber-950">{t.saveCode}</h2>
         <p className="mt-1 text-xs leading-relaxed text-amber-900">{t.codeWarning}</p>

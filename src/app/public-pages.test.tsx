@@ -17,10 +17,10 @@ import AccessibilityPage from './accessibility/page';
 afterEach(cleanup);
 describe('public information pages', () => {
   it.each([
-    [PrivacyPage, 'Privacy policy'], [TermsPage, 'Terms & conditions'], [CopyrightPage, 'Copyright'],
-    [RefundsPage, 'Refunds & cancellations'], [CookiesPage, 'Cookie notice'], [SecurityPage, 'Security at Printly'],
-    [AccessibilityPage, 'Accessibility'], [ContactPage, 'A little help, right where you need it.'],
-    [AboutPage, 'For the shops that make things happen.'], [FaqPage, 'A little clarity goes a long way.'],
+    [PrivacyPage, 'Privacy policy .'], [TermsPage, 'Terms & conditions .'], [CopyrightPage, 'Copyright .'],
+    [RefundsPage, 'Refunds & cancellations .'], [CookiesPage, 'Cookie notice .'], [SecurityPage, 'Security at Printly .'],
+    [AccessibilityPage, 'Accessibility .'], [ContactPage, 'A little help, right where you need it.'],
+    [AboutPage, 'For the shops that make things happen.'], [FaqPage, 'Good questions. Clear answers.'],
   ])('renders a useful page with a main heading and shared navigation', (Page, heading) => {
     render(<Page />);
     expect(screen.getByRole('heading', { level: 1, name: heading })).toBeTruthy();
