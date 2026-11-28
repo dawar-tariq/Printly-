@@ -16,16 +16,18 @@ describe('shop owner availability control', () => {
     }));
     render(<ShopAvailability initialOpen isOwner />);
     expect(screen.getByText(/active subscription/i)).toBeTruthy();
+    expect(screen.getByLabelText('Shop availability').className).toContain('open');
     fireEvent.click(screen.getByRole('button', { name: 'Close shop' }));
-    expect(await screen.findByText('Shop is closed')).toBeTruthy();
+    expect(await screen.findByText('Shop closed')).toBeTruthy();
+    expect(screen.getByLabelText('Shop availability').className).toContain('closed');
     expect(screen.getByText(/Existing orders and started payments remain available/i)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Reopen shop' }));
-    await screen.findByText('Shop setting: open');
+    await screen.findByText('Shop open');
     expect(calls).toEqual([false, true]); expect(refresh).toHaveBeenCalledTimes(2);
   });
   it('lets staff see the status but not change it', () => {
     render(<ShopAvailability initialOpen={false} isOwner={false} />);
-    expect(screen.getByText('Shop is closed')).toBeTruthy();
+    expect(screen.getByText('Shop closed')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Reopen shop' })).toBeNull();
     expect(screen.getByText(/Only the owner can change/i)).toBeTruthy();
   });
@@ -33,7 +35,7 @@ describe('shop owner availability control', () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network lost'); }));
     render(<ShopAvailability initialOpen isOwner />);
     fireEvent.click(screen.getByRole('button', { name: 'Close shop' }));
-    await waitFor(() => expect(screen.getByText('Shop status needs refresh')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('Status unconfirmed')).toBeTruthy());
     expect(screen.getByRole('button', { name: 'Refresh status' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Close shop' })).toBeNull();
   });

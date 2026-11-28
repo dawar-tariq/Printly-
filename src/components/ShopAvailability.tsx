@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Loader2, Store } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
+import styles from './ShopAvailability.module.css';
 
 /** The owner switch is not an override for verification or subscription. */
 export function ShopAvailability({ initialOpen, isOwner }: { initialOpen: boolean; isOwner: boolean }) {
@@ -35,13 +36,13 @@ export function ShopAvailability({ initialOpen, isOwner }: { initialOpen: boolea
     } finally { setBusy(false); }
   }
 
-  return <section className={`mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3 ${open ? 'border-green-200 bg-green-50' : 'border-amber-300 bg-amber-50'}`} aria-label="Shop availability">
-    <div className="min-w-0">
-      <p className={`flex items-center gap-2 text-sm font-extrabold ${open ? 'text-green-900' : 'text-amber-950'}`}><Store size={16} />{uncertain ? 'Shop status needs refresh' : open ? 'Shop setting: open' : 'Shop is closed'}</p>
-      <p className="mt-1 text-xs text-neutral-700">{open ? 'Orders also require shop approval and an active subscription.' : 'New orders are stopped. Existing orders and started payments remain available.'}{!isOwner && ' Only the owner can change this setting.'}</p>
-      {error && <p role="alert" className="mt-2 text-xs font-semibold text-red-800">{error}</p>}
+  return <section className={`${styles.control} ${uncertain ? styles.unknown : open ? styles.open : styles.closed}`} aria-label="Shop availability">
+    <div className={styles.row}>
+      <span className={styles.status}><span className={styles.dot} aria-hidden="true" />{uncertain ? 'Status unconfirmed' : open ? 'Shop open' : 'Shop closed'}</span>
+      {uncertain ? <button type="button" onClick={() => window.location.reload()} className={styles.action}>Refresh status</button>
+        : isOwner && <button type="button" disabled={busy} onClick={() => void changeAvailability()} className={styles.action}>{busy ? <><Loader2 size={14} className="animate-spin" /> Updating</> : open ? 'Close shop' : 'Reopen shop'}</button>}
+      <details className={styles.details}><summary aria-label="About shop availability">Info</summary><p>{open ? 'Orders also require shop approval and an active subscription.' : 'New orders are stopped. Existing orders and started payments remain available.'}{!isOwner && ' Only the owner can change this setting.'}</p></details>
     </div>
-    {uncertain ? <button type="button" onClick={() => window.location.reload()} className="btn btn-dark min-h-10 px-4 text-xs">Refresh status</button>
-      : isOwner && <button type="button" disabled={busy} onClick={() => void changeAvailability()} className="btn btn-dark min-h-10 px-4 text-xs">{busy ? <Loader2 size={15} className="animate-spin" /> : open ? 'Close shop' : 'Reopen shop'}</button>}
+    {error && <p role="alert" className={styles.error}>{error} Refresh before trying again.</p>}
   </section>;
 }
