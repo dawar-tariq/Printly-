@@ -180,7 +180,7 @@ export default function ShopSettingsPage() {
       </Link>
 
       {/* QR block */}
-      <section className="card p-5 flex flex-col sm:flex-row items-center gap-5">
+      <section id="shop-qr" className="card scroll-mt-24 p-5 flex flex-col sm:flex-row items-center gap-5">
         <div className="bg-white border-4 border-neutral-900 rounded-2xl p-3 shrink-0">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/api/shop/qr" alt="Shop QR code" className="w-40 h-40" />
@@ -268,7 +268,7 @@ export default function ShopSettingsPage() {
       </section>
 
       {/* Rate card */}
-      <section className="card p-5">
+      <section id="rate-card" className="card scroll-mt-24 p-5">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <h2 className="text-sm font-extrabold uppercase tracking-widest text-neutral-500">Rate card (₹ per unit)</h2>
           <div className="flex items-center gap-2">
