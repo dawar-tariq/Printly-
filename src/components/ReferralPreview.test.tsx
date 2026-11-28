@@ -17,6 +17,9 @@ describe('referral preview', () => {
   it('does not present a fake personal link in the owner preview', () => {
     render(<ReferralPreview owner />);
     expect(screen.getByText(/personal referral link not available yet/i)).toBeTruthy();
+    expect(screen.getByText(/illustrative example · not your data/i)).toBeTruthy();
+    expect(screen.getByText('3')).toBeTruthy();
+    expect(screen.getByRole('progressbar').getAttribute('aria-valuenow')).toBe('7');
     expect(screen.queryByRole('button', { name: /copy/i })).toBeNull();
   });
 });

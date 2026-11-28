@@ -9,6 +9,7 @@ const navigation = [
   { href: '/#how-it-works', label: 'How it works' },
   { href: '/#features', label: 'For shops' },
   { href: '/pricing', label: 'Pricing' },
+  ...(process.env.NEXT_PUBLIC_PRINTLY_ISOLATED_TEST === '1' ? [{ href: '/refer', label: 'Refer & earn' }] : []),
   { href: '/about', label: 'About' },
   { href: '/faq', label: 'FAQs' },
 ];
