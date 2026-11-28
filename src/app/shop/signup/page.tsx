@@ -7,6 +7,7 @@ import { Loader2, CheckCircle2, Store, ArrowLeft, ArrowRight, Plus, Trash2, Shie
 import { cn } from '@/lib/utils';
 import { isGstinFormat, normalizeShopName } from '@/lib/shop-identity';
 import { passwordPolicyError } from '@/lib/password-policy';
+import styles from './signup.module.css';
 
 const STEPS = [
   { key: 'shop', label: 'Shop & owner', icon: Store, hint: 'Who you are and how to reach you' },
@@ -176,7 +177,7 @@ export default function ShopSignupPage() {
 
   if (done) {
     return (
-      <div className="min-h-screen grid place-items-center px-6">
+      <div className={`${styles.page} min-h-screen grid place-items-center px-6`}>
         <div className="card max-w-md p-8 text-center">
           <CheckCircle2 size={48} className="mx-auto text-green-600" />
           <h1 className="mt-4 text-2xl font-extrabold">Application received!</h1>
@@ -196,25 +197,18 @@ export default function ShopSignupPage() {
   const StepIcon = STEPS[step].icon;
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(1000px_500px_at_50%_-10%,#ffedd5,transparent)]">
-      <header className="max-w-3xl mx-auto px-4 min-h-14 flex items-center justify-between gap-3"><Logo /><Link href="/login" aria-label="Already have a shop? Sign in" className="btn btn-dark h-10 shrink-0 px-4 text-sm"><span className="hidden sm:inline">Already have a shop?</span>Sign in</Link></header>
+    <div className={styles.page}>
+      <header className={styles.header}><Logo /><div className={styles.headerRight}><span>Already have a shop?</span><Link href="/login" aria-label="Already have a shop? Sign in">Sign in <ArrowRight size={15}/></Link></div></header>
       <main className="max-w-3xl mx-auto px-4 pb-16">
-        <div className="flex items-center gap-3 mt-2">
-          <span className="w-11 h-11 rounded-2xl bg-orange-100 text-orange-700 grid place-items-center"><Store size={22} /></span>
-          <div>
-            <h1 className="text-2xl font-extrabold tracking-tight">List your shop on Printly</h1>
-            <p className="text-xs text-neutral-500">Free to apply · Shop subscription required for access · UPI direct to your account</p>
-          </div>
-        </div>
-
+        <div className={styles.introduction}><p className={styles.eyebrow}><span /> PRINTLY FOR SHOPS</p><h1>Let’s get your shop<br/><em>ready for more.</em></h1><p>Tell us a little about your shop. We’ll review your application and guide you through the next steps.</p><div className={styles.introMeta}><span><Check size={14}/> Free to apply · Shop subscription required for access</span><span><Check size={14}/> Payments direct to your shop</span></div></div>
         {/* Progress */}
-        <ol className="mt-6 grid grid-cols-4 gap-2">
+        <ol aria-label="Application progress" className={`mt-6 grid grid-cols-4 gap-2 ${styles.progress}`}>
           {STEPS.map((s, i) => {
             const Icon = s.icon;
             const active = i === step;
             const complete = i < step;
             return (
-              <li key={s.key} className={cn('min-w-0 rounded-2xl border px-1 py-3 sm:p-3 text-center transition-colors', active ? 'border-orange-300 bg-orange-50' : complete ? 'border-green-200 bg-green-50' : 'border-neutral-200 bg-white')}>
+              <li key={s.key} aria-current={active ? 'step' : undefined} className={cn('min-w-0 rounded-2xl border px-1 py-3 sm:p-3 text-center transition-colors', active ? 'border-orange-300 bg-orange-50' : complete ? 'border-green-200 bg-green-50' : 'border-neutral-200 bg-white')}>
                 <span className={cn('mx-auto w-8 h-8 rounded-full grid place-items-center', active ? 'bg-orange-600 text-white' : complete ? 'bg-green-600 text-white' : 'bg-neutral-100 text-neutral-500')}>
                   {complete ? <Check size={15} /> : <Icon size={15} />}
                 </span>
@@ -227,7 +221,8 @@ export default function ShopSignupPage() {
         <div className="mt-3 h-1.5 rounded-full bg-neutral-200 overflow-hidden"><div className="h-full bg-orange-600 transition-all" style={{ width: `${((step + 1) / STEPS.length) * 100}%` }} /></div>
         <p className="mt-1.5 text-[11px] text-neutral-400">Step {step + 1} of {STEPS.length} — {STEPS[step].hint}</p>
 
-        <div className="card mt-4 p-5 sm:p-6">
+        <div className={`card mt-4 p-5 sm:p-6 ${styles.formCard}`}>
+          <div className={styles.formTitle}><div><p>STEP {String(step + 1).padStart(2, '0')} / 04</p><h2>{STEPS[step].label}</h2><span>{STEPS[step].hint}</span></div><StepIcon size={23}/></div>
           {step === 0 && (
             <div className="grid sm:grid-cols-2 gap-4">
               <div className="sm:col-span-2">
@@ -253,15 +248,15 @@ export default function ShopSignupPage() {
                   <input id="signup-gstin" className="input" value={form.gstin} onChange={set('gstin')} placeholder="01ABCDE1234F1Z5" />
                 </div>
               )}
-              <div className="sm:col-span-2"><label className="label">Your name *</label><input className="input" value={form.owner_name} onChange={set('owner_name')} placeholder="Owner / manager name" autoComplete="name" /></div>
-              <div><label className="label">Email *</label><input className="input" type="email" value={form.email} onChange={set('email')} placeholder="shop@example.com" autoComplete="email" /></div>
+              <div className="sm:col-span-2"><label className="label" htmlFor={'signup-owner_name'}>Your name *</label><input id={'signup-owner_name'} className="input" value={form.owner_name} onChange={set('owner_name')} placeholder="Owner / manager name" autoComplete="name" /></div>
+              <div><label className="label" htmlFor="signup-email">Email *</label><input id="signup-email" className="input" type="email" value={form.email} onChange={set('email')} placeholder="shop@example.com" autoComplete="email" aria-describedby="signup-email-hint" /><p id="signup-email-hint" className="mt-1 text-xs text-neutral-500">If you already created a customer support account, use a different email for this shop application. Its requests stay with the customer account. Existing shop accounts can sign in to support.</p></div>
               <div><label htmlFor="signup-password" className="label">Password * (at least 12 characters)</label><input id="signup-password" className="input" type="password" maxLength={72} value={form.password} onChange={set('password')} autoComplete="new-password" placeholder="••••••••••••" aria-describedby="signup-password-hint" /><p id="signup-password-hint" className="mt-1 text-xs text-neutral-500">Use a unique password; maximum 72 UTF-8 bytes. {form.password && passwordPolicyError(form.password)}</p></div>
-              <div><label className="label">Phone *</label><input className="input" value={form.phone} onChange={set('phone')} placeholder="99060 00000" inputMode="tel" autoComplete="tel" /></div>
-              <div><label className="label">Alternate phone</label><input className="input" value={form.alternate_phone} onChange={set('alternate_phone')} placeholder="Optional" inputMode="tel" /></div>
-              <div className="sm:col-span-2"><label className="label">Shop address *</label><input className="input" value={form.address} onChange={set('address')} placeholder="Shop number, street, landmark" /></div>
-              <div><label className="label">City *</label><input className="input" value={form.city} onChange={set('city')} placeholder="Srinagar" /></div>
-              <div><label className="label">PIN code</label><input className="input" value={form.pincode} onChange={set('pincode')} placeholder="190001" inputMode="numeric" /></div>
-              <div><label className="label">Your UPI ID</label><input className="input" value={form.upi_id} onChange={set('upi_id')} placeholder="name@okaxis" /></div>
+              <div><label className="label" htmlFor={'signup-phone'}>Phone *</label><input id={'signup-phone'} className="input" value={form.phone} onChange={set('phone')} placeholder="99060 00000" inputMode="tel" autoComplete="tel" /></div>
+              <div><label className="label" htmlFor={'signup-alternate_phone'}>Alternate phone</label><input id={'signup-alternate_phone'} className="input" value={form.alternate_phone} onChange={set('alternate_phone')} placeholder="Optional" inputMode="tel" /></div>
+              <div className="sm:col-span-2"><label className="label" htmlFor={'signup-address'}>Shop address *</label><input id={'signup-address'} className="input" value={form.address} onChange={set('address')} placeholder="Shop number, street, landmark" /></div>
+              <div><label className="label" htmlFor={'signup-city'}>City *</label><input id={'signup-city'} className="input" value={form.city} onChange={set('city')} placeholder="Srinagar" /></div>
+              <div><label className="label" htmlFor={'signup-pincode'}>PIN code</label><input id={'signup-pincode'} className="input" value={form.pincode} onChange={set('pincode')} placeholder="190001" inputMode="numeric" /></div>
+              <div><label className="label" htmlFor={'signup-upi_id'}>Your UPI ID</label><input id={'signup-upi_id'} className="input" value={form.upi_id} onChange={set('upi_id')} placeholder="name@okaxis" /></div>
               <p className="sm:col-span-2 text-[11px] text-neutral-500 -mt-1">Customers pay for orders directly to this UPI ID. Subscription payments to Printly are separate. You can change your shop UPI ID anytime in Settings.</p>
             </div>
           )}
@@ -273,20 +268,20 @@ export default function ShopSignupPage() {
                   {BUSINESS_TYPES.map((b) => <option key={b.value} value={b.value}>{b.label}</option>)}
                 </select>
               </div>
-              <div><label className="label">Legal business name</label><input className="input" value={form.legal_business_name} onChange={set('legal_business_name')} placeholder="As on registration, if any" /></div>
-              <div><label className="label">Year established</label><input className="input" type="number" min={1900} max={2100} value={form.year_established} onChange={set('year_established')} placeholder="e.g. 2018" /></div>
+              <div><label className="label" htmlFor={'signup-legal_business_name'}>Legal business name</label><input id={'signup-legal_business_name'} className="input" value={form.legal_business_name} onChange={set('legal_business_name')} placeholder="As on registration, if any" /></div>
+              <div><label className="label" htmlFor={'signup-year_established'}>Year established</label><input id={'signup-year_established'} className="input" type="number" min={1900} max={2100} value={form.year_established} onChange={set('year_established')} placeholder="e.g. 2018" /></div>
               <div><label className="label">Registration type</label>
                 <select className="input" value={form.registration_type} onChange={set('registration_type')}>
                   {REG_TYPES.map((b) => <option key={b.value} value={b.value}>{b.label}</option>)}
                 </select>
               </div>
               {form.registration_type !== 'unregistered' && (
-                <div className="sm:col-span-2"><label className="label">Registration / GSTIN number</label><input className="input" value={form.registration_number} onChange={set('registration_number')} placeholder="Number as on the certificate" /></div>
+                <div className="sm:col-span-2"><label className="label" htmlFor={'signup-registration_number'}>Registration / GSTIN number</label><input id={'signup-registration_number'} className="input" value={form.registration_number} onChange={set('registration_number')} placeholder="Number as on the certificate" /></div>
               )}
-              <div><label className="label">Opens at</label><input className="input" type="time" value={form.open_time} onChange={set('open_time')} /></div>
-              <div><label className="label">Closes at</label><input className="input" type="time" value={form.close_time} onChange={set('close_time')} /></div>
-              <div className="sm:col-span-2"><label className="label">Weekly off (optional)</label><input className="input" value={form.weekly_off} onChange={set('weekly_off')} placeholder="e.g. Sunday" /></div>
-              <div><label className="label">How did you hear about Printly?</label><input className="input" value={form.referral_source} onChange={set('referral_source')} placeholder="Friend, Google, walk-in…" /></div>
+              <div><label className="label" htmlFor={'signup-open_time'}>Opens at</label><input id={'signup-open_time'} className="input" type="time" value={form.open_time} onChange={set('open_time')} /></div>
+              <div><label className="label" htmlFor={'signup-close_time'}>Closes at</label><input id={'signup-close_time'} className="input" type="time" value={form.close_time} onChange={set('close_time')} /></div>
+              <div className="sm:col-span-2"><label className="label" htmlFor={'signup-weekly_off'}>Weekly off (optional)</label><input id={'signup-weekly_off'} className="input" value={form.weekly_off} onChange={set('weekly_off')} placeholder="e.g. Sunday" /></div>
+              <div><label className="label" htmlFor={'signup-referral_source'}>How did you hear about Printly?</label><input id={'signup-referral_source'} className="input" value={form.referral_source} onChange={set('referral_source')} placeholder="Friend, Google, walk-in…" /></div>
               <p className="sm:col-span-2 text-[11px] text-neutral-500 -mt-1 flex items-center gap-1.5"><Clock size={12} />Hours shown on your customer page so people don&apos;t visit when you&apos;re closed.</p>
             </div>
           )}
@@ -298,7 +293,7 @@ export default function ShopSignupPage() {
                 {SERVICE_OPTIONS.map((s) => {
                   const on = services.includes(s.value);
                   return (
-                    <button key={s.value} type="button" onClick={() => toggleService(s.value)} className={cn('text-left rounded-2xl border p-3.5 transition-colors', on ? 'border-orange-400 bg-orange-50' : 'border-neutral-200 bg-white hover:border-neutral-300')}>
+                    <button key={s.value} type="button" aria-pressed={on} onClick={() => toggleService(s.value)} className={cn('text-left rounded-2xl border p-3.5 transition-colors', on ? 'border-orange-400 bg-orange-50' : 'border-neutral-200 bg-white hover:border-neutral-300')}>
                       <span className="flex items-center justify-between">
                         <span className="font-extrabold text-sm">{s.label}</span>
                         <span className={cn('w-5 h-5 rounded-full grid place-items-center', on ? 'bg-orange-600 text-white' : 'bg-neutral-100 text-neutral-400')}>{on && <Check size={12} />}</span>
@@ -309,9 +304,9 @@ export default function ShopSignupPage() {
                 })}
               </div>
               <div className="grid sm:grid-cols-3 gap-4 mt-5">
-                <div><label className="label">Staff count</label><input className="input" type="number" min={1} max={100} value={form.staff_count} onChange={set('staff_count')} /></div>
-                <div><label className="label">Printers</label><input className="input" type="number" min={0} max={100} value={form.printer_count} onChange={set('printer_count')} /></div>
-                <div><label className="label">Avg jobs / day</label><input className="input" type="number" min={0} value={form.avg_daily_jobs} onChange={set('avg_daily_jobs')} placeholder="e.g. 120" /></div>
+                <div><label className="label" htmlFor={'signup-staff_count'}>Staff count</label><input id={'signup-staff_count'} className="input" type="number" min={1} max={100} value={form.staff_count} onChange={set('staff_count')} /></div>
+                <div><label className="label" htmlFor={'signup-printer_count'}>Printers</label><input id={'signup-printer_count'} className="input" type="number" min={0} max={100} value={form.printer_count} onChange={set('printer_count')} /></div>
+                <div><label className="label" htmlFor={'signup-avg_daily_jobs'}>Avg jobs / day</label><input id={'signup-avg_daily_jobs'} className="input" type="number" min={0} value={form.avg_daily_jobs} onChange={set('avg_daily_jobs')} placeholder="e.g. 120" /></div>
               </div>
               <div className="mt-4"><label className="label">Printer / equipment details</label>
                 <textarea className="input min-h-20 text-sm" value={form.printer_details} onChange={set('printer_details')} placeholder="e.g. 2× HP LaserJet Pro M404, 1× Epson L8050 colour, 1× Canon photocopier…" />
@@ -326,14 +321,14 @@ export default function ShopSignupPage() {
               <div className="space-y-2.5">
                 {inventory.map((row, idx) => (
                   <div key={idx} className="grid grid-cols-12 gap-2 items-end rounded-2xl border border-neutral-200 p-3">
-                    <div className="col-span-12 sm:col-span-4"><label className="label">Item name</label><input className="input h-10 text-sm" value={row.name} onChange={(e) => setInv(idx, 'name', e.target.value)} placeholder="e.g. A4 paper 80 GSM" /></div>
+                    <div className="col-span-12 sm:col-span-4"><label className="label" htmlFor={`signup-name-{idx}`}>Item name</label><input id={`signup-name-{idx}`} className="input h-10 text-sm" value={row.name} onChange={(e) => setInv(idx, 'name', e.target.value)} placeholder="e.g. A4 paper 80 GSM" /></div>
                     <div className="col-span-6 sm:col-span-3"><label className="label">Category</label>
                       <select className="input h-10 text-sm" value={row.category} onChange={(e) => setInv(idx, 'category', e.target.value)}>
                         {INV_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
                       </select>
                     </div>
-                    <div className="col-span-3 sm:col-span-2"><label className="label">Qty</label><input className="input h-10 text-sm" type="number" min={0} value={row.qty} onChange={(e) => setInv(idx, 'qty', e.target.value)} placeholder="0" /></div>
-                    <div className="col-span-3 sm:col-span-2"><label className="label">Unit</label><input className="input h-10 text-sm" value={row.unit} onChange={(e) => setInv(idx, 'unit', e.target.value)} placeholder="sheets" /></div>
+                    <div className="col-span-3 sm:col-span-2"><label className="label" htmlFor={`signup-qty-{idx}`}>Qty</label><input id={`signup-qty-{idx}`} className="input h-10 text-sm" type="number" min={0} value={row.qty} onChange={(e) => setInv(idx, 'qty', e.target.value)} placeholder="0" /></div>
+                    <div className="col-span-3 sm:col-span-2"><label className="label" htmlFor={`signup-unit-{idx}`}>Unit</label><input id={`signup-unit-{idx}`} className="input h-10 text-sm" value={row.unit} onChange={(e) => setInv(idx, 'unit', e.target.value)} placeholder="sheets" /></div>
                     <div className="col-span-12 sm:col-span-1 flex sm:justify-center"><button type="button" onClick={() => removeInv(idx)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg" aria-label="Remove item"><Trash2 size={16} /></button></div>
                   </div>
                 ))}
@@ -352,7 +347,7 @@ export default function ShopSignupPage() {
             </div>
           )}
 
-          {error && <p className="mt-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2 flex items-center gap-2"><CircleAlert size={15} />{error}</p>}
+          {error && <p role="alert" className="mt-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2 flex items-center gap-2"><CircleAlert size={15} />{error}</p>}
           {!stepValid && step === 0 && <p className="mt-4 text-[11px] text-neutral-500">Fill shop name, your name, a valid email, password (12+ characters), phone, address and city to continue.</p>}
 
           <div className="flex items-center gap-3 mt-6">

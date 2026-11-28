@@ -1,13 +1,13 @@
 import type { Metadata } from 'next';
+import styles from './landing.module.css';
 import { publicCanonical } from '@/lib/public-pages';
 import Link from 'next/link';
 import {
-  ArrowDown, ArrowRight, ArrowUpRight, BadgeCheck, Banknote, Check, CheckCircle2,
-  Clock3, CreditCard, FileText, Layers3, LayoutDashboard, PackageCheck,
-  QrCode, ScanLine, Settings2, ShieldCheck, Smartphone, Sparkles, Store, UploadCloud,
+  ArrowRight, ArrowUpRight, Banknote, Check, CreditCard, FileText, Layers3, LayoutDashboard, PackageCheck,
+  QrCode, ScanLine, Settings2, Smartphone, UploadCloud,
 } from 'lucide-react';
-import { BrandMark } from '@/components/BrandArtwork';
 import { FaqList } from '@/components/marketing/FaqList';
+import { LandingFooter } from '@/components/marketing/LandingFooter';
 import { PublicShell } from '@/components/marketing/PublicShell';
 import { landingFaqs } from '@/lib/marketing-faq';
 
@@ -46,126 +46,55 @@ export default function HomePage() {
       <p className="mt-6 text-xs leading-5 text-neutral-600">Do not use real shop credentials, customer information, payment IDs or files. Dropbox import is disabled for this rehearsal.</p>
     </div>
   </main>;
-  return <PublicShell>
-    <main id="main-content">
-      {/* Hero */}
-      <section className="overflow-hidden bg-[#f8f6f1]">
-        <div className="public-container grid items-center gap-12 pb-14 pt-12 sm:pb-20 sm:pt-16 lg:grid-cols-[0.96fr_1.04fr] lg:gap-16 lg:pb-24 lg:pt-20">
-          <div className="max-w-[620px]">
-            <p className="inline-flex items-center gap-2 rounded-full border border-[#e8d9cb] bg-white px-3 py-2 text-[11px] font-extrabold uppercase tracking-[0.12em] text-[#8f3a1c]"><span className="h-2 w-2 rounded-full bg-[#e7541a]" /> A better way to print, together</p>
-            <h1 className="mt-7 text-[clamp(2.75rem,5.5vw,5.5rem)] font-extrabold leading-[1.04] tracking-[-0.06em] text-[#24201e]">Less waiting.<br /><span className="text-[#c43d0a]">More doing.</span></h1>
-            <p className="mt-6 max-w-[500px] text-[17px] leading-[1.8] text-[#6b625b] sm:text-lg">Your local print shop, a little closer. Send your files, choose your options and follow your order—all from your phone.</p>
-            <div className="mt-8 flex flex-wrap gap-3">
-              <Link href="/s/p-demo1" className="public-button public-button-orange">Explore the demo <ArrowUpRight size={18} /></Link>
-              <Link href="#how-it-works" className="public-button public-button-light">See how it works <ArrowDown size={17} /></Link>
+  return <PublicShell className={styles.landingShell} footer={<LandingFooter />}>
+    <main id="main-content" className={styles.home}>
+      <section className={styles.hero}>
+        <div className={styles.wrap}>
+          <div className={styles.heroGrid}>
+            <div className={styles.heroCopy}>
+              <p className={styles.chapter}><span /> A BETTER WAY TO PRINT, TOGETHER</p>
+              <h1>Good prints.<br /><em>Better days.</em></h1>
+              <p className={styles.heroDescription}>Your local print shop, a little closer. Send your files, choose your options and follow your order—all from your phone.</p>
+              <div className={styles.actions}><Link href="/s/p-demo1" className={styles.primary}>Explore the demo <ArrowUpRight size={18} /></Link><Link href="/shop/signup" className={styles.startButton}>Start now <ArrowUpRight size={18} /><span className="sr-only"> — list your shop</span></Link></div>
+              <p className={styles.demoNote}>The demo shop has real checkout options. Avoid sensitive files and don’t pay unless you intend to place an order.</p>
+              <div className={styles.heroSteps}><span><b>01</b> Upload</span><span><b>02</b> Choose</span><span><b>03</b> Collect</span></div>
             </div>
-            <div className="mt-8 flex flex-wrap gap-x-6 gap-y-3 text-[13px] font-bold text-[#5d554e]">
-              <span className="inline-flex items-center gap-2"><Smartphone size={17} className="text-[#b43d11]" /> No app download</span>
-              <span className="inline-flex items-center gap-2"><Banknote size={17} className="text-[#b43d11]" /> Pay the shop directly</span>
-            </div>
-            <p className="mt-5 max-w-[450px] text-[11px] leading-5 text-[#81786f]">The demo shop has real checkout options. Avoid sensitive files and don’t pay unless you intend to place an order.</p>
-          </div>
-          <div className="relative mx-auto w-full max-w-[600px] lg:ml-auto">
-            <div className="absolute -left-6 -top-6 h-32 w-32 rounded-full border border-[#e3d8ca]" aria-hidden="true" />
-            <div className="relative h-[420px] overflow-hidden rounded-[1.8rem] bg-[#e6d5c5] sm:h-[540px] lg:h-[590px]">
-              <img src="/images/printly-shop-hero.webp" alt="" fetchPriority="high" className="h-full w-full object-cover object-[center_44%]" />
-              <div className="absolute inset-0 bg-gradient-to-t from-[#211611]/45 via-transparent to-transparent" />
-              <div className="absolute bottom-5 left-5 right-5 flex items-end justify-between gap-3 sm:bottom-7 sm:left-7 sm:right-7">
-                <div className="text-white"><p className="text-[10px] font-bold uppercase tracking-[0.17em] text-white/80">For the everyday things</p><p className="display-font mt-1 text-xl font-extrabold tracking-tight sm:text-2xl">Local shops. Easier days.</p></div>
-                <span className="rounded-full bg-black/30 px-2.5 py-1 text-[10px] text-white/90">Illustration</span>
-              </div>
-            </div>
-            <div className="relative ml-auto mt-3 w-full max-w-[260px] rounded-2xl border border-[#eee6de] bg-white p-4 shadow-[0_18px_50px_rgba(45,30,20,0.16)] sm:absolute sm:-bottom-5 sm:-right-5 sm:mt-0 sm:w-[245px] lg:relative lg:bottom-auto lg:right-auto lg:mt-3 lg:w-full xl:absolute xl:-bottom-5 xl:-right-5 xl:mt-0 xl:w-[245px]">
-              <div className="flex items-start justify-between"><div><p className="text-[10px] font-extrabold uppercase tracking-[0.13em] text-[#9a8d81]">Example order</p><p className="display-font mt-1 text-sm font-extrabold">Ready to collect</p></div><span className="grid h-9 w-9 place-items-center rounded-full bg-[#e8f2e8] text-[#39744c]"><Check size={17} /></span></div>
-              <div className="mt-3 flex items-center gap-1.5 text-[11px] font-semibold text-[#81766d]"><span className="h-1.5 w-1.5 rounded-full bg-[#6da779]" /> Follow along with your tracking link</div>
+            <div className={styles.productStage} aria-label="Illustrative preview of the Printly order experience">
+              <span className={styles.stageIndex}>A LITTLE LOOK INSIDE PRINTLY <b>↗</b></span>
+              <div className={styles.stageRing} aria-hidden="true" />
+              <div className={styles.orderWindow}><div className={styles.windowBar}><span className={styles.windowDots}><i/><i/><i/></span><span>YOUR PRINTLY ORDER</span><span>↗</span></div><div className={styles.windowBody}><div className={styles.windowHeading}><div><small>YOUR PRINT SHOP, ONLINE</small><h3>Let’s get your<br /><em>print ready.</em></h3></div><span className={styles.windowIcon}><FileText size={22}/></span></div><div className={styles.uploadCard}><div className={styles.uploadIcon}><UploadCloud size={20}/></div><div><strong>Upload your files</strong><small>Add your documents to get started</small></div><span>↗</span></div><div className={styles.windowOptions}><div><small>PAPER SIZE</small><strong>A4 <span>⌄</span></strong></div><div><small>COLOUR</small><strong>Black &amp; white <span>⌄</span></strong></div></div><div className={styles.windowButton}>Review your order <ArrowRight size={15}/></div></div></div>
+              <div className={styles.stageNote}><span><Check size={17}/></span><div><small>EXAMPLE ORDER</small><strong>Ready to collect</strong><p>Check progress with your tracking link</p></div></div>
+              <div className={styles.stageLabel}>PRINTING, MADE SIMPLE <span>✳</span></div>
+              <div className={styles.stageCaption}>ILLUSTRATIVE PREVIEW · SAMPLE DATA</div>
             </div>
           </div>
-        </div>
-        <div className="border-y border-[#e9e3dc] bg-white/75">
-          <div className="public-container flex flex-wrap items-center justify-between gap-x-8 gap-y-4 py-5 text-xs font-bold text-[#756a61] sm:text-sm">
-            <span className="eyebrow !text-[#8b8077]">Made for real life</span>
-            <span className="inline-flex items-center gap-2"><FileText size={16} className="text-[#c43d0a]" /> Everyday documents</span>
-            <span className="inline-flex items-center gap-2"><Store size={16} className="text-[#c43d0a]" /> Local print shops</span>
-            <span className="inline-flex items-center gap-2"><Sparkles size={16} className="text-[#c43d0a]" /> A smoother experience</span>
-          </div>
+          <div className={styles.heroBottom}><span>THE LITTLE THINGS, MADE SIMPLE</span><span>FOR EVERYDAY DOCUMENTS &amp; THE SHOPS BEHIND THEM</span><a href="#how-it-works" aria-label="Scroll to how it works">↓</a></div>
         </div>
       </section>
-
-      {/* How it works */}
-      <section id="how-it-works" className="scroll-mt-24 bg-white py-20 sm:py-28">
-        <div className="public-container">
-          <div className="flex flex-wrap items-end justify-between gap-6">
-            <div className="max-w-[650px]"><p className="eyebrow">A simpler kind of errand</p><h2 className="mt-4 text-[clamp(2rem,4vw,3.35rem)] font-extrabold leading-[1.1] tracking-[-0.05em]">From your screen to<br className="hidden sm:block" /> the shop counter.</h2></div>
-            <p className="max-w-[330px] text-[15px] leading-7 text-[#776d64]">A few easy steps for you. A more organised day for your local shop.</p>
-          </div>
-          <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-            {steps.map(({ number, icon: Icon, title, body }) => <article key={number} className="rounded-[1.3rem] border border-[#eee8e1] bg-[#fcfbf8] p-6 sm:p-7">
-              <div className="flex items-center justify-between"><span className="grid h-12 w-12 place-items-center rounded-2xl bg-[#fae9dc] text-[#b93c0c]"><Icon size={21} strokeWidth={1.8} /></span><span className="display-font text-sm font-bold text-[#c8bdb2]">{number}</span></div>
-              <h3 className="mt-7 text-lg font-extrabold tracking-[-0.03em]">{title}</h3><p className="mt-2 text-sm leading-7 text-[#756b62]">{body}</p>
-            </article>)}
-          </div>
+      <section id="how-it-works" className={styles.how}>
+        <div className={styles.wrap}>
+          <div className={styles.sectionIntro}><p className={styles.chapter}><span /> 01 / THE EXPERIENCE</p><div><h2>From your screen<br />to <em>the shop counter.</em></h2><p>A few easy steps for you. A more organised day for your local shop.</p></div></div>
+          <div className={styles.stepGrid}>{steps.map(({number,icon: Icon,title,body}) => <article className={styles.step} key={number}><div className={styles.stepTop}><span>{number} / 04</span><Icon size={24} strokeWidth={1.5}/></div><h3>{title}</h3><p>{body}</p></article>)}</div>
         </div>
       </section>
-
-      {/* Shop story */}
-      <section id="features" className="scroll-mt-24 bg-[#25211e] py-20 text-white sm:py-28">
-        <div className="public-container grid items-center gap-14 lg:grid-cols-2 lg:gap-24">
-          <div>
-            <p className="eyebrow !text-[#f2a376]">For the shops behind it all</p>
-            <h2 className="mt-4 text-[clamp(2.1rem,4.5vw,4rem)] font-extrabold leading-[1.1] tracking-[-0.055em]">A little more order.<br /><span className="text-[#f2955e]">A lot more flow.</span></h2>
-            <p className="mt-6 max-w-[490px] text-[15px] leading-8 text-[#d2c8be] sm:text-base">Great print shops do a hundred things at once. Printly brings orders, payment checks and everyday tools together, so you can focus on the work in front of you.</p>
-            <ul className="mt-7 space-y-3 text-sm font-semibold text-[#eee7df]">
-              {['One place for your orders and print details', 'Your own QR and direct customer payments', 'One all-features subscription gives your shop the tools to manage every order'].map((item) => <li key={item} className="flex items-start gap-3"><CheckCircle2 size={18} className="mt-0.5 shrink-0 text-[#f39562]" />{item}</li>)}
-            </ul>
-            <div className="mt-9 flex flex-wrap gap-3"><Link href="/shop/signup" className="public-button public-button-orange">Apply to list your shop <ArrowRight size={17} /></Link><Link href="/pricing" className="public-button border border-white/25 text-white hover:bg-white/10">Explore pricing</Link></div>
+      <section className={styles.customer}>
+        <div className={`${styles.wrap} ${styles.customerGrid}`}><div className={styles.phoneStage}>
+          <div className={styles.stageWords} aria-hidden="true">PRINT<br />PICK UP<br />REPEAT.</div>
+          <div className={styles.phone}><div className={styles.phoneNotch}/><div className={styles.phoneHeader}><b>printly<span>.</span></b><span>☰</span></div><div className={styles.phoneContent}><span className={styles.phoneTag}>YOUR LOCAL SHOP</span><h3>Print made<br /><em>simple.</em></h3><p>Everything you need, right from your phone.</p><div className={styles.phoneFile}><FileText size={21}/><span><b>Your document</b><small>Ready to personalise</small></span><Check size={16}/></div><div className={styles.phoneOption}><span>Paper size</span><b>A4</b></div><div className={styles.phoneOption}><span>Print type</span><b>Black &amp; white</b></div><div className={styles.phoneButton}>Review your order <ArrowRight size={15}/></div><small className={styles.exampleLabel}>ILLUSTRATIVE EXAMPLE</small></div></div>
+          <div className={styles.phoneBubble}><span>✳</span> PRINTING, SIMPLIFIED</div>
+        </div><div className={styles.customerCopy}><p className={styles.chapter}><span /> 02 / FOR CUSTOMERS</p><h2>Less waiting.<br /><em>More doing.</em></h2><p>From notes to big ideas, send what you need to print without the back-and-forth. Your local shop takes it from there.</p><div className={styles.benefits}><div><Smartphone size={20}/><span><b>No customer app download</b><small>Start from your browser.</small></span></div><div><Banknote size={20}/><span><b>Pay the shop directly</b><small>UPI or cash where available.</small></span></div><div><PackageCheck size={20}/><span><b>Know where your order stands</b><small>Save your link and follow along.</small></span></div></div><Link href="/s/p-demo1" className={styles.underLink}>Take a look at the demo <ArrowUpRight size={17}/></Link></div></div>
+      </section>
+      <section id="features" className={styles.owner}>
+        <div className={styles.wrap}><div className={styles.ownerIntro}><div><p className={styles.chapter}><span /> 03 / FOR PRINT SHOPS</p><h2>A little more<br /><em>room to grow.</em></h2></div><p>Built for the people behind every good print. Bring your shop online and keep the everyday moving.</p></div>
+          <div className={styles.ownerGrid}><div className={styles.ownerText}><span className={styles.ownerPill}>YOUR SHOP, CONNECTED</span><h3>Good for your customers.<br />Great for your shop.</h3><p>One all-features subscription gives your shop a simpler way to receive and manage orders. From the first upload to the final pickup, you’re in control.</p><Link href="/shop/signup" className={styles.lightButton}>Apply to list your shop <ArrowUpRight size={17}/></Link><Link href="/pricing" className={styles.ownerLink}>See shop pricing <ArrowRight size={16}/></Link></div>
+            <div className={styles.dashboard}><div className={styles.dashTop}><b>printly<span>.</span></b><span>SHOP WORKSPACE</span><span>•••</span></div><div className={styles.dashBody}><div className={styles.dashSide}><b>Overview</b><span>Orders</span><span>Inventory</span><span>Reports</span><span>Settings</span></div><div className={styles.dashMain}><small>YOUR WORKSPACE</small><h3>A better view of the day.</h3><div className={styles.stats}>{[['New','01'],['Printing','02'],['Ready','03']].map(([label,n])=><div key={label}><small>{label}</small><strong>{n}</strong></div>)}</div><div className={styles.dashOrder}><span><FileText size={20}/></span><div><b>Print order</b><small>Files, options and order details</small></div><strong>Ready</strong></div><p>Illustrative preview, not live shop data.</p></div></div></div>
           </div>
-          <div className="relative rounded-[1.6rem] border border-white/10 bg-[#342e29] p-4 shadow-2xl sm:p-6">
-            <div className="absolute -right-3 -top-4 grid h-14 w-14 place-items-center rounded-2xl bg-[#fae9d9] shadow-lg sm:-right-5"><BrandMark className="h-9 w-9" /></div>
-            <div className="rounded-2xl bg-[#faf8f4] p-5 text-[#302923] sm:p-6">
-              <div className="flex items-center justify-between gap-3"><div><p className="text-[10px] font-extrabold uppercase tracking-[0.15em] text-[#b94b22]">Your workspace</p><h3 className="mt-1 text-lg font-extrabold">A better view of the day.</h3></div><span className="rounded-full bg-[#efeae2] px-2.5 py-1 text-[10px] font-bold text-[#776a5d]">EXAMPLE</span></div>
-              <div className="mt-5 grid grid-cols-3 gap-2 sm:gap-3">{[['New', '01'], ['Printing', '02'], ['Ready', '03']].map(([label, n]) => <div key={label} className="rounded-xl border border-[#ece6de] bg-white px-3 py-4"><p className="text-[10px] font-bold text-[#9c8f83]">{label}</p><p className="display-font mt-2 text-2xl font-extrabold text-[#413831]">{n}</p></div>)}</div>
-              <div className="mt-4 rounded-xl border border-[#ece6de] bg-white p-4"><div className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-xl bg-[#fff0e5] text-[#ba4214]"><FileText size={18} /></span><div className="min-w-0 flex-1"><p className="text-xs font-extrabold">Print order</p><p className="mt-1 text-[11px] text-[#95887b]">Files, options and order details</p></div><span className="rounded-full bg-[#eaf4ea] px-2 py-1 text-[10px] font-bold text-[#41784f]">Ready</span></div></div>
-              <p className="mt-4 text-[11px] text-[#a09487]">An illustrative preview, not live shop data.</p>
-            </div>
-          </div>
+          <div className={styles.featureGrid}>{features.map(({icon: Icon,title,body})=><article key={title}><Icon size={24} strokeWidth={1.6}/><h3>{title}</h3><p>{body}</p></article>)}</div>
         </div>
       </section>
-
-      {/* Feature grid */}
-      <section className="bg-[#faf9f6] py-20 sm:py-28">
-        <div className="public-container">
-          <div className="mx-auto max-w-[650px] text-center"><p className="eyebrow">Thoughtful tools, all together</p><h2 className="mt-4 text-[clamp(2rem,4vw,3.35rem)] font-extrabold leading-[1.12] tracking-[-0.05em]">Everything the counter needs.</h2><p className="mx-auto mt-5 max-w-xl text-[15px] leading-7 text-[#776d64]">Practical features for the work you already do, built to make the busy parts feel a little lighter.</p></div>
-          <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{features.map(({ icon: Icon, title, body }) => <article key={title} className="rounded-[1.3rem] border border-[#ece7df] bg-white p-7"><span className="grid h-11 w-11 place-items-center rounded-xl bg-[#fff0e5] text-[#bd3e0d]"><Icon size={20} strokeWidth={1.8} /></span><h3 className="mt-6 text-[17px] font-extrabold tracking-[-0.03em]">{title}</h3><p className="mt-2 text-sm leading-7 text-[#776d64]">{body}</p></article>)}</div>
-        </div>
-      </section>
-
-      {/* Pricing */}
-      <section className="bg-white py-20 sm:py-24">
-        <div className="public-container">
-          <div className="feature-grid-pattern overflow-hidden rounded-[1.8rem] border border-[#efe4d8] bg-[#fff8f1] p-7 sm:p-12 lg:p-14">
-            <div className="grid items-center gap-10 lg:grid-cols-[1fr_auto]">
-              <div className="max-w-[690px]"><p className="eyebrow">Simple, straightforward pricing</p><h2 className="mt-4 text-[clamp(2rem,4vw,3.2rem)] font-extrabold leading-[1.12] tracking-[-0.05em]">One plan. Your choice of term.</h2><p className="mt-5 max-w-xl text-[15px] leading-7 text-[#776d64]">Every shop subscription includes the same features. Choose monthly, six-month or yearly access, with no automatic recurring billing.</p><div className="mt-6 flex flex-wrap gap-x-6 gap-y-3 text-sm font-bold text-[#52483f]"><span className="flex items-center gap-2"><Check size={16} className="text-[#bc400e]" /> All features included</span><span className="flex items-center gap-2"><Check size={16} className="text-[#bc400e]" /> No platform commission on new orders</span></div></div>
-              <Link href="/pricing" className="public-button public-button-dark justify-self-start lg:justify-self-end">See shop pricing <ArrowUpRight size={17} /></Link>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Reassurance */}
-      <section className="bg-[#f4f0e9] py-20 sm:py-24"><div className="public-container grid items-center gap-10 md:grid-cols-[1fr_1fr] lg:gap-24">
-        <div><p className="eyebrow">Made with care</p><h2 className="mt-4 text-[clamp(2rem,4vw,3.2rem)] font-extrabold leading-[1.12] tracking-[-0.05em]">Small details.<br />A better experience.</h2><p className="mt-5 max-w-[480px] text-[15px] leading-7 text-[#776d64]">A clear quote, a direct payment and an order you can follow. Good printing should feel this simple.</p><Link href="/security" className="mt-6 inline-flex items-center gap-2 text-sm font-extrabold text-[#a7380e] hover:underline">Read about security <ArrowRight size={16} /></Link></div>
-        <div className="grid gap-3">{[
-          { icon: ShieldCheck, title: 'Private file storage', body: 'Order files are stored privately and made available to authorised shop staff.' },
-          { icon: BadgeCheck, title: 'Clear before you pay', body: 'See your order options and quote before checking out with the shop.' },
-          { icon: Clock3, title: 'Updates at your fingertips', body: 'Save your tracking link and check the order’s progress when you need to.' },
-        ].map(({ icon: Icon, title, body }) => <div key={title} className="flex gap-4 rounded-2xl border border-[#e9e2d9] bg-white p-5"><span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[#fff0e5] text-[#bc400e]"><Icon size={20} /></span><div><h3 className="text-[15px] font-extrabold">{title}</h3><p className="mt-1 text-sm leading-6 text-[#7a7067]">{body}</p></div></div>)}</div>
-      </div></section>
-
-      {/* FAQs */}
-      <section className="bg-white py-20 sm:py-28"><div className="public-container grid gap-10 lg:grid-cols-[0.72fr_1.28fr] lg:gap-24"><div><p className="eyebrow">The things you might be wondering</p><h2 className="mt-4 text-[clamp(2rem,4vw,3.2rem)] font-extrabold leading-[1.12] tracking-[-0.05em]">Good questions.<br />Clear answers.</h2><p className="mt-5 max-w-xs text-[15px] leading-7 text-[#776d64]">Everything you need to know before your first order or your first day on Printly.</p><Link href="/faq" className="mt-6 inline-flex items-center gap-2 text-sm font-extrabold text-[#aa390e] hover:underline">See all FAQs <ArrowRight size={16} /></Link></div><FaqList items={landingFaqs} /></div></section>
-
-      {/* Final CTA */}
-      <section className="bg-white pb-20 sm:pb-24"><div className="public-container"><div className="relative overflow-hidden rounded-[1.8rem] bg-[#c33d0d] px-7 py-12 text-white sm:px-14 sm:py-16"><div className="absolute -right-10 -top-24 h-72 w-72 rounded-full border-[35px] border-white/10" aria-hidden="true" /><div className="relative flex flex-wrap items-end justify-between gap-8"><div className="max-w-[680px]"><p className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-[#ffdbc5]">Let’s make the everyday easier</p><h2 className="mt-4 text-[clamp(2rem,4.5vw,3.8rem)] font-extrabold leading-[1.08] tracking-[-0.05em]">Good for your customers.<br />Great for your shop.</h2><p className="mt-5 max-w-lg text-[15px] leading-7 text-[#ffe6d6]">Bring your print shop online with a simpler way to receive and manage orders.</p></div><Link href="/shop/signup" className="public-button bg-white text-[#a3340b] hover:bg-[#fff2e9]">Get your shop started <ArrowUpRight size={17} /></Link></div></div></div></section>
+      <section className={styles.pricing}><div className={`${styles.wrap} ${styles.pricingInner}`}><div><p className={styles.chapter}><span /> 04 / MADE FOR YOUR SHOP</p><h2>One plan.<br /><em>Your choice of term.</em></h2><p>Every shop subscription includes the same features. Choose monthly, six-month or yearly access, with no automatic recurring billing.</p><div className={styles.priceChecks}><span><Check size={16}/> All features included</span><span><Check size={16}/> No platform commission on new orders</span></div></div><Link href="/pricing" className={styles.darkButton}>Explore pricing <ArrowUpRight size={18}/></Link></div></section>
+      <section className={styles.faq}><div className={`${styles.wrap} ${styles.faqGrid}`}><div><p className={styles.chapter}><span /> 05 / THE DETAILS</p><h2>Good questions.<br /><em>Clear answers.</em></h2><p>Everything you need to know before your first order or your first day on Printly.</p><Link href="/faq" className={styles.underLink}>See all FAQs <ArrowRight size={16}/></Link></div><FaqList items={landingFaqs}/></div></section>
+      <section className={styles.final}><div className={styles.wrap}><div className={styles.finalBox}><div><p>LET’S MAKE THE EVERYDAY EASIER</p><h2>Let’s make<br /><em>good things happen.</em></h2><span>Bring your print shop online with Printly.</span></div><Link href="/shop/signup" className={styles.lightButton}>Get your shop started <ArrowUpRight size={18}/></Link><div className={styles.finalMark} aria-hidden="true">✳</div></div></div></section>
     </main>
   </PublicShell>;
 }
