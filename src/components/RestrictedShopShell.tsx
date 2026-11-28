@@ -6,7 +6,6 @@ import { Logo } from '@/components/Logo';
 import { SignOutButton } from '@/components/SignOutButton';
 import { cn } from '@/lib/utils';
 import { SubscriptionNotice } from '@/components/SubscriptionNotice';
-import { ShopAvailability } from '@/components/ShopAvailability';
 import type { ShopSubscription } from '@/lib/subscription';
 import { useSubscriptionState } from '@/lib/use-subscription-state';
 import styles from './RestrictedShopShell.module.css';
@@ -28,7 +27,7 @@ export function RestrictedShopShell({ shopName, isOpen, active, subscription, wa
           ))}
         </nav>
       </header>
-      <main className="mx-auto min-w-0 max-w-6xl px-3 py-5 sm:px-4"><SubscriptionNotice subscription={subscription} warningDays={warningDays} isOwner={isOwner} lockOnExpire={false} />{typeof isOpen === 'boolean' && <ShopAvailability initialOpen={isOpen} isOwner={isOwner} />}<div className={styles.content}>{children}</div></main>
+      <main className="mx-auto min-w-0 max-w-6xl px-3 py-5 sm:px-4"><SubscriptionNotice subscription={subscription} warningDays={warningDays} isOwner={isOwner} lockOnExpire={false} /><div className={styles.content}>{children}</div></main>
     </div>
   );
 }

@@ -65,7 +65,7 @@ export function ShopShell({ shop, reviewNote, subscription, warningDays, isOwner
       <OwnerAppUpdatePrompt />
       <main className="mx-auto min-w-0 max-w-6xl px-4 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-4 sm:px-4 md:pb-4">
         {isOwner && <ShopApplicationStatus shopId={shop.id} status={shop.kyc_status} shopStatus={shop.status} reviewNote={reviewNote} canAccessDashboard />}
-        <ShopAvailability initialOpen={shop.is_open} isOwner={isOwner} />
+        {pathname === '/shop/home' && <ShopAvailability initialOpen={shop.is_open} isOwner={isOwner} />}
         <SubscriptionNotice subscription={subscription} warningDays={warningDays} isOwner={isOwner} />
         {shop.kyc_status === 'pending' && (
           <div className="mb-4 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex items-start gap-2.5">
