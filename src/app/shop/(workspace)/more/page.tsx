@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ChevronRight, CreditCard, HelpCircle, LifeBuoy, QrCode, Settings2, Smartphone, TicketCheck } from 'lucide-react';
+import { ChevronRight, CreditCard, Gift, HelpCircle, LifeBuoy, QrCode, Settings2, Smartphone, TicketCheck } from 'lucide-react';
 import styles from './more.module.css';
 
 const links = [
@@ -14,6 +14,6 @@ const links = [
 
 export default function OwnerMorePage() {
   return <div className={styles.page}><div className={styles.heading}><p className="text-[10px] font-extrabold uppercase tracking-[.18em] text-orange-700">YOUR WORKSPACE</p><h1 className="mt-1 text-2xl font-black tracking-[-.04em]">More for your shop</h1><p className="mt-1 text-sm text-neutral-500">Your tools and settings, all in one place.</p></div>
-    <div className="mt-5 space-y-2">{links.map(({ href, title, description, icon: Icon }) => <Link href={href} key={href} className={styles.link}><span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-orange-50 text-orange-700"><Icon size={19} /></span><span className="min-w-0 flex-1"><strong className="block text-sm">{title}</strong><span className="mt-0.5 block text-xs text-neutral-500">{description}</span></span><ChevronRight size={17} className="text-neutral-400" /></Link>)}</div>
+    <div className="mt-5 space-y-2">{(process.env.PRINTLY_ISOLATED_TEST === '1' ? [{ href: '/shop/referrals', title: 'Refer & earn · preview', description: 'Explore the upcoming rewards programme', icon: Gift }, ...links] : links).map(({ href, title, description, icon: Icon }) => <Link href={href} key={href} className={styles.link}><span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-orange-50 text-orange-700"><Icon size={19} /></span><span className="min-w-0 flex-1"><strong className="block text-sm">{title}</strong><span className="mt-0.5 block text-xs text-neutral-500">{description}</span></span><ChevronRight size={17} className="text-neutral-400" /></Link>)}</div>
   </div>;
 }
