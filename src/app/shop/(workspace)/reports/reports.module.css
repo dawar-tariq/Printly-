@@ -1,0 +1,21 @@
+.page { max-width: 1100px; margin: 0 auto; padding-bottom: 40px; color: #20242a; }
+.heading { display: flex; align-items: end; justify-content: space-between; flex-wrap: wrap; gap: 20px; padding: 24px; border: 1px solid rgba(255,255,255,.9); border-radius: 22px; background: linear-gradient(115deg, rgba(255,255,255,.88), rgba(255,247,242,.72)); box-shadow: 0 12px 36px rgba(35,46,56,.06), inset 0 1px #fff; backdrop-filter: blur(20px); }
+.eyebrow { margin: 0 0 8px; color: #b74816; font-size: 11px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
+.title { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 28px; font-weight: 800; letter-spacing: -.035em; }
+.title svg { color: #e85d20; }
+.subtitle { margin: 5px 0 0; color: #626b72; font-size: 14px; line-height: 1.5; }
+.ranges { display: flex; gap: 3px; padding: 4px; border: 1px solid rgba(220,225,227,.85); border-radius: 13px; background: rgba(243,245,246,.8); }
+.range { min-height: 38px; padding: 0 15px; border-radius: 9px; color: #59626a; font-size: 12px; font-weight: 700; }
+.rangeActive { background: #e85d20; color: white; box-shadow: 0 3px 9px rgba(199,75,23,.23); }
+.stats { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 14px; margin-top: 16px; }
+.stat { padding: 20px; min-width: 0; }
+.statTop { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.statLabel { color: #687178; font-size: 12px; font-weight: 700; }
+.statIcon { display: grid; place-items: center; width: 37px; height: 37px; flex-shrink: 0; border-radius: 12px; color: #c95018; background: #fff0e7; }
+.statValue { margin-top: 12px; font-size: clamp(23px, 2.4vw, 30px); line-height: 1.2; font-weight: 800; letter-spacing: -.035em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.statSub { margin-top: 5px; color: #737c83; font-size: 12px; }
+.panel { margin-top: 16px; padding: 22px; min-width: 0; }
+.panelTitle { margin: 0; font-size: 16px; font-weight: 800; letter-spacing: -.015em; }
+.panelSub { margin: 4px 0 0; color: #737c83; font-size: 12px; line-height: 1.5; }
+.chart { height: 250px; min-width: 0; margin-top: 20px; }
+@media (max-width: 639px) { .heading { padding: 19px; border-radius: 18px; } .title { font-size: 25px; } .ranges { width: 100%; } .range { flex: 1; padding: 0 8px; } .stats { grid-template-columns: 1fr; gap: 10px; } .stat { padding: 16px 18px; } .statValue { margin-top: 5px; } .panel { padding: 18px; } .chart { height: 210px; } }
