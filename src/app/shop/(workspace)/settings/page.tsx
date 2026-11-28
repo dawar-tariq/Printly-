@@ -6,6 +6,7 @@ import {
   Loader2, Save, Plus, Trash2, QrCode, Download, CheckCircle2, Store, Wallet, Zap, Info, FileText, Smartphone, ChevronRight,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import styles from './settings.module.css';
 import { publicShopPath } from '@/lib/shop-identity';
 import { AccountPassword } from '@/components/AccountPassword';
 import { useRouter } from 'next/navigation';
@@ -168,25 +169,29 @@ export default function ShopSettingsPage() {
   );
 
   return (
-    <div className="max-w-4xl mx-auto space-y-5 pb-16">
+    <div className={styles.page}>
+      <header className={styles.heading}>
+        <div><p className={styles.eyebrow}>Your shop tools</p><h1>Settings &amp; QR</h1><p>Manage your shop details, customer QR and pricing in one place.</p></div>
+        <nav className={styles.shortcuts} aria-label="Settings sections"><a href="#shop-qr">Shop QR</a><a href="#shop-profile">Shop profile</a><a href="#rate-card">Rate card</a><a href="#account-security">Account security</a></nav>
+      </header>
       {banner && <div role="alert" className="rounded-xl bg-red-50 border border-red-200 text-red-800 text-sm px-4 py-2">{banner}</div>}
       {notice && <div role="status" className="rounded-xl bg-green-50 border border-green-200 text-green-800 text-sm px-4 py-2">{notice}</div>}
       {savedAt && <div className="rounded-xl bg-green-50 border border-green-200 text-green-800 text-sm px-4 py-2 flex items-center gap-2"><CheckCircle2 size={15} />Saved at {savedAt}</div>}
 
-      <Link href="/shop/app" className="flex items-center gap-3 rounded-2xl border border-orange-200 bg-orange-50 p-4 hover:border-orange-400">
+      <Link href="/shop/app" className={styles.appLink}>
         <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-white text-orange-700"><Smartphone size={21} /></span>
         <span className="min-w-0 flex-1"><strong className="block text-sm">Android app</strong><span className="mt-0.5 block text-xs text-neutral-600">Download and installation guide</span></span>
         <ChevronRight size={18} className="text-orange-700" />
       </Link>
 
       {/* QR block */}
-      <section id="shop-qr" className="card scroll-mt-24 p-5 flex flex-col sm:flex-row items-center gap-5">
-        <div className="bg-white border-4 border-neutral-900 rounded-2xl p-3 shrink-0">
+      <section id="shop-qr" className={`card scroll-mt-24 p-5 flex flex-col sm:flex-row items-center gap-5 ${styles.qrPanel}`}>
+        <div className={styles.qrFrame}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/api/shop/qr" alt="Shop QR code" className="w-40 h-40" />
         </div>
         <div className="text-center sm:text-left">
-          <h1 className="text-xl font-extrabold flex items-center gap-2 justify-center sm:justify-start"><QrCode size={20} />Your shop QR</h1>
+          <h2 className="text-xl font-extrabold flex items-center gap-2 justify-center sm:justify-start"><QrCode size={20} />Your shop QR</h2>
           <p className="text-sm text-neutral-600 mt-1">Print it, stick it on the counter or window. Customers scan → upload → pay → collect. No app, no account.</p>
           <div className="mt-2 text-xs text-neutral-600">Shop code: <b className="font-mono">{shortCode}</b></div>
           <a href={publicShopPath(shortCode)} className="mt-1 block text-xs font-mono text-orange-700 hover:underline" target="_blank" rel="noreferrer">{publicShopPath(shortCode)}</a>
@@ -219,8 +224,9 @@ export default function ShopSettingsPage() {
       )}
 
       {/* Profile */}
-      <section className="card p-5">
-        <h2 className="text-sm font-extrabold uppercase tracking-widest text-neutral-500 flex items-center gap-1.5"><Store size={14} />Shop profile & UPI</h2>
+      <section id="shop-profile" className={`card scroll-mt-24 p-5 ${styles.panel}`}>
+        <h2 className={styles.panelTitle}><Store size={18} />Shop profile &amp; UPI</h2>
+        <p className={styles.panelDescription}>Keep the details customers use to find and pay your shop up to date.</p>
         <div className="grid sm:grid-cols-2 gap-3 mt-3">
           <div className="sm:col-span-2"><label className="label">Shop name</label><input className="input" value={profile.name} onChange={(e) => { setProfile({ ...profile, name: e.target.value }); setDuplicateName(false); setProofPhoto(null); }} /></div>
           {duplicateName && (
@@ -268,9 +274,9 @@ export default function ShopSettingsPage() {
       </section>
 
       {/* Rate card */}
-      <section id="rate-card" className="card scroll-mt-24 p-5">
+      <section id="rate-card" className={`card scroll-mt-24 p-5 ${styles.panel}`}>
         <div className="flex items-center justify-between gap-3 flex-wrap">
-          <h2 className="text-sm font-extrabold uppercase tracking-widest text-neutral-500">Rate card (₹ per unit)</h2>
+          <h2 className={styles.panelTitle}>Rate card (₹ per unit)</h2>
           <div className="flex items-center gap-2">
             <select aria-label="Add a rate" className="input h-9 w-auto text-xs" value="" onChange={(e) => e.target.value && addRow(e.target.value)}>
               <option value="">+ Add rate…</option>
@@ -297,7 +303,7 @@ export default function ShopSettingsPage() {
           return (
             <div key={service} className="mt-4">
               <div className="text-[11px] font-extrabold uppercase tracking-widest text-orange-800 mb-1.5">{service}</div>
-              <div className="overflow-x-auto">
+              <div className={styles.tableScroll} tabIndex={0} role="region" aria-label={`${service} rate table, scroll horizontally`}>
                 <table className="w-full text-xs min-w-[560px]">
                   <thead className="text-left text-neutral-400">
                     <tr>
@@ -364,7 +370,7 @@ export default function ShopSettingsPage() {
         <p className="mt-3 text-[10px] text-neutral-500 flex items-start gap-1"><Info size={11} className="mt-0.5 shrink-0" />Empty dimensions mean “any / default”; the most specific matching rate is used. For predictable duplex pricing, set its size, colour and GSM to match the intended options. Conflicting equally specific physical-sheet rates cannot be saved. To change sides on a physical-sheet row, first change its billing unit. Customers see the calculation before paying.</p>
       </section>
 
-      <AccountPassword portal="shop" />
+      <div id="account-security" className="scroll-mt-24"><AccountPassword portal="shop" /></div>
     </div>
   );
 }

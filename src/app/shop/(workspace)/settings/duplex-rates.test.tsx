@@ -33,6 +33,18 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe('shop duplex rate editor', () => {
+  it('links each settings shortcut to its section and keeps QR actions available', async () => {
+    const { container } = render(<ShopSettingsPage />);
+    await screen.findByRole('heading', { name: 'Settings & QR' });
+    for (const id of ['shop-qr', 'shop-profile', 'rate-card', 'account-security']) {
+      expect(container.querySelector(`a[href="#${id}"]`)).toBeTruthy();
+      expect(container.querySelector(`#${id}`)).toBeTruthy();
+    }
+    expect(screen.getByRole('link', { name: /download png/i }).getAttribute('href')).toBe('/api/shop/qr?download=1');
+    expect(screen.getByRole('link', { name: /create a4 standee/i }).getAttribute('href')).toBe('/shop/standee');
+    expect(screen.getByRole('region', { name: /print rate table/i }).getAttribute('tabindex')).toBe('0');
+  });
+
   it('offers the Android app download guide from settings', async () => {
     render(<ShopSettingsPage />);
     const link = await screen.findByRole('link', { name: /Android app/i });
