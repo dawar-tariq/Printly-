@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { ArrowLeft, Check, ExternalLink, Eye, FileImage, FileText, Loader2, Printer, QrCode, RefreshCw, ShieldCheck, X } from 'lucide-react';
 import { STANDEE_THEMES, type StandeeInfo, type StandeeTheme } from '@/lib/standee/shared';
 import { cn } from '@/lib/utils';
+import styles from './standee.module.css';
 
 type Snapshot = { info: StandeeInfo; revision: string; theme: StandeeTheme; preview: string };
 type DownloadFormat = 'pdf' | 'png';
@@ -85,9 +86,9 @@ export default function ShopStandeePage() {
   const disabled = !snapshot || unavailable;
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5 pb-12">
+    <div className={`mx-auto max-w-6xl space-y-5 pb-12 ${styles.page}`}>
       <Link href="/shop/settings" className="inline-flex items-center gap-1.5 text-sm font-semibold text-neutral-600 hover:text-orange-700"><ArrowLeft size={16} /> Settings &amp; QR</Link>
-      <div className="flex flex-wrap items-end justify-between gap-3">
+      <div className={`flex flex-wrap items-end justify-between gap-3 ${styles.heading}`}>
         <div>
           <p className="text-[11px] font-extrabold uppercase tracking-[0.18em] text-orange-700">Your shop tools</p>
           <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-neutral-950 sm:text-3xl">QR standee</h1>
@@ -97,7 +98,7 @@ export default function ShopStandeePage() {
       </div>
 
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-        <section className="card p-5 sm:p-6" aria-labelledby="standee-details-title">
+        <section className={`card p-5 sm:p-6 ${styles.details}`} aria-labelledby="standee-details-title">
           <div className="flex items-start gap-3">
             <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-orange-100 text-orange-700"><QrCode size={21} /></span>
             <div><h2 id="standee-details-title" className="text-lg font-extrabold text-neutral-950">Your counter display</h2><p className="mt-1 text-sm leading-relaxed text-neutral-600">Customers can scan the code to open your shop&apos;s order page.</p></div>
@@ -108,7 +109,7 @@ export default function ShopStandeePage() {
             <div role="status" className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-relaxed text-amber-900">Your shop isn&apos;t accepting orders yet. The QR is ready, but customers can order only when your shop is approved and active.</div>
           )}
 
-          <div className="mt-5 rounded-2xl border border-orange-100 bg-[#fff9f4] p-4">
+          <div className={`mt-5 rounded-2xl border border-orange-100 bg-[#fff9f4] p-4 ${styles.identity}`}>
             <div className="flex items-center justify-between gap-3"><h3 className="text-xs font-extrabold uppercase tracking-wider text-neutral-500">Saved shop details</h3><span className="text-[11px] font-semibold text-neutral-500">From your profile</span></div>
             {snapshot ? <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
               <div className="min-w-0"><dt className="text-xs text-neutral-500">Shop name</dt><dd className="mt-0.5 break-words font-bold text-neutral-900">{snapshot.info.shop_name}</dd></div>
@@ -145,8 +146,8 @@ export default function ShopStandeePage() {
           <div className="mt-5 flex items-start gap-2 rounded-xl bg-neutral-50 p-3 text-xs leading-relaxed text-neutral-600"><ShieldCheck size={16} className="mt-0.5 shrink-0 text-orange-700" /><p>Print on A4 at actual size (100%), with headers and footers off. Check the preview and test a scan after printing.</p></div>
         </section>
 
-        <section id="standee-preview" className="overflow-hidden rounded-[1.25rem] border border-neutral-200 bg-[#f4f0eb]" aria-labelledby="preview-title">
-          <div className="flex items-center justify-between gap-3 border-b border-neutral-200 bg-white px-5 py-4">
+        <section id="standee-preview" className={`overflow-hidden rounded-[1.25rem] border border-neutral-200 ${styles.preview}`} aria-labelledby="preview-title">
+          <div className={`flex items-center justify-between gap-3 border-b border-neutral-200 px-5 py-4 ${styles.previewHeader}`}>
             <div><h2 id="preview-title" className="text-sm font-extrabold text-neutral-950">Standee preview</h2><p className="mt-0.5 text-xs text-neutral-500">Your actual shop details and QR code</p></div>
             <span className="rounded-full bg-neutral-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-neutral-600">A4</span>
           </div>

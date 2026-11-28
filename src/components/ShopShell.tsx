@@ -85,7 +85,9 @@ export function ShopShell({ shop, reviewNote, subscription, warningDays, isOwner
             <div><b>Application not approved.</b> {reviewNote ? <span>Reviewer&apos;s note: {reviewNote}</span> : 'Please contact Printly support to understand what is needed.'}</div>
           </div>
         )}
-        {children}
+        <div className={pathname === '/shop' || pathname === '/shop/home' || pathname === '/shop/more' ? undefined : styles.workspacePages}>
+          {children}
+        </div>
       </main>
       <nav aria-label="Shop mobile navigation" className={`no-print ${styles.mobileNav}`}>
         {MOBILE_TABS.map(({ href, label, icon: Icon }) => {

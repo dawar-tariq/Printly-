@@ -1,3 +1,30 @@
 .shell{min-height:100vh;background:linear-gradient(145deg,#f8fafb,#f4f6f7 65%,#f9f9f8);color:#20242a}.header{position:sticky;top:0;z-index:30;border-bottom:1px solid rgba(222,226,228,.8);background:rgba(255,255,255,.86);color:#20242a;box-shadow:0 5px 24px rgba(30,45,55,.035);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px)}.mobileNav{position:fixed;left:10px;right:10px;bottom:max(8px,env(safe-area-inset-bottom));z-index:40;display:flex;align-items:stretch;justify-content:space-around;padding:4px 5px;border:1px solid rgba(224,228,230,.9);border-radius:18px;background:rgba(255,255,255,.88);box-shadow:0 8px 30px rgba(24,36,47,.13);backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px)}@media(min-width:768px){.mobileNav{display:none}}@media print{.shell{background:white}.header,.mobileNav{display:none}}
 .shell{background:radial-gradient(ellipse at 92% 15%,rgba(255,224,207,.56),transparent 35%),radial-gradient(ellipse at 8% 72%,rgba(216,230,238,.65),transparent 38%),#f4f6f7}.header{background:rgba(255,255,255,.7);border-color:rgba(255,255,255,.8);box-shadow:0 8px 32px rgba(28,42,52,.06),inset 0 1px rgba(255,255,255,.95);backdrop-filter:blur(26px) saturate(150%);-webkit-backdrop-filter:blur(26px) saturate(150%)}.mobileNav{background:rgba(255,255,255,.69);border-color:rgba(255,255,255,.9);box-shadow:0 10px 32px rgba(30,44,55,.15),inset 0 1px rgba(255,255,255,.98);backdrop-filter:blur(26px) saturate(160%);-webkit-backdrop-filter:blur(26px) saturate(160%)}
 @media print{.shell{background:white}}
+
+/* Shared surface treatment for the remaining workspace screens. Kept separate
+   from the custom overview and order-board layouts. */
+.workspacePages :global(.card) {
+  border: 1px solid rgba(255, 255, 255, .9);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, .76);
+  box-shadow: 0 12px 36px rgba(35, 46, 56, .07), inset 0 1px rgba(255, 255, 255, .95);
+  backdrop-filter: blur(20px) saturate(135%);
+  -webkit-backdrop-filter: blur(20px) saturate(135%);
+}
+.workspacePages :global(.input) {
+  border-color: #dfe4e6;
+  border-radius: 12px;
+  background-color: rgba(255, 255, 255, .88);
+}
+.workspacePages :global(.input):focus-visible,
+.workspacePages button:focus-visible,
+.workspacePages a:focus-visible {
+  outline: 2px solid #c2410c;
+  outline-offset: 2px;
+}
+.workspacePages :global(.btn) { border-radius: 12px; }
+.workspacePages h1 { color: #20242a; }
+@media print {
+  .workspacePages :global(.card) { background: white; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
