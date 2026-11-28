@@ -7,10 +7,11 @@ import {
   Loader2, CheckCircle2, XCircle, Printer, PackageCheck, Package, Banknote, Clock,
   AlertCircle, User, ChevronRight, Zap, IndianRupee, RefreshCw, Bell, BellOff, Search,
 } from 'lucide-react';
-import { formatPaise, timeAgo } from '@/lib/format';
+import { formatPaiseExact, timeAgo } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { createBrowserSupabase } from '@/lib/supabase-client';
 import { requestUpiDecision } from '@/lib/upi-confirmation';
+import styles from './orders.module.css';
 
 interface OrderCard {
   id: string; token: string | null; status: string; payment_status: string; payment_method: string | null;
@@ -43,6 +44,7 @@ export default function ShopBoardPage() {
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [pages, setPages] = useState<Pages>(FIRST_PAGES);
+  const [mobileLane, setMobileLane] = useState<'all' | LaneName>('all');
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [utrEdit, setUtrEdit] = useState<Record<string, string>>({});
@@ -193,10 +195,10 @@ export default function ShopBoardPage() {
   </div>;
   const renderLane = (name: 'queued' | 'printing' | 'ready', title: string, Icon: typeof Printer, action: (order: OrderCard) => React.ReactNode) => {
     const lane = snapshot!.lanes[name];
-    return <section className="flex min-h-72 flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-neutral-200/60">
+    return <section className={cn(styles.lane, 'flex min-h-48 flex-col overflow-hidden lg:min-h-72', mobileLane !== 'all' && mobileLane !== name && 'hidden lg:flex')}>
       <div className="flex items-center justify-between border-b border-neutral-200 px-3 py-2.5"><h2 className="flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-widest text-neutral-600"><Icon size={14} />{title}<span className="rounded-full bg-white px-1.5 py-0.5 text-[10px]">{lane.pagination.count}</span></h2></div>
-      <div className="flex-1 space-y-2 p-2">{lane.orders.map((o) => <div key={o.id} className="rounded-xl border border-neutral-200 bg-white p-3">
-        <div className="flex items-start justify-between gap-2"><Link href={`/shop/orders/${o.id}`} className="min-w-0 flex-1"><div className="flex items-center gap-2"><span className="text-2xl font-black text-neutral-900">{o.token ?? '—'}</span>{o.rush && <span className="chip bg-red-100 text-red-700"><Zap size={10} />RUSH</span>}</div><div className="mt-1 break-all text-[10px] font-semibold text-neutral-600">Order ID: {o.id}</div><div className="mt-0.5 flex min-w-0 items-center gap-1 text-[11px] text-neutral-500"><User size={10} className="shrink-0" /><span className="min-w-0 truncate">{o.customer_name || 'Walk-in'} · {o.customer_phone}</span></div></Link><div className="shrink-0 text-right"><div className="text-sm font-extrabold tabular-nums">{formatPaise(o.total_paise)}</div><span className={cn('chip mt-0.5', o.payment_method === 'cod' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800')}>{o.payment_method === 'cod' ? 'COD' : 'UPI confirmed'}</span></div></div>
+      <div className="flex-1 space-y-2 p-2">{lane.orders.map((o) => <div key={o.id} className={styles.orderCard}>
+        <div className="flex items-start justify-between gap-2"><Link href={`/shop/orders/${o.id}`} className="min-w-0 flex-1"><div className="flex items-center gap-2"><span className="text-2xl font-black text-neutral-900">{o.token ?? '—'}</span>{o.rush && <span className="chip bg-red-100 text-red-700"><Zap size={10} />RUSH</span>}</div><div className="mt-1 break-all text-[10px] font-semibold text-neutral-600">Order ID: {o.id}</div><div className="mt-0.5 flex min-w-0 items-center gap-1 text-[11px] text-neutral-500"><User size={10} className="shrink-0" /><span className="min-w-0 truncate">{o.customer_name || 'Walk-in'} · {o.customer_phone}</span></div></Link><div className="shrink-0 text-right"><div className="text-sm font-extrabold tabular-nums">{formatPaiseExact(o.total_paise)}</div><span className={cn('chip mt-0.5', o.payment_method === 'cod' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800')}>{o.payment_method === 'cod' ? 'COD' : 'UPI confirmed'}</span></div></div>
         <div className="mt-2 flex items-center justify-between gap-2"><span className="flex items-center gap-1 text-[10px] text-neutral-400"><Clock size={10} />{timeAgo(o.created_at)} · {o.items?.[0]?.count ?? 0} items</span><div className="flex gap-1.5"><Link href={`/shop/orders/${o.id}`} className="btn btn-ghost h-8 px-2.5 text-[11px]">Details</Link>{action(o)}</div></div>
       </div>)}{lane.orders.length === 0 && <div className="py-8 text-center text-[11px] text-neutral-400">{search ? 'No matching orders on this page' : 'Nothing here'}</div>}</div>{pagination(name, lane)}
     </section>;
@@ -206,18 +208,28 @@ export default function ShopBoardPage() {
   if (!snapshot) return <div role="alert" className="card p-5 text-sm text-red-800"><p>Orders are temporarily unavailable. Do not assume there are no orders or payment reports.</p><button type="button" onClick={() => void load()} className="btn btn-dark mt-3 h-10 px-4">Try again</button></div>;
   const confirm = snapshot.lanes.confirm;
 
-  return <div>
+  return <div className={styles.boardPage}>
+    <div className={styles.pageHeader}><p className={styles.eyebrow}>YOUR SHOP / WORK QUEUE</p><h1>Orders<span>.</span></h1><p>Keep every job moving.</p></div>
     {loadError && <div role="status" className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">Could not refresh orders. The information below may be out of date. <button type="button" onClick={() => void load()} className="font-bold underline">Try again</button></div>}
     {actionError && <div role="alert" className="mb-4 rounded-xl bg-red-50 p-3 text-sm text-red-800">{actionError}</div>}
-    <div className="card mb-4 flex flex-wrap items-end gap-3 p-3">
+    <div className={`mb-4 flex flex-wrap items-end gap-3 ${styles.toolbar}`}>
       <label className="min-w-0 flex-1 basis-48 text-xs font-bold text-neutral-700">Search all open orders
-        <span className="relative mt-1 block"><Search size={15} className="absolute left-3 top-3 text-neutral-400" /><input value={searchInput} onChange={(event) => setSearchInput(event.target.value)} maxLength={80} className="input w-full pl-9 text-sm" placeholder="Order ID, token, name, phone or UTR" /></span>
+        <span className="relative mt-1 block"><Search size={15} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" /><input value={searchInput} onChange={(event) => setSearchInput(event.target.value)} maxLength={80} className={`input input-with-icon ${styles.search}`} placeholder="Order ID, token, name, phone or UTR" /></span>
       </label>
       <button type="button" onClick={() => void toggleSound()} aria-pressed={soundEnabled} className="btn btn-ghost min-h-10 px-3 text-xs">{soundEnabled ? <Bell size={15} /> : <BellOff size={15} />}{soundEnabled ? 'Sound on' : 'Enable sound'}</button>
       <button type="button" onClick={() => void load()} className="btn btn-ghost min-h-10 px-3 text-xs"><RefreshCw size={15} />Refresh</button>
       {soundMessage && <p role="status" className="w-full text-xs text-neutral-600">{soundMessage} Alerts are best-effort and work only while the board is open.</p>}
     </div>
-    <details className="card mb-4 p-3"><summary className="cursor-pointer text-sm font-bold text-neutral-700">Find an order with its tracking link</summary>
+    <nav aria-label="Filter order statuses" className="mb-4 flex gap-1.5 overflow-x-auto pb-1 lg:hidden">
+      {([
+        ['all', 'All', LANE_NAMES.reduce((sum, lane) => sum + snapshot.lanes[lane].pagination.count, 0)],
+        ['confirm', 'Payments', snapshot.lanes.confirm.pagination.count],
+        ['queued', 'New', snapshot.lanes.queued.pagination.count],
+        ['printing', 'Printing', snapshot.lanes.printing.pagination.count],
+        ['ready', 'Ready', snapshot.lanes.ready.pagination.count],
+      ] as const).map(([lane, label, count]) => <button key={lane} type="button" aria-pressed={mobileLane === lane} onClick={() => setMobileLane(lane)} className={cn('min-h-10 shrink-0 rounded-full px-4 text-xs font-extrabold', mobileLane === lane ? 'bg-orange-600 text-white' : 'border border-neutral-200 bg-white/70 text-neutral-600')}>{label} <span className="ml-0.5 tabular-nums">{count}</span></button>)}
+    </nav>
+    <details className={`mb-4 ${styles.lookup}`}><summary className="cursor-pointer text-sm font-bold text-neutral-700">Find an order with its tracking link</summary>
       <form className="mt-3 flex flex-wrap gap-2" onSubmit={(event) => {
         event.preventDefault();
         const match = lookup.trim().match(/(?:^|\/track\/)([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(?=\/?(?:$|[?#]))/i);
@@ -226,17 +238,17 @@ export default function ShopBoardPage() {
       }}><label className="min-w-0 flex-1 basis-48 text-xs font-semibold text-neutral-600">Tracking link or order ID<input value={lookup} onChange={(event) => setLookup(event.target.value)} maxLength={2048} className="input mt-1 w-full text-sm" placeholder="Paste the customer’s tracking link" /></label><button type="submit" className="btn btn-ghost min-h-10 self-end px-4 text-sm">Find order</button>{lookupError && <p role="alert" className="w-full text-xs text-red-700">{lookupError}</p>}</form>
       <p className="mt-2 text-xs text-neutral-500">Only orders for your shop can be opened.</p>
     </details>
-    {(confirm.pagination.count > 0 || !!search) && <section className="mb-4 overflow-hidden rounded-2xl border-2 border-amber-400 bg-amber-50">
+    <div className={styles.board}>
+    {(confirm.pagination.count > 0 || !!search || mobileLane === 'confirm') && <section className={cn(styles.paymentLane, 'overflow-hidden', mobileLane !== 'all' && mobileLane !== 'confirm' && 'hidden lg:block')}>
       <div className="flex items-center justify-between border-b border-amber-200 px-4 py-2.5"><h2 className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-widest text-amber-900"><AlertCircle size={14} />Payment confirmation ({confirm.pagination.count})</h2></div>
       <p className="px-4 pt-2 text-xs text-amber-900">A customer’s report or reference is not proof of payment. Verify the receiving account before confirming.</p>
-      <div className="grid min-w-0 grid-cols-1 gap-2 p-2 md:grid-cols-2">{confirm.orders.map((o) => <div key={o.id} className="min-w-0 rounded-xl border border-amber-200 bg-white p-3">
+      <div className={styles.paymentCards}>{confirm.orders.map((o) => <div key={o.id} className={styles.paymentCard}>
         <div className="flex items-start justify-between gap-2"><Link href={`/shop/orders/${o.id}`} className="min-w-0"><div className="break-all text-[11px] font-bold text-neutral-600">Order ID: {o.id}</div><div className="truncate text-sm font-bold">{o.customer_name || 'Walk-in'} · {o.customer_phone}</div><div className="mt-0.5 text-[11px] text-neutral-500">{o.items?.[0]?.count ?? 0} item(s) · {timeAgo(o.created_at)}</div></Link><div className="shrink-0 text-right"><div className="flex items-center gap-0.5 text-base font-extrabold tabular-nums"><IndianRupee size={14} />{(o.total_paise / 100).toFixed(2)}</div><span className="chip mt-0.5 bg-amber-100 text-amber-800">UPI · unverified</span></div></div>
         <label className="mt-2 block text-xs text-neutral-600">UPI reference (optional)<input value={utrEdit[o.id] ?? o.utr ?? ''} onChange={(e) => setUtrEdit((m) => ({ ...m, [o.id]: e.target.value }))} maxLength={40} className="input mt-1 h-9 min-w-0 w-full font-mono text-xs" /></label>
         {o.payment_status === 'pending' && <p className="mt-2 text-xs text-amber-900">Waiting for the customer to report payment. Open the order to record their report if they contacted you.</p>}
         <div className="mt-2 flex items-center gap-2"><button disabled={busyId === o.id || o.payment_status !== 'submitted'} onClick={() => void confirmPayment(o, 'confirm')} className="btn btn-primary h-9 flex-1 px-4 text-xs">{busyId === o.id ? <Loader2 size={14} className="animate-spin" /> : <><CheckCircle2 size={14} />Payment received</>}</button><button disabled={busyId === o.id} onClick={() => void confirmPayment(o, 'reject')} className="btn btn-ghost h-9 px-3 text-xs text-red-700"><XCircle size={14} />Not received</button></div>
       </div>)}{!confirm.orders.length && <p className="p-3 text-xs text-neutral-600">No matching payment reports on this page.</p>}</div>{pagination('confirm', confirm)}
     </section>}
-    <div className="grid gap-3 lg:grid-cols-3">
       {renderLane('queued', 'New orders', Package, (o) => <button disabled={busyId === o.id} onClick={() => void transition(o.id, 'printing')} className="btn btn-dark h-8 px-3 text-[11px]">{busyId === o.id ? <Loader2 size={13} className="animate-spin" /> : 'Start printing'}</button>)}
       {renderLane('printing', 'Printing', Printer, (o) => <button disabled={busyId === o.id} onClick={() => void transition(o.id, 'ready')} className="btn btn-dark h-8 px-3 text-[11px]">{busyId === o.id ? <Loader2 size={13} className="animate-spin" /> : 'Mark ready'}</button>)}
       {renderLane('ready', 'Ready for pickup', PackageCheck, (o) => <button disabled={busyId === o.id} onClick={() => void transition(o.id, 'collected')} className="btn btn-primary h-8 px-3 text-[11px]">{busyId === o.id ? <Loader2 size={13} className="animate-spin" /> : o.payment_method === 'cod' ? 'Cash received ✓' : 'Mark collected'}</button>)}

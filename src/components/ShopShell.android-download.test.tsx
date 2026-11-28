@@ -9,6 +9,8 @@ vi.mock('@/components/Logo', () => ({ Logo: () => null }));
 vi.mock('@/components/SignOutButton', () => ({ SignOutButton: () => null }));
 vi.mock('@/components/SubscriptionNotice', () => ({ SubscriptionNotice: () => null }));
 vi.mock('@/components/ShopAvailability', () => ({ ShopAvailability: () => null }));
+vi.mock('@/components/ShopApplicationStatus', () => ({ ShopApplicationStatus: () => null }));
+vi.mock('@/components/OwnerAppUpdatePrompt', () => ({ OwnerAppUpdatePrompt: () => null }));
 import { ShopShell } from './ShopShell';
 import { RestrictedShopShell } from './RestrictedShopShell';
 

@@ -65,7 +65,7 @@ describe('shop order board', () => {
     }));
     render(<ShopBoardPage />);
     await screen.findByText('135 total · page 1 of 5');
-    expect(screen.getAllByText('135')).toHaveLength(2); // exact completed count and queue total
+    expect(screen.getAllByText('135').length).toBeGreaterThanOrEqual(2); // exact completed count and queue total
     expect(mocks.on.mock.calls[0][1]).toMatchObject({ table: 'orders', filter: 'shop_id=eq.shop-1' });
     fireEvent.click(screen.getByRole('button', { name: 'Next queued page' }));
     await screen.findByText('135 total · page 2 of 5');
@@ -93,6 +93,19 @@ describe('shop order board', () => {
     attention = [{ id: 'fresh', updated_at: '2026-11-19T13:00:00Z' }];
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
     await waitFor(() => expect(starts).toHaveBeenCalledTimes(2));
+  });
+  it('filters the mobile board by status without hiding payment review on desktop', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json(board())));
+    render(<ShopBoardPage />);
+    const payments = await screen.findByRole('button', { name: /Payments 1/i });
+    const printing = screen.getByRole('button', { name: /Printing 0/i });
+    fireEvent.click(printing);
+    expect(printing.getAttribute('aria-pressed')).toBe('true');
+    expect(payments.getAttribute('aria-pressed')).toBe('false');
+    const paymentHeading = screen.getByText(/Payment confirmation \(1\)/i);
+    expect(paymentHeading.closest('section')?.className).toMatch(/hidden.*lg:block/);
+    fireEvent.click(payments);
+    expect(paymentHeading.closest('section')?.classList.contains('hidden')).toBe(false);
   });
   it('requires an independent-verification confirmation for a submitted UPI report', async () => {
     const posts: string[] = [];

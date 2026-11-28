@@ -4,50 +4,66 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Logo } from '@/components/Logo';
 import { SignOutButton } from '@/components/SignOutButton';
-import { LayoutDashboard, Settings, Boxes, BarChart3, CreditCard, ExternalLink, Hourglass, PenLine, Ban, MessageCircle, Smartphone } from 'lucide-react';
+import { LayoutDashboard, Settings, Boxes, BarChart3, CreditCard, ExternalLink, Hourglass, PenLine, Ban, MessageCircle, House, MoreHorizontal, Bell } from 'lucide-react';
 import { SubscriptionNotice } from '@/components/SubscriptionNotice';
 import { ShopAvailability } from '@/components/ShopAvailability';
+import { OwnerAppUpdatePrompt } from '@/components/OwnerAppUpdatePrompt';
 import { ShopApplicationStatus } from '@/components/ShopApplicationStatus';
 import type { ShopSubscription } from '@/lib/subscription';
 import { cn } from '@/lib/utils';
 import { publicShopPath } from '@/lib/shop-identity';
+import styles from './ShopShell.module.css';
 
 const TABS = [
-  { href: '/shop', label: 'Orders', icon: LayoutDashboard, exact: true },
+  { href: '/shop/home', label: 'Overview', icon: House },
+  { href: '/shop', label: 'Orders', icon: LayoutDashboard },
   { href: '/shop/inventory', label: 'Inventory', icon: Boxes },
   { href: '/shop/reports', label: 'Reports', icon: BarChart3 },
   { href: '/shop/subscription', label: 'Subscription', icon: CreditCard },
   { href: '/shop/settings', label: 'Settings & QR', icon: Settings },
-  { href: '/shop/app', label: 'Android app', icon: Smartphone },
+  { href: '/shop/app', label: 'Android app', icon: Bell },
   { href: '/support', label: 'Support', icon: MessageCircle },
 ];
+
+const MOBILE_TABS = [
+  { href: '/shop/home', label: 'Home', icon: House },
+  { href: '/shop', label: 'Orders', icon: LayoutDashboard },
+  { href: '/shop/inventory', label: 'Inventory', icon: Boxes },
+  { href: '/shop/reports', label: 'Reports', icon: BarChart3 },
+  { href: '/shop/more', label: 'More', icon: MoreHorizontal },
+];
+
+function activeTab(pathname: string, href: string): boolean {
+  if (href === '/shop') return pathname === '/shop' || pathname.startsWith('/shop/orders/');
+  if (href === '/shop/more') return ['/shop/more', '/shop/settings', '/shop/app', '/shop/recovery', '/shop/subscription', '/shop/standee'].some((route) => pathname === route || pathname.startsWith(`${route}/`));
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
 
 export function ShopShell({ shop, reviewNote, subscription, warningDays, isOwner, children }: { shop: { id: string; name: string; slug: string; short_code: string; kyc_status: string; status: string; is_open: boolean }; reviewNote: string; subscription: ShopSubscription | null; warningDays: number; isOwner: boolean; children: React.ReactNode }) {
   const pathname = usePathname();
 
   return (
-    <div className="min-h-screen bg-neutral-100">
-      <header className="no-print sticky top-0 z-30 bg-neutral-950 text-white">
-        <div className="max-w-6xl mx-auto px-3 sm:px-4 h-14 flex items-center gap-3">
-          <Logo inverse compactOnMobile />
-          <div className="min-w-0 flex-1">
-            <div className="text-sm font-bold truncate leading-tight">{shop.name}</div>
-            <div className="text-[10px] text-neutral-400 leading-tight">{shop.kyc_status === 'approved' ? 'Verified shop' : 'Verification pending'} · {shop.short_code} · <a className="hover:underline inline-flex items-center gap-0.5" href={publicShopPath(shop.short_code)} target="_blank" rel="noreferrer">customer page <ExternalLink size={9} /></a></div>
+    <div className={styles.shell}>
+      <header className={`no-print ${styles.header}`}>
+        <div className="mx-auto flex h-14 max-w-6xl items-center gap-3 px-4">
+          <Logo />
+          <div className="hidden min-w-0 flex-1 md:block">
+            <div className="truncate text-sm font-bold leading-tight">{shop.name}</div>
+            <div className="text-[10px] leading-tight text-neutral-500">{shop.kyc_status === 'approved' ? 'Verified shop' : 'Verification pending'} · {shop.short_code} · <a className="inline-flex items-center gap-0.5 hover:underline" href={publicShopPath(shop.short_code)} target="_blank" rel="noreferrer">customer page <ExternalLink size={9} /></a></div>
           </div>
-          <SignOutButton portal="shop" />
+          <div className="flex-1 md:hidden" />
+          <Link href="/shop/app" aria-label="App and notification settings" className="grid h-10 w-10 place-items-center rounded-xl text-neutral-600 hover:bg-orange-50 md:hidden"><Bell size={19} /></Link>
+          <SignOutButton portal="shop" buttonClassName="text-neutral-600 hover:bg-orange-50" />
         </div>
-        <nav aria-label="Shop navigation" className="max-w-6xl w-full min-w-0 mx-auto px-2 sm:px-3 flex items-center gap-1 overflow-x-auto pb-1.5">
-          {TABS.map(({ href, label, icon: Icon, exact }) => {
-            const active = exact ? pathname === href : pathname.startsWith(href);
-            return (
-              <Link key={href} href={href} className={cn('flex items-center gap-1.5 px-3 h-9 rounded-lg text-[13px] font-semibold whitespace-nowrap transition-colors', active ? 'bg-orange-600 text-white' : 'text-neutral-300 hover:bg-neutral-800')}>
-                <Icon size={15} />{label}
-              </Link>
-            );
+        <nav aria-label="Shop navigation" className="mx-auto hidden w-full min-w-0 max-w-6xl items-center gap-1 overflow-x-auto px-3 pb-1.5 md:flex">
+          {TABS.map(({ href, label, icon: Icon }) => {
+            const active = activeTab(pathname, href);
+            return <Link key={href} href={href} aria-current={active ? 'page' : undefined} className={cn('flex h-9 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 text-[13px] font-semibold transition-colors', active ? 'bg-orange-50 text-orange-800' : 'text-neutral-600 hover:bg-neutral-100')}><Icon size={15} />{label}</Link>;
           })}
         </nav>
       </header>
-      <main className="max-w-6xl min-w-0 mx-auto px-3 sm:px-4 py-4">
+      <OwnerAppUpdatePrompt />
+      <main className="mx-auto min-w-0 max-w-6xl px-4 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-4 sm:px-4 md:pb-4">
         {isOwner && <ShopApplicationStatus shopId={shop.id} status={shop.kyc_status} shopStatus={shop.status} reviewNote={reviewNote} canAccessDashboard />}
         <ShopAvailability initialOpen={shop.is_open} isOwner={isOwner} />
         <SubscriptionNotice subscription={subscription} warningDays={warningDays} isOwner={isOwner} />
@@ -71,6 +87,12 @@ export function ShopShell({ shop, reviewNote, subscription, warningDays, isOwner
         )}
         {children}
       </main>
+      <nav aria-label="Shop mobile navigation" className={`no-print ${styles.mobileNav}`}>
+        {MOBILE_TABS.map(({ href, label, icon: Icon }) => {
+          const active = activeTab(pathname, href);
+          return <Link key={href} href={href} aria-current={active ? 'page' : undefined} className={cn('flex min-h-12 min-w-0 flex-1 flex-col items-center justify-center gap-1 rounded-xl text-[10px] font-bold', active ? 'text-orange-700' : 'text-neutral-500')}><Icon size={18} strokeWidth={active ? 2.5 : 1.9} />{label}</Link>;
+        })}
+      </nav>
     </div>
   );
 }
