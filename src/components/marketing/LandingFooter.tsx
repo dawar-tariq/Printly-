@@ -4,7 +4,7 @@ import { Logo } from '@/components/Logo';
 import styles from '@/app/landing.module.css';
 
 const sections = [
-  { title: 'Explore', links: [['How it works', '/#how-it-works'], ['For print shops', '/#features'], ['Pricing', '/pricing'], ['About Printly', '/about'], ...(process.env.PRINTLY_ISOLATED_TEST === '1' ? [['Refer & earn', '/refer']] : [])] },
+  { title: 'Explore', links: [['How it works', '/#how-it-works'], ['For print shops', '/#features'], ['Pricing', '/pricing'], ['About Printly', '/about'], ...(process.env.PRINTLY_ISOLATED_TEST === '1' ? [['Refer & earn', '/refer'], ['Affiliate programme', '/affiliate']] : [])] },
   { title: 'Get started', links: [['Explore demo shop', '/s/p-demo1'], ['List your shop', '/shop/signup'], ['Shop sign in', '/login'], ['FAQs', '/faq']] },
   { title: 'Resources', links: [['Contact & help', '/contact'], ['Security', '/security'], ['Accessibility', '/accessibility'], ['Copyright', '/copyright']] },
   { title: 'The details', links: [['Privacy policy', '/privacy'], ['Terms & conditions', '/terms'], ['Refunds & cancellations', '/refunds'], ['Cookie notice', '/cookies']] },
